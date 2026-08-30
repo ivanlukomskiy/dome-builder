@@ -1,14 +1,15 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import type { PolyhedronData } from '../lib/polyhedra'
-import { removeVertices, sliceLayers } from '../lib/polyhedra'
+import type { PolyhedronData, VertexTransform } from '../lib/polyhedra'
+import { applyVertexTransforms, removeVertices, sliceLayers } from '../lib/polyhedra'
 
 interface DomeMeshProps {
   data: PolyhedronData
   layerCount: number
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
+  vertexTransforms: ReadonlyMap<number, VertexTransform>
   onVertexClick: (index: number) => void
 }
 
@@ -17,12 +18,18 @@ export function DomeMesh({
   layerCount,
   deletedVertexIndices,
   selectedVertexIndices,
+  vertexTransforms,
   onVertexClick,
 }: DomeMeshProps) {
+  const transformedVertices = useMemo(
+    () => applyVertexTransforms(data.vertices, vertexTransforms),
+    [data.vertices, vertexTransforms],
+  )
+
   const sliced = useMemo(() => {
-    const layered = sliceLayers(data, layerCount)
+    const layered = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
     return removeVertices(layered, deletedVertexIndices)
-  }, [data, layerCount, deletedVertexIndices])
+  }, [data, transformedVertices, layerCount, deletedVertexIndices])
 
   const edgeGeometry = useMemo(() => {
     const positions: number[] = []

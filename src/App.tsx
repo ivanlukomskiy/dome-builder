@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AxisType, SelectionMode, ShapeType } from './lib/polyhedra'
+import type { AxisType, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
 import {
   computePolyhedron,
+  DEFAULT_VERTEX_TRANSFORM,
   findLayerGroup,
   findRotationalSymmetryGroup,
+  isDefaultVertexTransform,
   SHAPE_AXES,
 } from './lib/polyhedra'
 import { Sidebar } from './components/Sidebar'
@@ -19,6 +21,9 @@ function App() {
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
   const [deletedGroups, setDeletedGroups] = useState<number[][]>([])
   const [redoStack, setRedoStack] = useState<number[][]>([])
+  const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
+    new Map(),
+  )
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
@@ -30,11 +35,12 @@ function App() {
     setLayerCount(Math.ceil(data.layers.length / 2))
   }, [data])
 
-  // Vertex-deletion edits only make sense for the dome config they were made against.
+  // Vertex-deletion and transform edits only make sense for the dome config they were made against.
   useEffect(() => {
     setSelectedVertexIndices(new Set())
     setDeletedGroups([])
     setRedoStack([])
+    setVertexTransforms(new Map())
   }, [shape, axis, subdivisions, layerCount])
 
   const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
@@ -94,6 +100,28 @@ function App() {
     setSelectedVertexIndices(new Set())
   }
 
+  const handleTransformChange = (field: keyof VertexTransform, value: number) => {
+    if (selectedVertexIndices.size === 0) return
+    setVertexTransforms((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedVertexIndices) {
+        const updated = { ...(next.get(idx) ?? DEFAULT_VERTEX_TRANSFORM), [field]: value }
+        if (isDefaultVertexTransform(updated)) next.delete(idx)
+        else next.set(idx, updated)
+      }
+      return next
+    })
+  }
+
+  const handleResetTransform = () => {
+    if (selectedVertexIndices.size === 0) return
+    setVertexTransforms((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedVertexIndices) next.delete(idx)
+      return next
+    })
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -109,6 +137,10 @@ function App() {
         selectionMode={selectionMode}
         onSelectionModeChange={setSelectionMode}
         selectedCount={selectedVertexIndices.size}
+        selectedVertexIndices={selectedVertexIndices}
+        vertexTransforms={vertexTransforms}
+        onTransformChange={handleTransformChange}
+        onResetTransform={handleResetTransform}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -121,6 +153,7 @@ function App() {
         layerCount={layerCount}
         deletedVertexIndices={deletedVertexIndices}
         selectedVertexIndices={selectedVertexIndices}
+        vertexTransforms={vertexTransforms}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />

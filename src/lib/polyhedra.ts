@@ -403,6 +403,55 @@ export function findRotationalSymmetryGroup(
   return Array.from(group)
 }
 
+// Per-vertex adjustment away from its default (canonical) position. All fields are 0
+// at the default position: z shifts elevation by a fraction of the model's total height,
+// r shifts radial distance from the main axis by a fraction of the model's max radius,
+// and theta rotates the vertex around the main (vertical) axis, in radians.
+export interface VertexTransform {
+  z: number
+  r: number
+  theta: number
+}
+
+export const DEFAULT_VERTEX_TRANSFORM: VertexTransform = { z: 0, r: 0, theta: 0 }
+
+export function isDefaultVertexTransform(t: VertexTransform): boolean {
+  return t.z === 0 && t.r === 0 && t.theta === 0
+}
+
+// Applies per-vertex transforms, measuring height/radius fractions against the untransformed
+// model's own extent so edits stay stable regardless of what's currently selected or sliced.
+export function applyVertexTransforms(
+  vertices: THREE.Vector3[],
+  transforms: ReadonlyMap<number, VertexTransform>,
+): THREE.Vector3[] {
+  if (transforms.size === 0) return vertices
+
+  let minY = Infinity
+  let maxY = -Infinity
+  let maxRadius = 0
+  for (const v of vertices) {
+    if (v.y < minY) minY = v.y
+    if (v.y > maxY) maxY = v.y
+    maxRadius = Math.max(maxRadius, Math.hypot(v.x, v.z))
+  }
+  const totalHeight = maxY - minY
+
+  return vertices.map((v, idx) => {
+    const t = transforms.get(idx)
+    if (!t || isDefaultVertexTransform(t)) return v
+
+    const radius = Math.hypot(v.x, v.z)
+    const angle = Math.atan2(v.z, v.x) + t.theta
+    const newRadius = radius + t.r * maxRadius
+    return new THREE.Vector3(
+      newRadius * Math.cos(angle),
+      v.y + t.z * totalHeight,
+      newRadius * Math.sin(angle),
+    )
+  })
+}
+
 export function removeVertices(
   sliced: SlicedPolyhedron,
   removed: ReadonlySet<number>,

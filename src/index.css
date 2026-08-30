@@ -175,6 +175,40 @@ body,
   opacity: 0.5;
 }
 
+.transform-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.transform-field label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.transform-field input[type='number'] {
+  width: 90px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: #21242c;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.transform-field input[type='number']::placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.transform-field input[type='number']:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .viewport {
   flex: 1;
   position: relative;

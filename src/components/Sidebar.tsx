@@ -1,5 +1,12 @@
-import type { AxisType, PolyhedronData, SelectionMode, ShapeType } from '../lib/polyhedra'
+import type {
+  AxisType,
+  PolyhedronData,
+  SelectionMode,
+  ShapeType,
+  VertexTransform,
+} from '../lib/polyhedra'
 import {
+  DEFAULT_VERTEX_TRANSFORM,
   MAX_SUBDIVISIONS,
   MIN_SUBDIVISIONS,
   SELECTION_MODE_OPTIONS,
@@ -20,12 +27,36 @@ interface SidebarProps {
   selectionMode: SelectionMode
   onSelectionModeChange: (mode: SelectionMode) => void
   selectedCount: number
+  selectedVertexIndices: ReadonlySet<number>
+  vertexTransforms: ReadonlyMap<number, VertexTransform>
+  onTransformChange: (field: keyof VertexTransform, value: number) => void
+  onResetTransform: () => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
   onUndo: () => void
   onRedo: () => void
   onCancelAll: () => void
+}
+
+// null return means the selected vertices don't all share the same value for this field.
+function sharedTransformValue(
+  selected: ReadonlySet<number>,
+  transforms: ReadonlyMap<number, VertexTransform>,
+  field: keyof VertexTransform,
+): number | null {
+  let value: number | null = null
+  let first = true
+  for (const idx of selected) {
+    const v = (transforms.get(idx) ?? DEFAULT_VERTEX_TRANSFORM)[field]
+    if (first) {
+      value = v
+      first = false
+    } else if (v !== value) {
+      return null
+    }
+  }
+  return value
 }
 
 export function Sidebar({
@@ -41,6 +72,10 @@ export function Sidebar({
   selectionMode,
   onSelectionModeChange,
   selectedCount,
+  selectedVertexIndices,
+  vertexTransforms,
+  onTransformChange,
+  onResetTransform,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -50,6 +85,18 @@ export function Sidebar({
 }: SidebarProps) {
   const axisOptions = SHAPE_AXES[shape]
   const maxLayers = data.layers.length
+
+  const zValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'z')
+  const rValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'r')
+  const thetaValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'theta')
+  const hasTransforms = Array.from(selectedVertexIndices).some((idx) => vertexTransforms.has(idx))
+
+  const handleFieldChange = (field: keyof VertexTransform, raw: string, toRadians = false) => {
+    if (raw === '' || raw === '-') return
+    const num = Number(raw)
+    if (Number.isNaN(num)) return
+    onTransformChange(field, toRadians ? (num * Math.PI) / 180 : num)
+  }
 
   return (
     <aside className="sidebar">
@@ -158,6 +205,52 @@ export function Sidebar({
           </button>
         </div>
       </section>
+
+      {selectedCount > 0 && (
+        <section className="control-group">
+          <h2>Transform</h2>
+          <div className="transform-field">
+            <label>Elevation (z)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={zValue ?? ''}
+              placeholder={zValue === null ? 'Mixed' : undefined}
+              onChange={(e) => handleFieldChange('z', e.target.value)}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Radius (r)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={rValue ?? ''}
+              placeholder={rValue === null ? 'Mixed' : undefined}
+              onChange={(e) => handleFieldChange('r', e.target.value)}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Angle (&theta;&deg;)</label>
+            <input
+              type="number"
+              step={1}
+              value={thetaValue === null ? '' : Math.round((thetaValue * 180) / Math.PI * 100) / 100}
+              placeholder={thetaValue === null ? 'Mixed' : undefined}
+              onChange={(e) => handleFieldChange('theta', e.target.value, true)}
+            />
+          </div>
+          <p className="hint">
+            {zValue === 0 && rValue === 0 && thetaValue === 0
+              ? 'Default position (0, 0, 0)'
+              : 'Values are relative to the default position'}
+          </p>
+          <div className="button-row">
+            <button disabled={!hasTransforms} onClick={onResetTransform}>
+              Reset Transform
+            </button>
+          </div>
+        </section>
+      )}
     </aside>
   )
 }
