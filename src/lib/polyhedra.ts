@@ -644,18 +644,35 @@ function addScaled2(p: Point2, dir: Point2, dist: number): Point2 {
   return [p[0] + dir[0] * dist, p[1] + dir[1] * dist]
 }
 
+function dot2(a: Point2, b: Point2): number {
+  return a[0] * b[0] + a[1] * b[1]
+}
+
+// The direction a joint rectangle extends inward along. Must be exactly perpendicular to
+// `radialOut` (the side line's own direction, since the side line connects the +-halfWidth
+// offsets along it) for the rectangle to have square corners instead of being a slanted
+// parallelogram - so this rotates `radialOut` by a quarter turn rather than using the arc's
+// own local tangent, which isn't generally perpendicular to the radius. `tangent` only picks
+// which of the two perpendicular directions points into the strut's body.
+function inwardPerpendicular(radialOut: Point2, tangent: Point2): Point2 {
+  const perp: Point2 = [-radialOut[1], radialOut[0]]
+  return dot2(perp, tangent) >= 0 ? perp : [-perp[0], -perp[1]]
+}
+
 // The rectangle sitting on a strut's end, used to square off the joint: one side is the
-// "side line" (innerPt-outerPt, length `width`), extending `depth` inward along the strut
-// (tangentIn) so that unioning it into the main polygon overwrites whatever the arc's
-// curvature did to the boundary near the tip with a flat, perpendicular end.
+// "side line" (innerPt-outerPt, length `width`, running along `radialOut`), extending `depth`
+// inward along `depthDir` - which must be perpendicular to `radialOut` for this to actually be
+// a rectangle (square corners) rather than a slanted parallelogram - so that unioning it into
+// the main polygon overwrites whatever the arc's curvature did to the boundary near the tip
+// with a flat end, perpendicular to the side line.
 function buildPositiveJointRect(
   innerPt: Point2,
   outerPt: Point2,
-  tangentIn: Point2,
+  depthDir: Point2,
   depth: number,
 ): Ring {
-  const innerFar = addScaled2(innerPt, tangentIn, depth)
-  const outerFar = addScaled2(outerPt, tangentIn, depth)
+  const innerFar = addScaled2(innerPt, depthDir, depth)
+  const outerFar = addScaled2(outerPt, depthDir, depth)
   return [outerPt, innerPt, innerFar, outerFar, outerPt]
 }
 
@@ -666,13 +683,13 @@ function buildPositiveJointRect(
 function buildNegativeJointRects(
   innerPt: Point2,
   outerPt: Point2,
-  tangentIn: Point2,
+  depthDir: Point2,
   depth: number,
   radialOut: Point2,
   margin: number,
 ): [Ring, Ring] {
-  const innerFar = addScaled2(innerPt, tangentIn, depth)
-  const outerFar = addScaled2(outerPt, tangentIn, depth)
+  const innerFar = addScaled2(innerPt, depthDir, depth)
+  const outerFar = addScaled2(outerPt, depthDir, depth)
   const outerRect: Ring = [
     outerPt,
     outerFar,
@@ -798,19 +815,23 @@ export function extrudeArcToBeam(
     // strut's geometry), which starves the clipping library's floating point sweep of
     // precision and makes it fail to close its output rings.
     const margin = Math.max(halfWidth, depth) * 4
-    const startTangentIn = normalize2(sub2(pts2D[1], pts2D[0]))
-    const endTangentIn = normalize2(sub2(pts2D[n - 2], pts2D[n - 1]))
+    // The arc's own local tangent - only used to pick which side of the (perpendicular-to-
+    // radius) joint direction points into the strut's body, not as the joint direction itself.
+    const startTangent = normalize2(sub2(pts2D[1], pts2D[0]))
+    const endTangent = normalize2(sub2(pts2D[n - 2], pts2D[n - 1]))
+    const startDepthDir = inwardPerpendicular(radialOut[0], startTangent)
+    const endDepthDir = inwardPerpendicular(radialOut[n - 1], endTangent)
 
-    positiveRects.push(buildPositiveJointRect(inner[0], outer[0], startTangentIn, depth))
-    positiveRects.push(buildPositiveJointRect(inner[n - 1], outer[n - 1], endTangentIn, depth))
+    positiveRects.push(buildPositiveJointRect(inner[0], outer[0], startDepthDir, depth))
+    positiveRects.push(buildPositiveJointRect(inner[n - 1], outer[n - 1], endDepthDir, depth))
     negativeRects.push(
-      ...buildNegativeJointRects(inner[0], outer[0], startTangentIn, depth, radialOut[0], margin),
+      ...buildNegativeJointRects(inner[0], outer[0], startDepthDir, depth, radialOut[0], margin),
     )
     negativeRects.push(
       ...buildNegativeJointRects(
         inner[n - 1],
         outer[n - 1],
-        endTangentIn,
+        endDepthDir,
         depth,
         radialOut[n - 1],
         margin,
