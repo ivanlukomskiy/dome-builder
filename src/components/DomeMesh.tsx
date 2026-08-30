@@ -90,7 +90,7 @@ export function DomeMesh({
             onPointerOver={handlePointerOver}
             onPointerOut={handlePointerOut}
           >
-            <sphereGeometry args={[isSelected ? 0.032 : 0.02, 16, 16]} />
+            <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
             <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
           </mesh>
         )

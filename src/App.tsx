@@ -5,9 +5,9 @@ import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
 
 function App() {
-  const [shape, setShape] = useState<ShapeType>('icosahedron')
+  const [shape, setShape] = useState<ShapeType>('octahedron')
   const [axis, setAxis] = useState<AxisType>('vertex')
-  const [subdivisions, setSubdivisions] = useState(2)
+  const [subdivisions, setSubdivisions] = useState(3)
   const [layerCount, setLayerCount] = useState(2)
 
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
