@@ -7,17 +7,17 @@ import { Viewport } from './components/Viewport'
 function App() {
   const [shape, setShape] = useState<ShapeType>('icosahedron')
   const [axis, setAxis] = useState<AxisType>('vertex')
-  const [subdivisions, setSubdivisions] = useState(1)
-  const [layerCount, setLayerCount] = useState(4)
+  const [subdivisions, setSubdivisions] = useState(2)
+  const [layerCount, setLayerCount] = useState(2)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
     [shape, axis, subdivisions],
   )
 
-  // Default to showing the full shape whenever the shape/axis choice changes.
+  // Default to showing half the layers (rounded up) whenever the shape/axis/subdivision choice changes.
   useEffect(() => {
-    setLayerCount(data.layers.length)
+    setLayerCount(Math.ceil(data.layers.length / 2))
   }, [data])
 
   return (

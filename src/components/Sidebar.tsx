@@ -13,11 +13,6 @@ interface SidebarProps {
   data: PolyhedronData
 }
 
-const SUBDIVISION_OPTIONS = Array.from(
-  { length: MAX_SUBDIVISIONS - MIN_SUBDIVISIONS + 1 },
-  (_, i) => MIN_SUBDIVISIONS + i,
-)
-
 export function Sidebar({
   shape,
   onShapeChange,
@@ -73,17 +68,18 @@ export function Sidebar({
 
       <section className="control-group">
         <h2>Subdivisions</h2>
-        {SUBDIVISION_OPTIONS.map((n) => (
-          <label key={n} className="radio-row">
-            <input
-              type="radio"
-              name="subdivisions"
-              checked={subdivisions === n}
-              onChange={() => onSubdivisionsChange(n)}
-            />
-            {n}
-          </label>
-        ))}
+        <div className="layer-slider-row">
+          <input
+            type="range"
+            min={MIN_SUBDIVISIONS}
+            max={MAX_SUBDIVISIONS}
+            value={subdivisions}
+            onChange={(e) => onSubdivisionsChange(Number(e.target.value))}
+          />
+          <span className="layer-count">
+            {subdivisions} / {MAX_SUBDIVISIONS}
+          </span>
+        </div>
       </section>
 
       <section className="control-group">
@@ -100,14 +96,6 @@ export function Sidebar({
             {layerCount} / {maxLayers}
           </span>
         </div>
-        <ul className="layer-list">
-          {data.layers.map((layer, i) => (
-            <li key={i} className={i < layerCount ? 'kept' : 'dropped'}>
-              Layer {i + 1}: {layer.vertexIndices.length} pt
-              {layer.vertexIndices.length !== 1 ? 's' : ''}
-            </li>
-          ))}
-        </ul>
       </section>
     </aside>
   )

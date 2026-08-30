@@ -55,8 +55,8 @@ export function DomeMesh({ data, layerCount }: DomeMeshProps) {
         const v = sliced.vertices[idx]
         return (
           <mesh key={idx} position={[v.x, v.y, v.z]}>
-            <sphereGeometry args={[0.035, 16, 16]} />
-            <meshStandardMaterial color="#d94f4f" />
+            <sphereGeometry args={[0.02, 16, 16]} />
+            <meshStandardMaterial color="#4fd97e" />
           </mesh>
         )
       })}
