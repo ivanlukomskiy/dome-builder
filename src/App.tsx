@@ -21,7 +21,7 @@ function App() {
   const [axis, setAxis] = useState<AxisType>('vertex')
   const [subdivisions, setSubdivisions] = useState(3)
   const [layerCount, setLayerCount] = useState(2)
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>('point')
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('symmetric')
 
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
   const [deletedGroups, setDeletedGroups] = useState<number[][]>([])
@@ -72,23 +72,20 @@ function App() {
   const handleVertexClick = (index: number) => {
     if (deletedVertexIndices.has(index)) return
 
-    // Added vertices don't belong to a layer or symmetry group - always a plain toggle.
-    if (index < 0) {
-      setSelectedVertexIndices((prev) => {
-        const next = new Set(prev)
-        if (next.has(index)) next.delete(index)
-        else next.add(index)
-        return next
-      })
-      return
-    }
+    // Grouping is always done against base (untransformed) positions, canonical vertices
+    // and added ones alike, so it stays stable regardless of any transform edits.
+    const positionOf = (id: number) => resolveVertexPosition(id, data.vertices, addedVertices)
+    const candidateIds = [
+      ...data.vertices.map((_, i) => i),
+      ...Array.from(addedVertices.keys()),
+    ]
 
     let group: number[]
     if (selectionMode === 'layer') {
-      group = findLayerGroup(data, index)
+      group = findLayerGroup(index, candidateIds, positionOf)
     } else if (selectionMode === 'symmetric') {
       const fold = SHAPE_AXES[shape].find((opt) => opt.value === axis)!.fold
-      group = findRotationalSymmetryGroup(data, fold, index)
+      group = findRotationalSymmetryGroup(index, candidateIds, positionOf, fold)
     } else {
       group = [index]
     }

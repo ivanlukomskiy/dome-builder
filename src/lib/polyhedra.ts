@@ -355,29 +355,40 @@ export function sliceLayers(data: PolyhedronData, layerCount: number): SlicedPol
   }
 }
 
-// Every vertex on the same layer (same height) as the given vertex.
-export function findLayerGroup(data: PolyhedronData, vertexIndex: number): number[] {
-  const layer = data.layers.find((l) => l.vertexIndices.includes(vertexIndex))
-  return layer ? layer.vertexIndices : [vertexIndex]
+// Every vertex among `candidateIds` on the same layer (same height) as the given vertex.
+// Geometric, not tied to `data.layers`, so it naturally covers added vertices too - a
+// midpoint created between two same-height points lands on that exact height itself.
+export function findLayerGroup(
+  vertexIndex: number,
+  candidateIds: number[],
+  positionOf: (id: number) => THREE.Vector3,
+): number[] {
+  const height = positionOf(vertexIndex).y
+  const group = candidateIds.filter((id) => Math.abs(positionOf(id).y - height) < HEIGHT_EPS)
+  return group.length > 0 ? group : [vertexIndex]
 }
 
 const ROTATION_EPS = 1e-4
 
 // The orbit of a vertex under the shape's rotational symmetry about the main (vertical)
-// axis: up to `fold` vertices on the same layer, evenly spaced around the axis, that the
-// polyhedron's symmetry carries into one another. A vertex sitting on the axis itself
-// (radius ~0, e.g. an apex) has no distinct rotational partners.
+// axis: up to `fold` vertices among `candidateIds` on the same layer, evenly spaced around
+// the axis, that the polyhedron's symmetry carries into one another. Works for added
+// vertices too, as long as they were created from (and so inherit the arrangement of) a
+// symmetric set of points. A vertex sitting on the axis itself (radius ~0, e.g. an apex)
+// has no distinct rotational partners.
 export function findRotationalSymmetryGroup(
-  data: PolyhedronData,
-  fold: number,
   vertexIndex: number,
+  candidateIds: number[],
+  positionOf: (id: number) => THREE.Vector3,
+  fold: number,
 ): number[] {
-  const layer = data.layers.find((l) => l.vertexIndices.includes(vertexIndex))
-  if (!layer) return [vertexIndex]
-
-  const clicked = data.vertices[vertexIndex]
+  const clicked = positionOf(vertexIndex)
   const radius = Math.hypot(clicked.x, clicked.z)
   if (radius < ROTATION_EPS) return [vertexIndex]
+
+  const sameLayer = candidateIds.filter(
+    (id) => Math.abs(positionOf(id).y - clicked.y) < HEIGHT_EPS,
+  )
 
   const group = new Set<number>()
   const angleStep = (2 * Math.PI) / fold
@@ -388,17 +399,17 @@ export function findRotationalSymmetryGroup(
     const rx = clicked.x * cos - clicked.z * sin
     const rz = clicked.x * sin + clicked.z * cos
 
-    let bestIdx = -1
+    let bestId: number | null = null
     let bestDist = Infinity
-    for (const idx of layer.vertexIndices) {
-      const v = data.vertices[idx]
+    for (const id of sameLayer) {
+      const v = positionOf(id)
       const dist = Math.hypot(v.x - rx, v.z - rz)
       if (dist < bestDist) {
         bestDist = dist
-        bestIdx = idx
+        bestId = id
       }
     }
-    if (bestIdx !== -1 && bestDist < 1e-3) group.add(bestIdx)
+    if (bestId !== null && bestDist < 1e-3) group.add(bestId)
   }
   return Array.from(group)
 }
