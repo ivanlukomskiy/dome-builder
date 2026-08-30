@@ -47,6 +47,8 @@ interface SidebarProps {
   onFocalZ2Change: (value: number) => void
   edgeSegments: number
   onEdgeSegmentsChange: (value: number) => void
+  extrudeDistance: number
+  onExtrudeDistanceChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -102,6 +104,8 @@ export function Sidebar({
   onFocalZ2Change,
   edgeSegments,
   onEdgeSegmentsChange,
+  extrudeDistance,
+  onExtrudeDistanceChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -255,6 +259,21 @@ export function Sidebar({
           </div>
           <p className="hint">
             Each edge is bent through the confocal ellipsoids of the two focal points.
+          </p>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={0.3}
+              step={0.005}
+              value={extrudeDistance}
+              onChange={(e) => onExtrudeDistanceChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{extrudeDistance.toFixed(3)}</span>
+          </div>
+          <p className="hint">
+            Extrudes each arc symmetrically toward/away from the ellipsoids' center, turning it
+            into a ribbon-shaped face.
           </p>
         </section>
       )}

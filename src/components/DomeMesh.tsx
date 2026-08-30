@@ -5,6 +5,7 @@ import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import {
   computeArcEdgePoints,
+  extrudeArcToRibbon,
   removeVertices,
   resolveVertexPosition,
   sliceLayers,
@@ -22,6 +23,7 @@ interface DomeMeshProps {
   focalPoint1Y: number
   focalPoint2Y: number
   edgeSegments: number
+  extrudeDistance: number
   onVertexClick: (index: number) => void
 }
 
@@ -37,6 +39,7 @@ export function DomeMesh({
   focalPoint1Y,
   focalPoint2Y,
   edgeSegments,
+  extrudeDistance,
   onVertexClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
@@ -82,48 +85,78 @@ export function DomeMesh({
     return geom
   }, [visibleAddedFaces, resolvePosition])
 
-  // In preview mode each edge is drawn as a run of small segments that bulge along the
-  // confocal-ellipsoid family for the two focal points, instead of a single straight line.
-  const pushEdge = useCallback(
-    (positions: number[], va: THREE.Vector3, vb: THREE.Vector3) => {
-      if (mode !== 'preview') {
-        positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z)
-        return
-      }
-      const arcPoints = computeArcEdgePoints(va, vb, focalPoint1Y, focalPoint2Y, edgeSegments)
-      for (let i = 0; i < arcPoints.length - 1; i++) {
-        const p0 = arcPoints[i]
-        const p1 = arcPoints[i + 1]
-        positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z)
-      }
-    },
-    [mode, focalPoint1Y, focalPoint2Y, edgeSegments],
-  )
-
+  // Edit mode draws each edge as a plain straight line.
   const addedEdgeGeometry = useMemo(() => {
     const positions: number[] = []
     for (const [i0, i1, i2] of visibleAddedFaces) {
       const v0 = resolvePosition(i0)
       const v1 = resolvePosition(i1)
       const v2 = resolvePosition(i2)
-      pushEdge(positions, v0, v1)
-      pushEdge(positions, v1, v2)
-      pushEdge(positions, v2, v0)
+      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
+      positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
+      positions.push(v2.x, v2.y, v2.z, v0.x, v0.y, v0.z)
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     return geom
-  }, [visibleAddedFaces, resolvePosition, pushEdge])
+  }, [visibleAddedFaces, resolvePosition])
 
   const edgeGeometry = useMemo(() => {
     const positions: number[] = []
     for (const [a, b] of sliced.keptEdges) {
-      pushEdge(positions, sliced.vertices[a], sliced.vertices[b])
+      const va = sliced.vertices[a]
+      const vb = sliced.vertices[b]
+      positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z)
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     return geom
-  }, [sliced, pushEdge])
+  }, [sliced])
+
+  // Preview mode instead turns each edge into a ribbon-shaped face: bulge it into an arc
+  // along the confocal-ellipsoid family for the two focal points, then symmetrically extrude
+  // that arc toward/away from the ellipsoids' center to give it width.
+  const centerY = (focalPoint1Y + focalPoint2Y) / 2
+  const buildRibbon = useCallback(
+    (va: THREE.Vector3, vb: THREE.Vector3) => {
+      const arcPoints = computeArcEdgePoints(va, vb, focalPoint1Y, focalPoint2Y, edgeSegments)
+      return extrudeArcToRibbon(arcPoints, centerY, extrudeDistance)
+    },
+    [focalPoint1Y, focalPoint2Y, edgeSegments, centerY, extrudeDistance],
+  )
+
+  const edgeRibbonGeometry = useMemo(() => {
+    const positions: number[] = []
+    for (const [a, b] of sliced.keptEdges) {
+      for (const v of buildRibbon(sliced.vertices[a], sliced.vertices[b])) {
+        positions.push(v.x, v.y, v.z)
+      }
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geom.computeVertexNormals()
+    return geom
+  }, [sliced, buildRibbon])
+
+  const addedEdgeRibbonGeometry = useMemo(() => {
+    const positions: number[] = []
+    for (const [i0, i1, i2] of visibleAddedFaces) {
+      const v0 = resolvePosition(i0)
+      const v1 = resolvePosition(i1)
+      const v2 = resolvePosition(i2)
+      for (const [a, b] of [
+        [v0, v1],
+        [v1, v2],
+        [v2, v0],
+      ] as const) {
+        for (const v of buildRibbon(a, b)) positions.push(v.x, v.y, v.z)
+      }
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geom.computeVertexNormals()
+    return geom
+  }, [visibleAddedFaces, resolvePosition, buildRibbon])
 
   const faceGeometry = useMemo(() => {
     const positions: number[] = []
@@ -164,9 +197,11 @@ export function DomeMesh({
           />
         </mesh>
       )}
-      <lineSegments geometry={edgeGeometry}>
-        <lineBasicMaterial color="#1b3a57" />
-      </lineSegments>
+      {mode === 'edit' && (
+        <lineSegments geometry={edgeGeometry}>
+          <lineBasicMaterial color="#1b3a57" />
+        </lineSegments>
+      )}
       {mode === 'edit' && (
         <mesh geometry={addedFaceGeometry}>
           <meshStandardMaterial
@@ -178,9 +213,21 @@ export function DomeMesh({
           />
         </mesh>
       )}
-      <lineSegments geometry={addedEdgeGeometry}>
-        <lineBasicMaterial color="#571b3a" />
-      </lineSegments>
+      {mode === 'edit' && (
+        <lineSegments geometry={addedEdgeGeometry}>
+          <lineBasicMaterial color="#571b3a" />
+        </lineSegments>
+      )}
+      {mode === 'preview' && (
+        <mesh geometry={edgeRibbonGeometry}>
+          <meshStandardMaterial color="#5b9bd5" side={THREE.DoubleSide} roughness={0.5} />
+        </mesh>
+      )}
+      {mode === 'preview' && (
+        <mesh geometry={addedEdgeRibbonGeometry}>
+          <meshStandardMaterial color="#d55b9b" side={THREE.DoubleSide} roughness={0.5} />
+        </mesh>
+      )}
       {mode === 'edit' &&
         sliced.keptVertexIndices.map((idx) => {
           const v = sliced.vertices[idx]

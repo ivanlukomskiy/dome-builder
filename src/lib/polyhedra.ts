@@ -631,3 +631,36 @@ export function computeArcEdgePoints(
   }
   return points
 }
+
+// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a ribbon-shaped
+// face: each point is offset by half the extrusion distance toward the ellipsoid center and
+// half away from it, and the resulting two parallel curves are triangulated into a strip. The
+// original arc stays exactly centered within the ribbon's width. Returns a flat, non-indexed
+// list of triangle vertices (three per triangle, ready to feed straight into a BufferGeometry).
+export function extrudeArcToRibbon(
+  arcPoints: THREE.Vector3[],
+  centerY: number,
+  extrudeDistance: number,
+): THREE.Vector3[] {
+  const half = extrudeDistance / 2
+  const center = new THREE.Vector3(0, centerY, 0)
+
+  const offsets = arcPoints.map((p) => {
+    const towardCenter = center.clone().sub(p)
+    if (towardCenter.lengthSq() < RADIAL_EPS) towardCenter.set(0, 1, 0)
+    else towardCenter.normalize()
+    return {
+      outer: p.clone().addScaledVector(towardCenter, -half),
+      inner: p.clone().addScaledVector(towardCenter, half),
+    }
+  })
+
+  const triangles: THREE.Vector3[] = []
+  for (let i = 0; i < offsets.length - 1; i++) {
+    const { outer: outerA, inner: innerA } = offsets[i]
+    const { outer: outerB, inner: innerB } = offsets[i + 1]
+    triangles.push(outerA, innerA, outerB)
+    triangles.push(innerA, innerB, outerB)
+  }
+  return triangles
+}

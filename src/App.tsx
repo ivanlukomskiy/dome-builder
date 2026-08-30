@@ -42,6 +42,7 @@ function App() {
   const [focalZ1, setFocalZ1] = useState(0)
   const [focalZ2, setFocalZ2] = useState(0)
   const [edgeSegments, setEdgeSegments] = useState(8)
+  const [extrudeDistance, setExtrudeDistance] = useState(0.05)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
@@ -214,6 +215,8 @@ function App() {
         onFocalZ2Change={setFocalZ2}
         edgeSegments={edgeSegments}
         onEdgeSegmentsChange={setEdgeSegments}
+        extrudeDistance={extrudeDistance}
+        onExtrudeDistanceChange={setExtrudeDistance}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -233,6 +236,7 @@ function App() {
         focalPoint1Y={focalPoint1Y}
         focalPoint2Y={focalPoint2Y}
         edgeSegments={edgeSegments}
+        extrudeDistance={extrudeDistance}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />
