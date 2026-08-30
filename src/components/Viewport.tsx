@@ -18,6 +18,7 @@ interface ViewportProps {
   edgeSegments: number
   extrudeDistance: number
   thickness: number
+  cornerLength: number
   onVertexClick: (index: number) => void
   onDeselectAll: () => void
 }
@@ -35,6 +36,7 @@ export function Viewport({
   edgeSegments,
   extrudeDistance,
   thickness,
+  cornerLength,
   onVertexClick,
   onDeselectAll,
 }: ViewportProps) {
@@ -66,6 +68,7 @@ export function Viewport({
           edgeSegments={edgeSegments}
           extrudeDistance={extrudeDistance}
           thickness={thickness}
+          cornerLength={cornerLength}
           onVertexClick={onVertexClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />

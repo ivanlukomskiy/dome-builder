@@ -43,6 +43,7 @@ function App() {
   const [edgeSegments, setEdgeSegments] = useState(8)
   const [extrudeDistance, setExtrudeDistance] = useState(0.05)
   const [thickness, setThickness] = useState(0.03)
+  const [cornerLength, setCornerLength] = useState(0.15)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
@@ -216,6 +217,8 @@ function App() {
         onExtrudeDistanceChange={setExtrudeDistance}
         thickness={thickness}
         onThicknessChange={setThickness}
+        cornerLength={cornerLength}
+        onCornerLengthChange={setCornerLength}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -236,6 +239,7 @@ function App() {
         edgeSegments={edgeSegments}
         extrudeDistance={extrudeDistance}
         thickness={thickness}
+        cornerLength={cornerLength}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />

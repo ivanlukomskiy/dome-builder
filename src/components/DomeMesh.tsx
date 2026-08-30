@@ -4,7 +4,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import {
-  computeArcEdgePoints,
+  computeEdgePolyline,
   extrudeArcToBeam,
   removeVertices,
   resolveVertexPosition,
@@ -24,6 +24,7 @@ interface DomeMeshProps {
   edgeSegments: number
   extrudeDistance: number
   thickness: number
+  cornerLength: number
   onVertexClick: (index: number) => void
 }
 
@@ -40,6 +41,7 @@ export function DomeMesh({
   edgeSegments,
   extrudeDistance,
   thickness,
+  cornerLength,
   onVertexClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
@@ -113,16 +115,17 @@ export function DomeMesh({
     return geom
   }, [sliced])
 
-  // Preview mode instead turns each edge into a solid beam: bulge it into an arc along the
-  // sphere family centered on the dome's center point, then symmetrically extrude that arc
-  // toward/away from the sphere's center (width) and along its own surface normal
-  // (thickness) to give it a rectangular cross-section.
+  // Preview mode instead turns each edge into a solid beam: turn it into a polyline with
+  // mitered corners (straight tangent lead-ins at each end, bridged either by a sharp point or
+  // by an arc bulging along the sphere family centered on the dome's center point), then
+  // symmetrically extrude that polyline toward/away from the sphere's center (width) and along
+  // its own surface normal (thickness) to give it a rectangular cross-section.
   const buildBeam = useCallback(
     (va: THREE.Vector3, vb: THREE.Vector3) => {
-      const arcPoints = computeArcEdgePoints(va, vb, centerY, edgeSegments)
-      return extrudeArcToBeam(arcPoints, centerY, extrudeDistance, thickness)
+      const points = computeEdgePolyline(va, vb, centerY, edgeSegments, cornerLength)
+      return extrudeArcToBeam(points, centerY, extrudeDistance, thickness)
     },
-    [centerY, edgeSegments, extrudeDistance, thickness],
+    [centerY, edgeSegments, extrudeDistance, thickness, cornerLength],
   )
 
   const edgeBeamGeometry = useMemo(() => {

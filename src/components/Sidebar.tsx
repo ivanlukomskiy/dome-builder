@@ -49,6 +49,8 @@ interface SidebarProps {
   onExtrudeDistanceChange: (value: number) => void
   thickness: number
   onThicknessChange: (value: number) => void
+  cornerLength: number
+  onCornerLengthChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -106,6 +108,8 @@ export function Sidebar({
   onExtrudeDistanceChange,
   thickness,
   onThicknessChange,
+  cornerLength,
+  onCornerLengthChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -246,6 +250,22 @@ export function Sidebar({
       {mode === 'preview' && (
         <section className="control-group">
           <h2>Edge Curvature</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={0.4}
+              step={0.005}
+              value={cornerLength}
+              onChange={(e) => onCornerLengthChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{cornerLength.toFixed(3)}</span>
+          </div>
+          <p className="hint">
+            Corner length (D): straight lead-in at each end, tangent to the sphere and angled
+            toward the other end. Meeting lead-ins form a sharp point; otherwise the gap between
+            them is smoothed.
+          </p>
           <div className="layer-slider-row">
             <input
               type="range"

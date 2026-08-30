@@ -617,6 +617,67 @@ export function computeArcEdgePoints(
   return points
 }
 
+// The unit direction at `from`, tangent to the sphere centered at (0, centerY, 0) (i.e.
+// perpendicular to the radius from that center to `from`), leaning as much as possible toward
+// `toward` - the component of (toward - from) that lies in that tangent plane, normalized.
+function tangentDirection(from: THREE.Vector3, toward: THREE.Vector3, centerY: number): THREE.Vector3 {
+  const radial = new THREE.Vector3(from.x, from.y - centerY, from.z)
+  const alongEdge = toward.clone().sub(from)
+  if (radial.lengthSq() < RADIAL_EPS) {
+    return alongEdge.lengthSq() < RADIAL_EPS ? new THREE.Vector3(1, 0, 0) : alongEdge.normalize()
+  }
+  radial.normalize()
+
+  const tangent = alongEdge.addScaledVector(radial, -alongEdge.dot(radial))
+  if (tangent.lengthSq() < RADIAL_EPS) {
+    // alongEdge runs (anti)parallel to the radius: fall back to an arbitrary tangent direction.
+    const arbitrary = Math.abs(radial.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
+    tangent.copy(arbitrary).addScaledVector(radial, -arbitrary.dot(radial))
+  }
+  return tangent.normalize()
+}
+
+// Turns a straight edge into a polyline with mitered corners: at each end, a straight
+// `cornerLength`-long lead-in (edgeLine1/edgeLine2) departs tangent to the sphere at that
+// endpoint, angled toward the other end. Since both lead-ins and the original edge all sit in
+// the plane spanned by the two endpoints and the sphere center, the two lead-ins (extended as
+// lines) always meet at a single point in that plane.
+//
+// If that crossing point falls within both lead-ins' actual length (a sharp enough corner),
+// the polyline is just the two lead-ins cut off at that point: p1 -> intersection -> p2.
+// Otherwise the lead-ins stay straight and full-length, and the gap between their far ends is
+// bridged by the same arc-smoothing used for a whole edge (computeArcEdgePoints): p1 -> end of
+// edgeLine1 -> ...smoothed middle... -> end of edgeLine2 -> p2.
+export function computeEdgePolyline(
+  p1: THREE.Vector3,
+  p2: THREE.Vector3,
+  centerY: number,
+  segments: number,
+  cornerLength: number,
+): THREE.Vector3[] {
+  if (cornerLength < RADIAL_EPS) return computeArcEdgePoints(p1, p2, centerY, segments)
+
+  const d1 = tangentDirection(p1, p2, centerY).multiplyScalar(cornerLength)
+  const d2 = tangentDirection(p2, p1, centerY).multiplyScalar(cornerLength)
+
+  const n = d1.clone().cross(d2)
+  const denom = n.lengthSq()
+  if (denom > RADIAL_EPS) {
+    const r = p2.clone().sub(p1)
+    const t = r.clone().cross(d2).dot(n) / denom
+    const s = r.clone().cross(d1).dot(n) / denom
+    const EDGE_EPS = 1e-6
+    if (t >= -EDGE_EPS && t <= 1 + EDGE_EPS && s >= -EDGE_EPS && s <= 1 + EDGE_EPS) {
+      const intersection = p1.clone().addScaledVector(d1, Math.min(Math.max(t, 0), 1))
+      return [p1, intersection, p2]
+    }
+  }
+
+  const end1 = p1.clone().add(d1)
+  const end2 = p2.clone().add(d2)
+  return [p1, ...computeArcEdgePoints(end1, end2, centerY, segments), p2]
+}
+
 function pushQuad(
   triangles: THREE.Vector3[],
   a: THREE.Vector3,
@@ -628,7 +689,7 @@ function pushQuad(
   triangles.push(a, c, d)
 }
 
-// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a solid beam: each
+// Symmetrically extrudes an arc (as produced by computeEdgePolyline) into a solid beam: each
 // point is offset by half `width` toward the sphere center and half away from it (giving
 // the strut its width, in the same plane as the arc and the sphere's center), and then that
 // whole ribbon is offset by half `thickness` each way along its own surface normal (giving it
