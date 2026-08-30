@@ -18,6 +18,7 @@ interface ViewportProps {
   focalPoint2Y: number
   edgeSegments: number
   extrudeDistance: number
+  thickness: number
   onVertexClick: (index: number) => void
   onDeselectAll: () => void
 }
@@ -35,6 +36,7 @@ export function Viewport({
   focalPoint2Y,
   edgeSegments,
   extrudeDistance,
+  thickness,
   onVertexClick,
   onDeselectAll,
 }: ViewportProps) {
@@ -66,6 +68,7 @@ export function Viewport({
           focalPoint2Y={focalPoint2Y}
           edgeSegments={edgeSegments}
           extrudeDistance={extrudeDistance}
+          thickness={thickness}
           onVertexClick={onVertexClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />

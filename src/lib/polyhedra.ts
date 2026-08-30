@@ -632,35 +632,69 @@ export function computeArcEdgePoints(
   return points
 }
 
-// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a ribbon-shaped
-// face: each point is offset by half the extrusion distance toward the ellipsoid center and
-// half away from it, and the resulting two parallel curves are triangulated into a strip. The
-// original arc stays exactly centered within the ribbon's width. Returns a flat, non-indexed
-// list of triangle vertices (three per triangle, ready to feed straight into a BufferGeometry).
-export function extrudeArcToRibbon(
+function pushQuad(
+  triangles: THREE.Vector3[],
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  c: THREE.Vector3,
+  d: THREE.Vector3,
+): void {
+  triangles.push(a, b, c)
+  triangles.push(a, c, d)
+}
+
+// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a solid beam: each
+// point is offset by half `width` toward the ellipsoid center and half away from it (giving
+// the strut its width, in the same plane as the arc and the ellipsoids' center), and then that
+// whole ribbon is offset by half `thickness` each way along its own surface normal (giving it
+// depth, perpendicular to that plane). The original arc stays exactly centered inside the
+// resulting box-shaped tube. Returns a flat, non-indexed list of triangle vertices (three per
+// triangle, ready to feed straight into a BufferGeometry) covering all four side faces.
+export function extrudeArcToBeam(
   arcPoints: THREE.Vector3[],
   centerY: number,
-  extrudeDistance: number,
+  width: number,
+  thickness: number,
 ): THREE.Vector3[] {
-  const half = extrudeDistance / 2
+  const halfWidth = width / 2
+  const halfThickness = thickness / 2
   const center = new THREE.Vector3(0, centerY, 0)
+  const last = arcPoints.length - 1
 
-  const offsets = arcPoints.map((p) => {
+  const cross = arcPoints.map((p, i) => {
     const towardCenter = center.clone().sub(p)
     if (towardCenter.lengthSq() < RADIAL_EPS) towardCenter.set(0, 1, 0)
     else towardCenter.normalize()
+
+    const prev = arcPoints[Math.max(i - 1, 0)]
+    const next = arcPoints[Math.min(i + 1, last)]
+    const tangent = next.clone().sub(prev)
+    if (tangent.lengthSq() < RADIAL_EPS) tangent.set(1, 0, 0)
+    else tangent.normalize()
+
+    const binormal = new THREE.Vector3().crossVectors(tangent, towardCenter)
+    if (binormal.lengthSq() < RADIAL_EPS) binormal.crossVectors(tangent, new THREE.Vector3(0, 1, 0))
+    if (binormal.lengthSq() < RADIAL_EPS) binormal.set(0, 0, 1)
+    else binormal.normalize()
+
+    const outer = p.clone().addScaledVector(towardCenter, -halfWidth)
+    const inner = p.clone().addScaledVector(towardCenter, halfWidth)
     return {
-      outer: p.clone().addScaledVector(towardCenter, -half),
-      inner: p.clone().addScaledVector(towardCenter, half),
+      outerTop: outer.clone().addScaledVector(binormal, halfThickness),
+      outerBottom: outer.clone().addScaledVector(binormal, -halfThickness),
+      innerTop: inner.clone().addScaledVector(binormal, halfThickness),
+      innerBottom: inner.clone().addScaledVector(binormal, -halfThickness),
     }
   })
 
   const triangles: THREE.Vector3[] = []
-  for (let i = 0; i < offsets.length - 1; i++) {
-    const { outer: outerA, inner: innerA } = offsets[i]
-    const { outer: outerB, inner: innerB } = offsets[i + 1]
-    triangles.push(outerA, innerA, outerB)
-    triangles.push(innerA, innerB, outerB)
+  for (let i = 0; i < cross.length - 1; i++) {
+    const a = cross[i]
+    const b = cross[i + 1]
+    pushQuad(triangles, a.outerTop, b.outerTop, b.outerBottom, a.outerBottom) // outer face
+    pushQuad(triangles, a.innerBottom, b.innerBottom, b.innerTop, a.innerTop) // inner face
+    pushQuad(triangles, a.outerTop, a.innerTop, b.innerTop, b.outerTop) // top face
+    pushQuad(triangles, a.outerBottom, b.outerBottom, b.innerBottom, a.innerBottom) // bottom face
   }
   return triangles
 }

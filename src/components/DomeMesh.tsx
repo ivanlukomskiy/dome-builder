@@ -5,7 +5,7 @@ import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import {
   computeArcEdgePoints,
-  extrudeArcToRibbon,
+  extrudeArcToBeam,
   removeVertices,
   resolveVertexPosition,
   sliceLayers,
@@ -24,6 +24,7 @@ interface DomeMeshProps {
   focalPoint2Y: number
   edgeSegments: number
   extrudeDistance: number
+  thickness: number
   onVertexClick: (index: number) => void
 }
 
@@ -40,6 +41,7 @@ export function DomeMesh({
   focalPoint2Y,
   edgeSegments,
   extrudeDistance,
+  thickness,
   onVertexClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
@@ -113,22 +115,23 @@ export function DomeMesh({
     return geom
   }, [sliced])
 
-  // Preview mode instead turns each edge into a ribbon-shaped face: bulge it into an arc
-  // along the confocal-ellipsoid family for the two focal points, then symmetrically extrude
-  // that arc toward/away from the ellipsoids' center to give it width.
+  // Preview mode instead turns each edge into a solid beam: bulge it into an arc along the
+  // confocal-ellipsoid family for the two focal points, then symmetrically extrude that arc
+  // toward/away from the ellipsoids' center (width) and along its own surface normal
+  // (thickness) to give it a rectangular cross-section.
   const centerY = (focalPoint1Y + focalPoint2Y) / 2
-  const buildRibbon = useCallback(
+  const buildBeam = useCallback(
     (va: THREE.Vector3, vb: THREE.Vector3) => {
       const arcPoints = computeArcEdgePoints(va, vb, focalPoint1Y, focalPoint2Y, edgeSegments)
-      return extrudeArcToRibbon(arcPoints, centerY, extrudeDistance)
+      return extrudeArcToBeam(arcPoints, centerY, extrudeDistance, thickness)
     },
-    [focalPoint1Y, focalPoint2Y, edgeSegments, centerY, extrudeDistance],
+    [focalPoint1Y, focalPoint2Y, edgeSegments, centerY, extrudeDistance, thickness],
   )
 
-  const edgeRibbonGeometry = useMemo(() => {
+  const edgeBeamGeometry = useMemo(() => {
     const positions: number[] = []
     for (const [a, b] of sliced.keptEdges) {
-      for (const v of buildRibbon(sliced.vertices[a], sliced.vertices[b])) {
+      for (const v of buildBeam(sliced.vertices[a], sliced.vertices[b])) {
         positions.push(v.x, v.y, v.z)
       }
     }
@@ -136,9 +139,9 @@ export function DomeMesh({
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geom.computeVertexNormals()
     return geom
-  }, [sliced, buildRibbon])
+  }, [sliced, buildBeam])
 
-  const addedEdgeRibbonGeometry = useMemo(() => {
+  const addedEdgeBeamGeometry = useMemo(() => {
     const positions: number[] = []
     for (const [i0, i1, i2] of visibleAddedFaces) {
       const v0 = resolvePosition(i0)
@@ -149,14 +152,14 @@ export function DomeMesh({
         [v1, v2],
         [v2, v0],
       ] as const) {
-        for (const v of buildRibbon(a, b)) positions.push(v.x, v.y, v.z)
+        for (const v of buildBeam(a, b)) positions.push(v.x, v.y, v.z)
       }
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geom.computeVertexNormals()
     return geom
-  }, [visibleAddedFaces, resolvePosition, buildRibbon])
+  }, [visibleAddedFaces, resolvePosition, buildBeam])
 
   const faceGeometry = useMemo(() => {
     const positions: number[] = []
@@ -219,12 +222,12 @@ export function DomeMesh({
         </lineSegments>
       )}
       {mode === 'preview' && (
-        <mesh geometry={edgeRibbonGeometry}>
+        <mesh geometry={edgeBeamGeometry}>
           <meshStandardMaterial color="#5b9bd5" side={THREE.DoubleSide} roughness={0.5} />
         </mesh>
       )}
       {mode === 'preview' && (
-        <mesh geometry={addedEdgeRibbonGeometry}>
+        <mesh geometry={addedEdgeBeamGeometry}>
           <meshStandardMaterial color="#d55b9b" side={THREE.DoubleSide} roughness={0.5} />
         </mesh>
       )}

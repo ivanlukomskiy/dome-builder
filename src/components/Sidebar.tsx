@@ -49,6 +49,8 @@ interface SidebarProps {
   onEdgeSegmentsChange: (value: number) => void
   extrudeDistance: number
   onExtrudeDistanceChange: (value: number) => void
+  thickness: number
+  onThicknessChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -106,6 +108,8 @@ export function Sidebar({
   onEdgeSegmentsChange,
   extrudeDistance,
   onExtrudeDistanceChange,
+  thickness,
+  onThicknessChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -153,72 +157,80 @@ export function Sidebar({
         </div>
       </section>
 
-      <section className="control-group">
-        <h2>Shape</h2>
-        {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
-          <label key={s} className="radio-row">
-            <input
-              type="radio"
-              name="shape"
-              checked={shape === s}
-              onChange={() => onShapeChange(s)}
-            />
-            {SHAPE_LABELS[s]}
-          </label>
-        ))}
-      </section>
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Shape</h2>
+          {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
+            <label key={s} className="radio-row">
+              <input
+                type="radio"
+                name="shape"
+                checked={shape === s}
+                onChange={() => onShapeChange(s)}
+              />
+              {SHAPE_LABELS[s]}
+            </label>
+          ))}
+        </section>
+      )}
 
-      <section className="control-group">
-        <h2>Main axis</h2>
-        {axisOptions.map((opt) => (
-          <label key={opt.value} className="radio-row">
-            <input
-              type="radio"
-              name="axis"
-              checked={axis === opt.value}
-              onChange={() => onAxisChange(opt.value)}
-            />
-            <span>
-              {opt.label}
-              <span className="hint">
-                {opt.axisCount} axes &middot; {opt.fold}-fold
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Main axis</h2>
+          {axisOptions.map((opt) => (
+            <label key={opt.value} className="radio-row">
+              <input
+                type="radio"
+                name="axis"
+                checked={axis === opt.value}
+                onChange={() => onAxisChange(opt.value)}
+              />
+              <span>
+                {opt.label}
+                <span className="hint">
+                  {opt.axisCount} axes &middot; {opt.fold}-fold
+                </span>
               </span>
+            </label>
+          ))}
+        </section>
+      )}
+
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Subdivisions</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={MIN_SUBDIVISIONS}
+              max={MAX_SUBDIVISIONS}
+              value={subdivisions}
+              onChange={(e) => onSubdivisionsChange(Number(e.target.value))}
+            />
+            <span className="layer-count">
+              {subdivisions} / {MAX_SUBDIVISIONS}
             </span>
-          </label>
-        ))}
-      </section>
+          </div>
+        </section>
+      )}
 
-      <section className="control-group">
-        <h2>Subdivisions</h2>
-        <div className="layer-slider-row">
-          <input
-            type="range"
-            min={MIN_SUBDIVISIONS}
-            max={MAX_SUBDIVISIONS}
-            value={subdivisions}
-            onChange={(e) => onSubdivisionsChange(Number(e.target.value))}
-          />
-          <span className="layer-count">
-            {subdivisions} / {MAX_SUBDIVISIONS}
-          </span>
-        </div>
-      </section>
-
-      <section className="control-group">
-        <h2>Layers</h2>
-        <div className="layer-slider-row">
-          <input
-            type="range"
-            min={1}
-            max={maxLayers}
-            value={layerCount}
-            onChange={(e) => onLayerCountChange(Number(e.target.value))}
-          />
-          <span className="layer-count">
-            {layerCount} / {maxLayers}
-          </span>
-        </div>
-      </section>
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Layers</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={1}
+              max={maxLayers}
+              value={layerCount}
+              onChange={(e) => onLayerCountChange(Number(e.target.value))}
+            />
+            <span className="layer-count">
+              {layerCount} / {maxLayers}
+            </span>
+          </div>
+        </section>
+      )}
 
       {mode === 'preview' && (
         <section className="control-group">
@@ -272,8 +284,22 @@ export function Sidebar({
             <span className="layer-count">{extrudeDistance.toFixed(3)}</span>
           </div>
           <p className="hint">
-            Extrudes each arc symmetrically toward/away from the ellipsoids' center, turning it
-            into a ribbon-shaped face.
+            Width: extrudes each arc symmetrically toward/away from the ellipsoids' center.
+          </p>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={0.15}
+              step={0.0025}
+              value={thickness}
+              onChange={(e) => onThicknessChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{thickness.toFixed(4)}</span>
+          </div>
+          <p className="hint">
+            Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
+            it into a solid beam.
           </p>
         </section>
       )}
