@@ -4,7 +4,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import {
-  computeArcEdgePoints,
+  computeSmoothedEdgePoints,
   extrudeArcToBeam,
   removeVertices,
   resolveVertexPosition,
@@ -20,8 +20,8 @@ interface DomeMeshProps {
   selectedVertexIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
-  focalPoint1Y: number
-  focalPoint2Y: number
+  centerY: number
+  bendDistance: number
   edgeSegments: number
   extrudeDistance: number
   thickness: number
@@ -37,8 +37,8 @@ export function DomeMesh({
   selectedVertexIndices,
   addedVertices,
   addedFaces,
-  focalPoint1Y,
-  focalPoint2Y,
+  centerY,
+  bendDistance,
   edgeSegments,
   extrudeDistance,
   thickness,
@@ -115,17 +115,16 @@ export function DomeMesh({
     return geom
   }, [sliced])
 
-  // Preview mode instead turns each edge into a solid beam: bulge it into an arc along the
-  // confocal-ellipsoid family for the two focal points, then symmetrically extrude that arc
-  // toward/away from the ellipsoids' center (width) and along its own surface normal
-  // (thickness) to give it a rectangular cross-section.
-  const centerY = (focalPoint1Y + focalPoint2Y) / 2
+  // Preview mode instead turns each edge into a solid beam: bend it around the single center
+  // point (straight leads into a Bezier, or a straight cut if the leads would cross), then
+  // symmetrically extrude that bent line toward/away from the center (width) and along its own
+  // surface normal (thickness) to give it a rectangular cross-section.
   const buildBeam = useCallback(
     (va: THREE.Vector3, vb: THREE.Vector3) => {
-      const arcPoints = computeArcEdgePoints(va, vb, focalPoint1Y, focalPoint2Y, edgeSegments)
+      const arcPoints = computeSmoothedEdgePoints(va, vb, centerY, bendDistance, edgeSegments)
       return extrudeArcToBeam(arcPoints, centerY, extrudeDistance, thickness)
     },
-    [focalPoint1Y, focalPoint2Y, edgeSegments, centerY, extrudeDistance, thickness],
+    [centerY, bendDistance, edgeSegments, extrudeDistance, thickness],
   )
 
   const edgeBeamGeometry = useMemo(() => {
@@ -272,16 +271,10 @@ export function DomeMesh({
           )
         })}
       {mode === 'preview' && (
-        <>
-          <mesh position={[0, focalPoint1Y, 0]}>
-            <sphereGeometry args={[0.032, 16, 16]} />
-            <meshStandardMaterial color="#f5e050" />
-          </mesh>
-          <mesh position={[0, focalPoint2Y, 0]}>
-            <sphereGeometry args={[0.032, 16, 16]} />
-            <meshStandardMaterial color="#f5e050" />
-          </mesh>
-        </>
+        <mesh position={[0, centerY, 0]}>
+          <sphereGeometry args={[0.032, 16, 16]} />
+          <meshStandardMaterial color="#f5e050" />
+        </mesh>
       )}
     </group>
   )

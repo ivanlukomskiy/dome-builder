@@ -37,11 +37,11 @@ function App() {
   const [addedFaces, setAddedFaces] = useState<Face[]>([])
   const [nextAddedVertexId, setNextAddedVertexId] = useState(-1)
 
-  // Focal points: two fixed points on the main axis (x = 0, radius = 0), each at a height
-  // given as a fraction of the model's total height, offset from the model's vertical center.
-  const [focalZ1, setFocalZ1] = useState(0)
-  const [focalZ2, setFocalZ2] = useState(0)
+  // Center point: a single fixed point on the main axis (x = 0, radius = 0), at a height given
+  // as a fraction of the model's total height, that every edge bends around.
+  const [centerZ, setCenterZ] = useState(0)
   const [edgeSegments, setEdgeSegments] = useState(8)
+  const [bendDistance, setBendDistance] = useState(0.1)
   const [extrudeDistance, setExtrudeDistance] = useState(0.05)
   const [thickness, setThickness] = useState(0.03)
 
@@ -63,8 +63,7 @@ function App() {
   )
 
   const modelExtent = useMemo(() => computeModelExtent(data.vertices), [data.vertices])
-  const focalPoint1Y = focalZ1 * modelExtent.totalHeight
-  const focalPoint2Y = focalZ2 * modelExtent.totalHeight
+  const centerY = centerZ * modelExtent.totalHeight
 
   // Default to showing half the layers (rounded up) whenever the shape/axis/subdivision choice changes.
   useEffect(() => {
@@ -210,12 +209,12 @@ function App() {
         onResetTransform={handleResetTransform}
         canAddPoints={canAddPoints}
         onAddPoints={handleAddPoints}
-        focalZ1={focalZ1}
-        onFocalZ1Change={setFocalZ1}
-        focalZ2={focalZ2}
-        onFocalZ2Change={setFocalZ2}
+        centerZ={centerZ}
+        onCenterZChange={setCenterZ}
         edgeSegments={edgeSegments}
         onEdgeSegmentsChange={setEdgeSegments}
+        bendDistance={bendDistance}
+        onBendDistanceChange={setBendDistance}
         extrudeDistance={extrudeDistance}
         onExtrudeDistanceChange={setExtrudeDistance}
         thickness={thickness}
@@ -236,8 +235,8 @@ function App() {
         selectedVertexIndices={selectedVertexIndices}
         addedVertices={transformedAddedVertices}
         addedFaces={addedFaces}
-        focalPoint1Y={focalPoint1Y}
-        focalPoint2Y={focalPoint2Y}
+        centerY={centerY}
+        bendDistance={bendDistance}
         edgeSegments={edgeSegments}
         extrudeDistance={extrudeDistance}
         thickness={thickness}

@@ -562,74 +562,157 @@ export function buildAddedGeometry(
   return { vertices, faces, nextId }
 }
 
-// A point's semi-major radius with respect to two foci on the main (vertical) axis: half the
-// sum of its distances to each focus. This is the "a" of the confocal ellipsoid of revolution
-// (foci on the axis) that the point sits on - the family of ellipsoids sharing those two foci.
-export function semiMajorRadius(point: THREE.Vector3, focal1Y: number, focal2Y: number): number {
-  const distTo1 = Math.hypot(point.x, point.y - focal1Y, point.z)
-  const distTo2 = Math.hypot(point.x, point.y - focal2Y, point.z)
-  return (distTo1 + distTo2) / 2
-}
-
 const RADIAL_EPS = 1e-9
 
-// Rescales (guideX, guideY, guideZ) away from the center between the two foci, along its own
-// direction from that center, until its semi-major radius equals `targetA`. Scaling along a
-// fixed direction from the foci's center always has exactly one solution (unlike solving for
-// height at a fixed horizontal offset, which can demand a horizontal reach the target
-// ellipsoid can't actually provide) - and it preserves the point's radial coordinates, since
-// its direction from the center is exactly what's being held fixed.
-function scaleToSemiMajorRadius(
-  guideX: number,
-  guideY: number,
-  guideZ: number,
-  centerY: number,
-  focalHalfDistance: number,
-  targetA: number,
+// The direction perpendicular to `radius` (a vector from the shared center to `origin`) that
+// lies in the plane spanned by `radius` and (target - origin), pointing toward `target`. This
+// is the direction an edge's endpoint bends along when smoothing: sideways relative to its own
+// radius from the center, angled toward the other endpoint.
+function perpendicularTowards(
+  origin: THREE.Vector3,
+  target: THREE.Vector3,
+  radius: THREE.Vector3,
 ): THREE.Vector3 {
-  const a = Math.max(targetA, focalHalfDistance)
-  const bSquared = Math.max(a * a - focalHalfDistance * focalHalfDistance, RADIAL_EPS)
-  const offAxisRadius = Math.hypot(guideX, guideZ)
-  const axialOffset = guideY - centerY
+  const toward = target.clone().sub(origin)
+  const radiusLenSq = radius.lengthSq()
+  if (radiusLenSq < RADIAL_EPS) return toward.normalize()
 
-  const denomSquared = (offAxisRadius * offAxisRadius) / bSquared + (axialOffset * axialOffset) / (a * a)
-  if (denomSquared < RADIAL_EPS) return new THREE.Vector3(0, centerY + a, 0)
-
-  const scale = 1 / Math.sqrt(denomSquared)
-  return new THREE.Vector3(guideX * scale, centerY + axialOffset * scale, guideZ * scale)
+  const perp = toward.addScaledVector(radius, -toward.dot(radius) / radiusLenSq)
+  if (perp.lengthSq() < RADIAL_EPS) {
+    // toward is parallel to radius (the edge points straight at/away from the center), so any
+    // direction perpendicular to radius is equally valid - just pick one.
+    const arbitrary =
+      Math.abs(radius.x) + Math.abs(radius.z) > RADIAL_EPS
+        ? new THREE.Vector3(-radius.z, 0, radius.x)
+        : new THREE.Vector3(1, 0, 0)
+    return arbitrary.normalize()
+  }
+  return perp.normalize()
 }
 
-// Turns a straight edge into `segments` sub-segments that bulge into a smooth arc: each
-// intermediate point starts as a plain straight-line interpolation (fixing its radial
-// coordinates - its direction from the center between the two foci), then is rescaled from
-// that center along that same direction until its semi-major radius matches the value
-// linearly interpolated between the edge's two endpoints - so the edge follows the
-// confocal-ellipsoid family from one endpoint's ellipsoid to the other's.
-export function computeArcEdgePoints(
+function cubicBezierPoint(
+  p0: THREE.Vector3,
   p1: THREE.Vector3,
   p2: THREE.Vector3,
-  focal1Y: number,
-  focal2Y: number,
+  p3: THREE.Vector3,
+  t: number,
+): THREE.Vector3 {
+  const u = 1 - t
+  const a = u * u * u
+  const b = 3 * u * u * t
+  const c = 3 * u * t * t
+  const d = t * t * t
+  return new THREE.Vector3(
+    a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+    a * p0.y + b * p1.y + c * p2.y + d * p3.y,
+    a * p0.z + b * p1.z + c * p2.z + d * p3.z,
+  )
+}
+
+// Samples `count + 1` points across a sequence of pieces (each with an approximate length and
+// a t -> point parameterization), spaced in proportion to each piece's length so the sampling
+// stays roughly even along the whole path regardless of how the pieces' own parameter spaces
+// compare to one another.
+function sampleAlongPieces(
+  pieces: { length: number; at: (t: number) => THREE.Vector3 }[],
+  count: number,
+): THREE.Vector3[] {
+  const totalLength = pieces.reduce((sum, piece) => sum + piece.length, 0)
+  const points: THREE.Vector3[] = []
+  for (let k = 0; k <= count; k++) {
+    const target = totalLength < RADIAL_EPS ? 0 : (k / count) * totalLength
+    let covered = 0
+    let point: THREE.Vector3 | null = null
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i]
+      const isLast = i === pieces.length - 1
+      if (target <= covered + piece.length || isLast) {
+        const localT = piece.length < RADIAL_EPS ? 0 : (target - covered) / piece.length
+        point = piece.at(Math.min(1, Math.max(0, localT)))
+        break
+      }
+      covered += piece.length
+    }
+    points.push(point!)
+  }
+  return points
+}
+
+// Bends a straight edge (p1 -> p2) around a single center point on the main (vertical) axis.
+// At each endpoint, step `bendDistance` sideways - perpendicular to that endpoint's own radius
+// from the center, angled toward the other endpoint - to get a short straight lead. If the two
+// leads would cross before running their full length, the bend is sharp enough that no curve is
+// needed: cut both leads at that intersection and use two plain straight segments. Otherwise,
+// join the leads' far ends with a cubic Bezier that continues each lead's own direction (so the
+// whole path stays tangent-continuous), giving a straight -> curved -> straight profile.
+export function computeSmoothedEdgePoints(
+  p1: THREE.Vector3,
+  p2: THREE.Vector3,
+  centerY: number,
+  bendDistance: number,
   segments: number,
 ): THREE.Vector3[] {
   const count = Math.max(1, Math.round(segments))
-  if (count === 1) return [p1, p2]
+  if (count === 1 || bendDistance < RADIAL_EPS) return [p1, p2]
 
-  const centerY = (focal1Y + focal2Y) / 2
-  const focalHalfDistance = Math.abs(focal2Y - focal1Y) / 2
-  const a1 = semiMajorRadius(p1, focal1Y, focal2Y)
-  const a2 = semiMajorRadius(p2, focal1Y, focal2Y)
-
-  const points: THREE.Vector3[] = []
-  for (let k = 0; k <= count; k++) {
-    const t = k / count
-    const guideX = p1.x + (p2.x - p1.x) * t
-    const guideZ = p1.z + (p2.z - p1.z) * t
-    const guideY = p1.y + (p2.y - p1.y) * t
-    const targetA = a1 + (a2 - a1) * t
-    points.push(scaleToSemiMajorRadius(guideX, guideY, guideZ, centerY, focalHalfDistance, targetA))
+  const center = new THREE.Vector3(0, centerY, 0)
+  const radius1 = p1.clone().sub(center)
+  const radius2 = p2.clone().sub(center)
+  if (radius1.lengthSq() < RADIAL_EPS || radius2.lengthSq() < RADIAL_EPS) {
+    return sampleAlongPieces([{ length: p1.distanceTo(p2), at: (t) => p1.clone().lerp(p2, t) }], count)
   }
-  return points
+
+  const perp1 = perpendicularTowards(p1, p2, radius1)
+  const perp2 = perpendicularTowards(p2, p1, radius2)
+
+  // Closest approach between the two lead rays p1 + t*perp1 and p2 + s*perp2 (t, s >= 0),
+  // solved by setting the connecting vector's dot product with each direction to zero.
+  const b = perp1.dot(perp2)
+  const denom = b * b - 1
+  const w0 = p1.clone().sub(p2)
+  const d = perp1.dot(w0)
+  const e = perp2.dot(w0)
+
+  let cut: THREE.Vector3 | null = null
+  if (Math.abs(denom) > RADIAL_EPS) {
+    const s = (d * b - e) / denom
+    const t = s * b - d
+    if (t >= -RADIAL_EPS && t <= bendDistance && s >= -RADIAL_EPS && s <= bendDistance) {
+      const onLead1 = p1.clone().addScaledVector(perp1, Math.max(0, t))
+      const onLead2 = p2.clone().addScaledVector(perp2, Math.max(0, s))
+      cut = onLead1.add(onLead2).multiplyScalar(0.5)
+    }
+  }
+
+  if (cut) {
+    return sampleAlongPieces(
+      [
+        { length: p1.distanceTo(cut), at: (t) => p1.clone().lerp(cut!, t) },
+        { length: cut.distanceTo(p2), at: (t) => cut!.clone().lerp(p2, t) },
+      ],
+      count,
+    )
+  }
+
+  const q1 = p1.clone().addScaledVector(perp1, bendDistance)
+  const q2 = p2.clone().addScaledVector(perp2, bendDistance)
+  // Handles continue each lead past q1/q2 by the same distance again, giving the Bezier
+  // tangent continuity with the straight leads at both ends.
+  const handle1 = q1.clone().addScaledVector(perp1, bendDistance)
+  const handle2 = q2.clone().addScaledVector(perp2, bendDistance)
+
+  return sampleAlongPieces(
+    [
+      { length: p1.distanceTo(q1), at: (t) => p1.clone().lerp(q1, t) },
+      {
+        length:
+          (q1.distanceTo(q2) + q1.distanceTo(handle1) + handle1.distanceTo(handle2) + handle2.distanceTo(q2)) / 2,
+        at: (t) => cubicBezierPoint(q1, handle1, handle2, q2, t),
+      },
+      { length: q2.distanceTo(p2), at: (t) => q2.clone().lerp(p2, t) },
+    ],
+    count,
+  )
 }
 
 function pushQuad(
@@ -643,13 +726,13 @@ function pushQuad(
   triangles.push(a, c, d)
 }
 
-// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a solid beam: each
-// point is offset by half `width` toward the ellipsoid center and half away from it (giving
-// the strut its width, in the same plane as the arc and the ellipsoids' center), and then that
-// whole ribbon is offset by half `thickness` each way along its own surface normal (giving it
-// depth, perpendicular to that plane). The original arc stays exactly centered inside the
-// resulting box-shaped tube. Returns a flat, non-indexed list of triangle vertices (three per
-// triangle, ready to feed straight into a BufferGeometry) covering all four side faces.
+// Symmetrically extrudes an arc (as produced by computeSmoothedEdgePoints) into a solid beam:
+// each point is offset by half `width` toward the shared center and half away from it (giving
+// the strut its width, in the same plane as the arc and the center), and then that whole ribbon
+// is offset by half `thickness` each way along its own surface normal (giving it depth,
+// perpendicular to that plane). The original arc stays exactly centered inside the resulting
+// box-shaped tube. Returns a flat, non-indexed list of triangle vertices (three per triangle,
+// ready to feed straight into a BufferGeometry) covering all four side faces.
 export function extrudeArcToBeam(
   arcPoints: THREE.Vector3[],
   centerY: number,
