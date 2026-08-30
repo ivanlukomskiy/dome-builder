@@ -1,0 +1,32 @@
+import { Canvas } from '@react-three/fiber'
+import { Grid, OrbitControls } from '@react-three/drei'
+import type { PolyhedronData } from '../lib/polyhedra'
+import { DomeMesh } from './DomeMesh'
+
+interface ViewportProps {
+  data: PolyhedronData
+  layerCount: number
+}
+
+export function Viewport({ data, layerCount }: ViewportProps) {
+  return (
+    <div className="viewport">
+      <Canvas camera={{ position: [3.5, 2.8, 4], fov: 45 }}>
+        <color attach="background" args={['#12141a']} />
+        <ambientLight intensity={0.7} />
+        <directionalLight position={[5, 8, 5]} intensity={1.1} />
+        <directionalLight position={[-4, -2, -4]} intensity={0.25} />
+        <Grid
+          args={[10, 10]}
+          position={[0, -1.6, 0]}
+          cellColor="#2a2e39"
+          sectionColor="#3a4050"
+          fadeDistance={20}
+          infiniteGrid
+        />
+        <DomeMesh data={data} layerCount={layerCount} />
+        <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+      </Canvas>
+    </div>
+  )
+}
