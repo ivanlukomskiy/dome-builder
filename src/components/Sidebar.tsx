@@ -41,10 +41,8 @@ interface SidebarProps {
   onResetTransform: () => void
   canAddPoints: boolean
   onAddPoints: () => void
-  focalZ1: number
-  onFocalZ1Change: (value: number) => void
-  focalZ2: number
-  onFocalZ2Change: (value: number) => void
+  centerZ: number
+  onCenterZChange: (value: number) => void
   edgeSegments: number
   onEdgeSegmentsChange: (value: number) => void
   extrudeDistance: number
@@ -100,10 +98,8 @@ export function Sidebar({
   onResetTransform,
   canAddPoints,
   onAddPoints,
-  focalZ1,
-  onFocalZ1Change,
-  focalZ2,
-  onFocalZ2Change,
+  centerZ,
+  onCenterZChange,
   edgeSegments,
   onEdgeSegmentsChange,
   extrudeDistance,
@@ -132,7 +128,7 @@ export function Sidebar({
     onTransformChange(field, toRadians ? (num * Math.PI) / 180 : num)
   }
 
-  const handleFocalChange = (onChange: (value: number) => void, raw: string) => {
+  const handleCenterChange = (onChange: (value: number) => void, raw: string) => {
     if (raw === '' || raw === '-') return
     const num = Number(raw)
     if (Number.isNaN(num)) return
@@ -234,23 +230,14 @@ export function Sidebar({
 
       {mode === 'preview' && (
         <section className="control-group">
-          <h2>Focal Points</h2>
+          <h2>Center</h2>
           <div className="transform-field">
-            <label>Focal point 1 (z)</label>
+            <label>Center (z)</label>
             <input
               type="number"
               step={0.05}
-              value={focalZ1}
-              onChange={(e) => handleFocalChange(onFocalZ1Change, e.target.value)}
-            />
-          </div>
-          <div className="transform-field">
-            <label>Focal point 2 (z)</label>
-            <input
-              type="number"
-              step={0.05}
-              value={focalZ2}
-              onChange={(e) => handleFocalChange(onFocalZ2Change, e.target.value)}
+              value={centerZ}
+              onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
             />
           </div>
         </section>
@@ -269,9 +256,7 @@ export function Sidebar({
             />
             <span className="layer-count">{edgeSegments} segments</span>
           </div>
-          <p className="hint">
-            Each edge is bent through the confocal ellipsoids of the two focal points.
-          </p>
+          <p className="hint">Each edge is bent through the spheres centered on that point.</p>
           <div className="layer-slider-row">
             <input
               type="range"
@@ -284,7 +269,7 @@ export function Sidebar({
             <span className="layer-count">{extrudeDistance.toFixed(3)}</span>
           </div>
           <p className="hint">
-            Width: extrudes each arc symmetrically toward/away from the ellipsoids' center.
+            Width: extrudes each arc symmetrically toward/away from the sphere's center.
           </p>
           <div className="layer-slider-row">
             <input

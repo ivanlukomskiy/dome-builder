@@ -20,8 +20,7 @@ interface DomeMeshProps {
   selectedVertexIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
-  focalPoint1Y: number
-  focalPoint2Y: number
+  centerY: number
   edgeSegments: number
   extrudeDistance: number
   thickness: number
@@ -37,8 +36,7 @@ export function DomeMesh({
   selectedVertexIndices,
   addedVertices,
   addedFaces,
-  focalPoint1Y,
-  focalPoint2Y,
+  centerY,
   edgeSegments,
   extrudeDistance,
   thickness,
@@ -116,16 +114,15 @@ export function DomeMesh({
   }, [sliced])
 
   // Preview mode instead turns each edge into a solid beam: bulge it into an arc along the
-  // confocal-ellipsoid family for the two focal points, then symmetrically extrude that arc
-  // toward/away from the ellipsoids' center (width) and along its own surface normal
+  // sphere family centered on the dome's center point, then symmetrically extrude that arc
+  // toward/away from the sphere's center (width) and along its own surface normal
   // (thickness) to give it a rectangular cross-section.
-  const centerY = (focalPoint1Y + focalPoint2Y) / 2
   const buildBeam = useCallback(
     (va: THREE.Vector3, vb: THREE.Vector3) => {
-      const arcPoints = computeArcEdgePoints(va, vb, focalPoint1Y, focalPoint2Y, edgeSegments)
+      const arcPoints = computeArcEdgePoints(va, vb, centerY, edgeSegments)
       return extrudeArcToBeam(arcPoints, centerY, extrudeDistance, thickness)
     },
-    [focalPoint1Y, focalPoint2Y, edgeSegments, centerY, extrudeDistance, thickness],
+    [centerY, edgeSegments, extrudeDistance, thickness],
   )
 
   const edgeBeamGeometry = useMemo(() => {
@@ -272,16 +269,10 @@ export function DomeMesh({
           )
         })}
       {mode === 'preview' && (
-        <>
-          <mesh position={[0, focalPoint1Y, 0]}>
-            <sphereGeometry args={[0.032, 16, 16]} />
-            <meshStandardMaterial color="#f5e050" />
-          </mesh>
-          <mesh position={[0, focalPoint2Y, 0]}>
-            <sphereGeometry args={[0.032, 16, 16]} />
-            <meshStandardMaterial color="#f5e050" />
-          </mesh>
-        </>
+        <mesh position={[0, centerY, 0]}>
+          <sphereGeometry args={[0.032, 16, 16]} />
+          <meshStandardMaterial color="#f5e050" />
+        </mesh>
       )}
     </group>
   )

@@ -14,8 +14,7 @@ interface ViewportProps {
   selectedVertexIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
-  focalPoint1Y: number
-  focalPoint2Y: number
+  centerY: number
   edgeSegments: number
   extrudeDistance: number
   thickness: number
@@ -32,8 +31,7 @@ export function Viewport({
   selectedVertexIndices,
   addedVertices,
   addedFaces,
-  focalPoint1Y,
-  focalPoint2Y,
+  centerY,
   edgeSegments,
   extrudeDistance,
   thickness,
@@ -64,8 +62,7 @@ export function Viewport({
           selectedVertexIndices={selectedVertexIndices}
           addedVertices={addedVertices}
           addedFaces={addedFaces}
-          focalPoint1Y={focalPoint1Y}
-          focalPoint2Y={focalPoint2Y}
+          centerY={centerY}
           edgeSegments={edgeSegments}
           extrudeDistance={extrudeDistance}
           thickness={thickness}
