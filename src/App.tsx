@@ -7,12 +7,16 @@ import {
   buildAddedGeometry,
   computeModelExtent,
   computePolyhedron,
+  computeTransformToPosition,
+  computeVisibleVertexIds,
   DEFAULT_VERTEX_TRANSFORM,
   findLayerGroup,
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
   resolveVertexPosition,
+  scaleToRadius,
   SHAPE_AXES,
+  sphereRadius,
 } from './lib/polyhedra'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
@@ -186,6 +190,56 @@ function App() {
     setSelectedVertexIndices(new Set())
   }
 
+  // Snaps every (non-deleted) vertex onto a common sphere around the gravity center: first the
+  // mean of everyone's current distance from that center, then each vertex is moved along its
+  // own ray from the center out to that mean distance, replacing any transform it already had.
+  const handleAdjustToSphere = () => {
+    const canonicalIds = data.vertices.map((_, i) => i).filter((i) => !deletedVertexIndices.has(i))
+    const addedIds = Array.from(addedVertices.keys()).filter((id) => !deletedVertexIndices.has(id))
+    const allIds = [...canonicalIds, ...addedIds]
+    if (allIds.length === 0) return
+
+    const currentPositionOf = (id: number) =>
+      resolveVertexPosition(id, transformedVertices, transformedAddedVertices)
+    const canonicalPositionOf = (id: number) =>
+      id >= 0 ? data.vertices[id] : addedVertices.get(id)!
+
+    const meanRadius =
+      allIds.reduce((sum, id) => sum + sphereRadius(currentPositionOf(id), centerY), 0) /
+      allIds.length
+
+    setVertexTransforms((prev) => {
+      const next = new Map(prev)
+      for (const id of allIds) {
+        const current = currentPositionOf(id)
+        const target = scaleToRadius(current.x, current.y, current.z, centerY, meanRadius)
+        const t = computeTransformToPosition(canonicalPositionOf(id), target, modelExtent)
+        if (isDefaultVertexTransform(t)) next.delete(id)
+        else next.set(id, t)
+      }
+      return next
+    })
+  }
+
+  // Lowers (or raises) the gravity center so it sits at the same height as the currently
+  // visible model's lowest vertex - i.e. the dome's base rests exactly on the center's plane.
+  const handleGroundCenter = () => {
+    const visibleIds = computeVisibleVertexIds(
+      data,
+      transformedVertices,
+      layerCount,
+      deletedVertexIndices,
+      addedFaces,
+    )
+    if (visibleIds.length === 0) return
+    const positionOf = (id: number) => resolveVertexPosition(id, transformedVertices, transformedAddedVertices)
+    const minY = visibleIds.reduce(
+      (min, id) => Math.min(min, positionOf(id).y),
+      Infinity,
+    )
+    setCenterZ(modelExtent.totalHeight > 0 ? minY / modelExtent.totalHeight : 0)
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -209,8 +263,10 @@ function App() {
         onResetTransform={handleResetTransform}
         canAddPoints={canAddPoints}
         onAddPoints={handleAddPoints}
+        onAdjustToSphere={handleAdjustToSphere}
         centerZ={centerZ}
         onCenterZChange={setCenterZ}
+        onGroundCenter={handleGroundCenter}
         edgeSegments={edgeSegments}
         onEdgeSegmentsChange={setEdgeSegments}
         extrudeDistance={extrudeDistance}

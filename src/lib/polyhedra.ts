@@ -511,6 +511,29 @@ export function removeVertices(
   }
 }
 
+// Every vertex id currently visible in the model: canonical vertices kept by the layer slice
+// and not deleted, plus added vertices whose whole triangle (all three anchors) is still
+// visible too - the same rule DomeMesh uses to decide what to render.
+export function computeVisibleVertexIds(
+  data: PolyhedronData,
+  transformedVertices: THREE.Vector3[],
+  layerCount: number,
+  deletedVertexIndices: ReadonlySet<number>,
+  addedFaces: Face[],
+): number[] {
+  const sliced = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
+  const kept = removeVertices(sliced, deletedVertexIndices)
+  const keptSet = new Set(kept.keptVertexIndices)
+
+  const ids = new Set(kept.keptVertexIndices)
+  for (const face of addedFaces) {
+    const visible = face.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx)))
+    if (!visible) continue
+    for (const idx of face) if (idx < 0) ids.add(idx)
+  }
+  return Array.from(ids)
+}
+
 // Vertex indices are non-negative for the shape's own (canonical) vertices, looked up in
 // `canonicalVertices`. A user-added vertex instead gets a negative id, looked up in `added` -
 // this keeps the two spaces collision-free without needing a combined array.
@@ -573,7 +596,7 @@ const RADIAL_EPS = 1e-9
 // Rescales (guideX, guideY, guideZ) away from the center, along its own direction from that
 // center, until its distance from the center equals `targetRadius`. Preserves the point's
 // direction from the center, since that's exactly what's being held fixed.
-function scaleToRadius(
+export function scaleToRadius(
   guideX: number,
   guideY: number,
   guideZ: number,
@@ -586,6 +609,26 @@ function scaleToRadius(
 
   const scale = targetRadius / dist
   return new THREE.Vector3(guideX * scale, centerY + axialOffset * scale, guideZ * scale)
+}
+
+// The (z, r, theta) transform that, applied to `canonicalPos` via applyVertexTransform, lands
+// exactly on `targetPos`. Used to bake an absolute target position (e.g. a point moved onto a
+// given sphere) into the same cylindrical-offset representation manual edits use, replacing
+// whatever transform (if any) was there before.
+export function computeTransformToPosition(
+  canonicalPos: THREE.Vector3,
+  targetPos: THREE.Vector3,
+  extent: ModelExtent,
+): VertexTransform {
+  const baseCylRadius = Math.hypot(canonicalPos.x, canonicalPos.z)
+  const targetCylRadius = Math.hypot(targetPos.x, targetPos.z)
+  const baseAngle = Math.atan2(canonicalPos.z, canonicalPos.x)
+  const targetAngle = Math.atan2(targetPos.z, targetPos.x)
+  return {
+    z: extent.totalHeight > RADIAL_EPS ? (targetPos.y - canonicalPos.y) / extent.totalHeight : 0,
+    r: extent.maxRadius > RADIAL_EPS ? (targetCylRadius - baseCylRadius) / extent.maxRadius : 0,
+    theta: targetCylRadius > RADIAL_EPS ? targetAngle - baseAngle : 0,
+  }
 }
 
 // Turns a straight edge into `segments` sub-segments that bulge into a smooth arc: each

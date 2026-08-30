@@ -41,8 +41,10 @@ interface SidebarProps {
   onResetTransform: () => void
   canAddPoints: boolean
   onAddPoints: () => void
+  onAdjustToSphere: () => void
   centerZ: number
   onCenterZChange: (value: number) => void
+  onGroundCenter: () => void
   edgeSegments: number
   onEdgeSegmentsChange: (value: number) => void
   extrudeDistance: number
@@ -100,8 +102,10 @@ export function Sidebar({
   onResetTransform,
   canAddPoints,
   onAddPoints,
+  onAdjustToSphere,
   centerZ,
   onCenterZChange,
+  onGroundCenter,
   edgeSegments,
   onEdgeSegmentsChange,
   extrudeDistance,
@@ -232,20 +236,22 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'preview' && (
-        <section className="control-group">
-          <h2>Center</h2>
-          <div className="transform-field">
-            <label>Center (z)</label>
-            <input
-              type="number"
-              step={0.05}
-              value={centerZ}
-              onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
-            />
-          </div>
-        </section>
-      )}
+      <section className="control-group">
+        <h2>Center</h2>
+        <div className="transform-field">
+          <label>Center (z)</label>
+          <input
+            type="number"
+            step={0.05}
+            value={centerZ}
+            onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
+          />
+        </div>
+        <div className="button-row">
+          <button onClick={onGroundCenter}>Ground the Center</button>
+        </div>
+        <p className="hint">Sets the center&rsquo;s height to match the lowest visible vertex.</p>
+      </section>
 
       {mode === 'preview' && (
         <section className="control-group">
@@ -353,6 +359,13 @@ export function Sidebar({
           {selectedCount > 0 && !canAddPoints && (
             <p className="hint">Select an even number of points to pair them up.</p>
           )}
+          <div className="button-row">
+            <button onClick={onAdjustToSphere}>Adjust to a Sphere</button>
+          </div>
+          <p className="hint">
+            Moves every vertex along its own line from the gravity center out to the mean of
+            everyone's current distance from that center.
+          </p>
         </section>
       )}
 

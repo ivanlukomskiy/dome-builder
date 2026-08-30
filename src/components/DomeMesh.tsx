@@ -271,12 +271,10 @@ export function DomeMesh({
             </mesh>
           )
         })}
-      {mode === 'preview' && (
-        <mesh position={[0, centerY, 0]}>
-          <sphereGeometry args={[0.032, 16, 16]} />
-          <meshStandardMaterial color="#f5e050" />
-        </mesh>
-      )}
+      <mesh position={[0, centerY, 0]}>
+        <sphereGeometry args={[0.032, 16, 16]} />
+        <meshStandardMaterial color="#f5e050" />
+      </mesh>
     </group>
   )
 }
