@@ -43,6 +43,8 @@ function App() {
   const [edgeSegments, setEdgeSegments] = useState(8)
   const [extrudeDistance, setExtrudeDistance] = useState(0.05)
   const [thickness, setThickness] = useState(0.03)
+  const [jointDistance, setJointDistance] = useState(0.03)
+  const [isolatedBeamKey, setIsolatedBeamKey] = useState<string | null>(null)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
@@ -79,6 +81,7 @@ function App() {
     setAddedVertices(new Map())
     setAddedFaces([])
     setNextAddedVertexId(-1)
+    setIsolatedBeamKey(null)
   }, [shape, axis, subdivisions, layerCount])
 
   const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
@@ -138,6 +141,11 @@ function App() {
 
   const handleDeselectAll = () => {
     setSelectedVertexIndices(new Set())
+    setIsolatedBeamKey(null)
+  }
+
+  const handleBeamClick = (key: string) => {
+    setIsolatedBeamKey((prev) => (prev === key ? null : key))
   }
 
   const handleCancelAll = () => {
@@ -216,6 +224,8 @@ function App() {
         onExtrudeDistanceChange={setExtrudeDistance}
         thickness={thickness}
         onThicknessChange={setThickness}
+        jointDistance={jointDistance}
+        onJointDistanceChange={setJointDistance}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -236,7 +246,10 @@ function App() {
         edgeSegments={edgeSegments}
         extrudeDistance={extrudeDistance}
         thickness={thickness}
+        jointDistance={jointDistance}
+        isolatedBeamKey={isolatedBeamKey}
         onVertexClick={handleVertexClick}
+        onBeamClick={handleBeamClick}
         onDeselectAll={handleDeselectAll}
       />
     </div>

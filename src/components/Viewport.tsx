@@ -18,7 +18,10 @@ interface ViewportProps {
   edgeSegments: number
   extrudeDistance: number
   thickness: number
+  jointDistance: number
+  isolatedBeamKey: string | null
   onVertexClick: (index: number) => void
+  onBeamClick: (key: string) => void
   onDeselectAll: () => void
 }
 
@@ -35,7 +38,10 @@ export function Viewport({
   edgeSegments,
   extrudeDistance,
   thickness,
+  jointDistance,
+  isolatedBeamKey,
   onVertexClick,
+  onBeamClick,
   onDeselectAll,
 }: ViewportProps) {
   return (
@@ -66,7 +72,10 @@ export function Viewport({
           edgeSegments={edgeSegments}
           extrudeDistance={extrudeDistance}
           thickness={thickness}
+          jointDistance={jointDistance}
+          isolatedBeamKey={isolatedBeamKey}
           onVertexClick={onVertexClick}
+          onBeamClick={onBeamClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>

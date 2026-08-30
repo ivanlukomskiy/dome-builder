@@ -24,7 +24,15 @@ interface DomeMeshProps {
   edgeSegments: number
   extrudeDistance: number
   thickness: number
+  jointDistance: number
+  isolatedBeamKey: string | null
   onVertexClick: (index: number) => void
+  onBeamClick: (key: string) => void
+}
+
+interface Beam {
+  key: string
+  geometry: THREE.BufferGeometry
 }
 
 export function DomeMesh({
@@ -40,7 +48,10 @@ export function DomeMesh({
   edgeSegments,
   extrudeDistance,
   thickness,
+  jointDistance,
+  isolatedBeamKey,
   onVertexClick,
+  onBeamClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
     const layered = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
@@ -120,42 +131,47 @@ export function DomeMesh({
   const buildBeam = useCallback(
     (va: THREE.Vector3, vb: THREE.Vector3) => {
       const arcPoints = computeArcEdgePoints(va, vb, centerY, edgeSegments)
-      return extrudeArcToBeam(arcPoints, centerY, extrudeDistance, thickness)
+      return extrudeArcToBeam(arcPoints, centerY, extrudeDistance, thickness, jointDistance)
     },
-    [centerY, edgeSegments, extrudeDistance, thickness],
+    [centerY, edgeSegments, extrudeDistance, thickness, jointDistance],
   )
 
-  const edgeBeamGeometry = useMemo(() => {
-    const positions: number[] = []
-    for (const [a, b] of sliced.keptEdges) {
+  // One beam per edge (rather than a single merged geometry) so each strut can be clicked and
+  // isolated independently in preview mode.
+  const edgeBeams = useMemo((): Beam[] => {
+    return sliced.keptEdges.map(([a, b]) => {
+      const positions: number[] = []
       for (const v of buildBeam(sliced.vertices[a], sliced.vertices[b])) {
         positions.push(v.x, v.y, v.z)
       }
-    }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geom.computeVertexNormals()
-    return geom
+      const geom = new THREE.BufferGeometry()
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+      geom.computeVertexNormals()
+      return { key: `edge:${a}:${b}`, geometry: geom }
+    })
   }, [sliced, buildBeam])
 
-  const addedEdgeBeamGeometry = useMemo(() => {
-    const positions: number[] = []
-    for (const [i0, i1, i2] of visibleAddedFaces) {
+  const addedEdgeBeams = useMemo((): Beam[] => {
+    const beams: Beam[] = []
+    visibleAddedFaces.forEach(([i0, i1, i2], faceIdx) => {
       const v0 = resolvePosition(i0)
       const v1 = resolvePosition(i1)
       const v2 = resolvePosition(i2)
-      for (const [a, b] of [
+      const faceEdges = [
         [v0, v1],
         [v1, v2],
         [v2, v0],
-      ] as const) {
+      ] as const
+      faceEdges.forEach(([a, b], edgeIdx) => {
+        const positions: number[] = []
         for (const v of buildBeam(a, b)) positions.push(v.x, v.y, v.z)
-      }
-    }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geom.computeVertexNormals()
-    return geom
+        const geom = new THREE.BufferGeometry()
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+        geom.computeVertexNormals()
+        beams.push({ key: `added:${faceIdx}:${edgeIdx}`, geometry: geom })
+      })
+    })
+    return beams
   }, [visibleAddedFaces, resolvePosition, buildBeam])
 
   const faceGeometry = useMemo(() => {
@@ -218,16 +234,56 @@ export function DomeMesh({
           <lineBasicMaterial color="#571b3a" />
         </lineSegments>
       )}
-      {mode === 'preview' && (
-        <mesh geometry={edgeBeamGeometry}>
-          <meshStandardMaterial color="#5b9bd5" side={THREE.DoubleSide} roughness={0.5} />
-        </mesh>
-      )}
-      {mode === 'preview' && (
-        <mesh geometry={addedEdgeBeamGeometry}>
-          <meshStandardMaterial color="#d55b9b" side={THREE.DoubleSide} roughness={0.5} />
-        </mesh>
-      )}
+      {mode === 'preview' &&
+        edgeBeams.map(({ key, geometry }) => {
+          const isFaded = isolatedBeamKey !== null && isolatedBeamKey !== key
+          return (
+            <mesh
+              key={key}
+              geometry={geometry}
+              onClick={(e) => {
+                e.stopPropagation()
+                onBeamClick(key)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <meshStandardMaterial
+                color="#5b9bd5"
+                side={THREE.DoubleSide}
+                roughness={0.5}
+                transparent={isFaded}
+                opacity={isFaded ? 0.2 : 1}
+                depthWrite={!isFaded}
+              />
+            </mesh>
+          )
+        })}
+      {mode === 'preview' &&
+        addedEdgeBeams.map(({ key, geometry }) => {
+          const isFaded = isolatedBeamKey !== null && isolatedBeamKey !== key
+          return (
+            <mesh
+              key={key}
+              geometry={geometry}
+              onClick={(e) => {
+                e.stopPropagation()
+                onBeamClick(key)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <meshStandardMaterial
+                color="#d55b9b"
+                side={THREE.DoubleSide}
+                roughness={0.5}
+                transparent={isFaded}
+                opacity={isFaded ? 0.2 : 1}
+                depthWrite={!isFaded}
+              />
+            </mesh>
+          )
+        })}
       {mode === 'edit' &&
         sliced.keptVertexIndices.map((idx) => {
           const v = sliced.vertices[idx]

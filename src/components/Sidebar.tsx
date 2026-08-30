@@ -49,6 +49,8 @@ interface SidebarProps {
   onExtrudeDistanceChange: (value: number) => void
   thickness: number
   onThicknessChange: (value: number) => void
+  jointDistance: number
+  onJointDistanceChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -106,6 +108,8 @@ export function Sidebar({
   onExtrudeDistanceChange,
   thickness,
   onThicknessChange,
+  jointDistance,
+  onJointDistanceChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -285,6 +289,21 @@ export function Sidebar({
           <p className="hint">
             Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
             it into a solid beam.
+          </p>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={0.15}
+              step={0.0025}
+              value={jointDistance}
+              onChange={(e) => onJointDistanceChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{jointDistance.toFixed(4)}</span>
+          </div>
+          <p className="hint">
+            Joint distance: squares off each strut end flat for this distance, trimming the
+            arc's natural curve back to a straight mating face.
           </p>
         </section>
       )}

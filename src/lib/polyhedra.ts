@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping'
 
 export type ShapeType = 'octahedron' | 'icosahedron' | 'goldberg'
 export type AxisType = 'vertex' | 'face' | 'edge'
@@ -628,58 +629,257 @@ function pushQuad(
   triangles.push(a, c, d)
 }
 
-// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a solid beam: each
-// point is offset by half `width` toward the sphere center and half away from it (giving
-// the strut its width, in the same plane as the arc and the sphere's center), and then that
-// whole ribbon is offset by half `thickness` each way along its own surface normal (giving it
-// depth, perpendicular to that plane). The original arc stays exactly centered inside the
-// resulting box-shaped tube. Returns a flat, non-indexed list of triangle vertices (three per
-// triangle, ready to feed straight into a BufferGeometry) covering all four side faces.
+type Point2 = [number, number]
+
+function sub2(a: Point2, b: Point2): Point2 {
+  return [a[0] - b[0], a[1] - b[1]]
+}
+
+function normalize2(p: Point2): Point2 {
+  const len = Math.hypot(p[0], p[1])
+  return len < RADIAL_EPS ? [1, 0] : [p[0] / len, p[1] / len]
+}
+
+function addScaled2(p: Point2, dir: Point2, dist: number): Point2 {
+  return [p[0] + dir[0] * dist, p[1] + dir[1] * dist]
+}
+
+// The rectangle sitting on a strut's end, used to square off the joint: one side is the
+// "side line" (innerPt-outerPt, length `width`), extending `depth` inward along the strut
+// (tangentIn) so that unioning it into the main polygon overwrites whatever the arc's
+// curvature did to the boundary near the tip with a flat, perpendicular end.
+function buildPositiveJointRect(
+  innerPt: Point2,
+  outerPt: Point2,
+  tangentIn: Point2,
+  depth: number,
+): Ring {
+  const innerFar = addScaled2(innerPt, tangentIn, depth)
+  const outerFar = addScaled2(outerPt, tangentIn, depth)
+  return [outerPt, innerPt, innerFar, outerFar, outerPt]
+}
+
+// The two rectangles flanking a positive joint rectangle's `depth`-length sides, each
+// running from that side out past the strut's width by a large margin. Subtracting them
+// trims away any part of the (curved) main polygon that pokes out past the flat joint
+// rectangle's straight edges near the tip.
+function buildNegativeJointRects(
+  innerPt: Point2,
+  outerPt: Point2,
+  tangentIn: Point2,
+  depth: number,
+  radialOut: Point2,
+  margin: number,
+): [Ring, Ring] {
+  const innerFar = addScaled2(innerPt, tangentIn, depth)
+  const outerFar = addScaled2(outerPt, tangentIn, depth)
+  const outerRect: Ring = [
+    outerPt,
+    outerFar,
+    addScaled2(outerFar, radialOut, margin),
+    addScaled2(outerPt, radialOut, margin),
+    outerPt,
+  ]
+  const innerRect: Ring = [
+    innerPt,
+    innerFar,
+    addScaled2(innerFar, radialOut, -margin),
+    addScaled2(innerPt, radialOut, -margin),
+    innerPt,
+  ]
+  return [outerRect, innerRect]
+}
+
+// Rounds every coordinate to a fixed grid before it reaches the clipping library. Two points
+// that are mathematically meant to coincide (e.g. a corner shared by two independently-built
+// rectangles) can otherwise differ in their last couple of significant digits depending on the
+// arithmetic path used to compute each - well within visual tolerance at this model's scale,
+// but enough to make the sweep-line algorithm's segment ordering inconsistent and fail to close
+// its output rings.
+const COORD_SNAP = 1e9
+
+function snapRing(ring: Ring): Ring {
+  return ring.map(([x, y]): [number, number] => [
+    Math.round(x * COORD_SNAP) / COORD_SNAP,
+    Math.round(y * COORD_SNAP) / COORD_SNAP,
+  ])
+}
+
+function ringToVec2(ring: Ring): THREE.Vector2[] {
+  // polygon-clipping's output rings repeat their first point at the end; drop it so the
+  // triangulator and wall-edge walk don't see a degenerate zero-length closing edge.
+  const points = ring.map(([x, y]) => new THREE.Vector2(x, y))
+  const first = points[0]
+  const last = points[points.length - 1]
+  if (points.length > 1 && first.distanceToSquared(last) < RADIAL_EPS) points.pop()
+  return points
+}
+
+// Builds a strut as a single flat "joint" polygon - the arc's width-wide ribbon with its two
+// ends squared off against the arc's own curvature - then thickens that polygon into a solid
+// beam. The joint polygon is assembled via 2D boolean ops, all within the plane shared by the
+// arc, the sphere center, and the strut's own offset directions:
+//   - main polygon: the ribbon traced by offsetting every arc point by half `width` toward and
+//     away from the sphere center (inner/outer chains), closed off at both ends.
+//   - positive joint rectangles: a `jointDistance`-deep rectangle at each end, flush with that
+//     end's side line, reaching `jointDistance` back into the strut.
+//   - negative joint rectangles: two per end, flanking the positive rectangle's inward-facing
+//     sides and extending far past the strip's width, used to trim the curved boundary back to
+//     that rectangle's straight edges.
+// main ∪ positive rectangles, minus the negative rectangles, replaces the naturally curved ends
+// with flat ones - a stable mating face for whatever joins struts at a shared vertex. The result
+// is then thickened symmetrically along the plane's own normal by `thickness`, giving it depth.
 export function extrudeArcToBeam(
   arcPoints: THREE.Vector3[],
   centerY: number,
   width: number,
   thickness: number,
+  jointDistance: number,
 ): THREE.Vector3[] {
+  const n = arcPoints.length
+  if (n < 2) return []
+
   const halfWidth = width / 2
   const halfThickness = thickness / 2
   const center = new THREE.Vector3(0, centerY, 0)
-  const last = arcPoints.length - 1
 
-  const cross = arcPoints.map((p, i) => {
-    const towardCenter = center.clone().sub(p)
-    if (towardCenter.lengthSq() < RADIAL_EPS) towardCenter.set(0, 1, 0)
-    else towardCenter.normalize()
+  // Every arc point is a chord point rescaled along its own direction from `center`, so the
+  // whole arc - and everything offset from it toward/away from that same center - stays within
+  // the plane spanned by the two endpoints and the center.
+  let normal = new THREE.Vector3().crossVectors(
+    arcPoints[0].clone().sub(center),
+    arcPoints[n - 1].clone().sub(center),
+  )
+  if (normal.lengthSq() < RADIAL_EPS) {
+    const mid = arcPoints[Math.floor(n / 2)]
+    normal = new THREE.Vector3().crossVectors(arcPoints[0].clone().sub(center), mid.clone().sub(center))
+  }
+  if (normal.lengthSq() < RADIAL_EPS) normal.set(0, 0, 1)
+  normal.normalize()
 
-    const prev = arcPoints[Math.max(i - 1, 0)]
-    const next = arcPoints[Math.min(i + 1, last)]
-    const tangent = next.clone().sub(prev)
-    if (tangent.lengthSq() < RADIAL_EPS) tangent.set(1, 0, 0)
-    else tangent.normalize()
+  let e1 = arcPoints[0].clone().sub(center)
+  if (e1.lengthSq() < RADIAL_EPS) e1 = arcPoints[n - 1].clone().sub(center)
+  e1.normalize()
+  const e2 = new THREE.Vector3().crossVectors(normal, e1).normalize()
+  // e1 x e2 === normal by construction, so a counter-clockwise triangle in (e1, e2) 2D
+  // coordinates faces +normal in 3D - relied on below to keep cap/wall winding consistent.
 
-    const binormal = new THREE.Vector3().crossVectors(tangent, towardCenter)
-    if (binormal.lengthSq() < RADIAL_EPS) binormal.crossVectors(tangent, new THREE.Vector3(0, 1, 0))
-    if (binormal.lengthSq() < RADIAL_EPS) binormal.set(0, 0, 1)
-    else binormal.normalize()
+  const to2D = (p: THREE.Vector3): Point2 => {
+    const rel = p.clone().sub(center)
+    return [rel.dot(e1), rel.dot(e2)]
+  }
+  const to3D = ([x, y]: Point2): THREE.Vector3 =>
+    center.clone().addScaledVector(e1, x).addScaledVector(e2, y)
 
-    const outer = p.clone().addScaledVector(towardCenter, -halfWidth)
-    const inner = p.clone().addScaledVector(towardCenter, halfWidth)
-    return {
-      outerTop: outer.clone().addScaledVector(binormal, halfThickness),
-      outerBottom: outer.clone().addScaledVector(binormal, -halfThickness),
-      innerTop: inner.clone().addScaledVector(binormal, halfThickness),
-      innerBottom: inner.clone().addScaledVector(binormal, -halfThickness),
-    }
-  })
+  const pts2D = arcPoints.map(to2D)
+  // The center is the 2D origin, so a point's own direction from the origin is exactly the
+  // radial (toward/away from sphere center) direction at that point.
+  const radialOut = pts2D.map(normalize2)
+
+  const inner: Point2[] = pts2D.map((p, i) => addScaled2(p, radialOut[i], -halfWidth))
+  const outer: Point2[] = pts2D.map((p, i) => addScaled2(p, radialOut[i], halfWidth))
+
+  const mainRing: Ring = [...outer, ...[...inner].reverse(), outer[0]]
+
+  const totalLen = pts2D.reduce(
+    (sum, p, i) => (i === 0 ? 0 : sum + Math.hypot(p[0] - pts2D[i - 1][0], p[1] - pts2D[i - 1][1])),
+    0,
+  )
+  // Keep the two joint zones from overlapping past the strut's midpoint.
+  const depth = Math.max(0, Math.min(jointDistance, totalLen / 2 - 1e-6))
+
+  const positiveRects: Ring[] = []
+  const negativeRects: Ring[] = []
+  if (depth > RADIAL_EPS) {
+    // "Large" only needs to clear whatever bulge the arc's own curvature could plausibly put
+    // past the strip's straight edge near a tip - bounded by `depth` and the local curvature,
+    // never anywhere near the model's own scale. A margin comparable to that scale risks
+    // sweeping the negative rectangles into each other (or into unrelated parts of this same
+    // strut's geometry), which starves the clipping library's floating point sweep of
+    // precision and makes it fail to close its output rings.
+    const margin = Math.max(halfWidth, depth) * 4
+    const startTangentIn = normalize2(sub2(pts2D[1], pts2D[0]))
+    const endTangentIn = normalize2(sub2(pts2D[n - 2], pts2D[n - 1]))
+
+    positiveRects.push(buildPositiveJointRect(inner[0], outer[0], startTangentIn, depth))
+    positiveRects.push(buildPositiveJointRect(inner[n - 1], outer[n - 1], endTangentIn, depth))
+    negativeRects.push(
+      ...buildNegativeJointRects(inner[0], outer[0], startTangentIn, depth, radialOut[0], margin),
+    )
+    negativeRects.push(
+      ...buildNegativeJointRects(
+        inner[n - 1],
+        outer[n - 1],
+        endTangentIn,
+        depth,
+        radialOut[n - 1],
+        margin,
+      ),
+    )
+  }
+
+  // At extreme slider combinations (e.g. joint distance and width both maxed out on a short
+  // edge) the resulting rectangles can overlap in ways that push the clipping library's
+  // floating-point sweep past what it can resolve. Rather than let a single strut's numerical
+  // edge case blank the whole preview, fall back to the plain main polygon (no joint squaring)
+  // for that strut alone.
+  let jointPolygons: MultiPolygon
+  try {
+    const snappedMainRing = snapRing(mainRing)
+    const unioned =
+      positiveRects.length > 0
+        ? polygonClipping.union(
+            [snappedMainRing],
+            ...positiveRects.map((r): Polygon => [snapRing(r)]),
+          )
+        : [[snappedMainRing]]
+    jointPolygons =
+      negativeRects.length > 0
+        ? polygonClipping.difference(unioned, ...negativeRects.map((r): Polygon => [snapRing(r)]))
+        : unioned
+  } catch {
+    jointPolygons = [[mainRing]]
+  }
 
   const triangles: THREE.Vector3[] = []
-  for (let i = 0; i < cross.length - 1; i++) {
-    const a = cross[i]
-    const b = cross[i + 1]
-    pushQuad(triangles, a.outerTop, b.outerTop, b.outerBottom, a.outerBottom) // outer face
-    pushQuad(triangles, a.innerBottom, b.innerBottom, b.innerTop, a.innerTop) // inner face
-    pushQuad(triangles, a.outerTop, a.innerTop, b.innerTop, b.outerTop) // top face
-    pushQuad(triangles, a.outerBottom, b.outerBottom, b.innerBottom, a.innerBottom) // bottom face
+  for (const polygon of jointPolygons) {
+    if (polygon.length === 0) continue
+    const [outerRing, ...holeRings] = polygon
+    const contour = ringToVec2(outerRing)
+    const holes = holeRings.map(ringToVec2)
+    const combined = [...contour, ...holes.flat()]
+    const capTriangles = THREE.ShapeUtils.triangulateShape(contour, holes)
+
+    for (const [i0, i1, i2] of capTriangles) {
+      const p0 = combined[i0]
+      const p1 = combined[i1]
+      const p2 = combined[i2]
+      const signedArea2 = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y)
+      const [a, b, c] = signedArea2 >= 0 ? [p0, p1, p2] : [p0, p2, p1]
+
+      const aTop = to3D([a.x, a.y]).addScaledVector(normal, halfThickness)
+      const bTop = to3D([b.x, b.y]).addScaledVector(normal, halfThickness)
+      const cTop = to3D([c.x, c.y]).addScaledVector(normal, halfThickness)
+      triangles.push(aTop, bTop, cTop)
+
+      const aBottom = to3D([a.x, a.y]).addScaledVector(normal, -halfThickness)
+      const bBottom = to3D([b.x, b.y]).addScaledVector(normal, -halfThickness)
+      const cBottom = to3D([c.x, c.y]).addScaledVector(normal, -halfThickness)
+      triangles.push(aBottom, cBottom, bBottom)
+    }
+
+    for (const ring of [contour, ...holes]) {
+      const m = ring.length
+      for (let i = 0; i < m; i++) {
+        const a = ring[i]
+        const b = ring[(i + 1) % m]
+        const aTop = to3D([a.x, a.y]).addScaledVector(normal, halfThickness)
+        const aBottom = to3D([a.x, a.y]).addScaledVector(normal, -halfThickness)
+        const bTop = to3D([b.x, b.y]).addScaledVector(normal, halfThickness)
+        const bBottom = to3D([b.x, b.y]).addScaledVector(normal, -halfThickness)
+        pushQuad(triangles, aTop, aBottom, bBottom, bTop)
+      }
+    }
   }
   return triangles
 }
