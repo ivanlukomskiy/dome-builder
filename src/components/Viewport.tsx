@@ -1,10 +1,12 @@
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import type * as THREE from 'three'
+import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
 
 interface ViewportProps {
+  mode: ViewMode
   data: PolyhedronData
   layerCount: number
   transformedVertices: THREE.Vector3[]
@@ -12,11 +14,17 @@ interface ViewportProps {
   selectedVertexIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
+  focalPoint1Y: number
+  focalPoint2Y: number
+  edgeSegments: number
+  extrudeDistance: number
+  thickness: number
   onVertexClick: (index: number) => void
   onDeselectAll: () => void
 }
 
 export function Viewport({
+  mode,
   data,
   layerCount,
   transformedVertices,
@@ -24,6 +32,11 @@ export function Viewport({
   selectedVertexIndices,
   addedVertices,
   addedFaces,
+  focalPoint1Y,
+  focalPoint2Y,
+  edgeSegments,
+  extrudeDistance,
+  thickness,
   onVertexClick,
   onDeselectAll,
 }: ViewportProps) {
@@ -43,6 +56,7 @@ export function Viewport({
           infiniteGrid
         />
         <DomeMesh
+          mode={mode}
           data={data}
           layerCount={layerCount}
           transformedVertices={transformedVertices}
@@ -50,6 +64,11 @@ export function Viewport({
           selectedVertexIndices={selectedVertexIndices}
           addedVertices={addedVertices}
           addedFaces={addedFaces}
+          focalPoint1Y={focalPoint1Y}
+          focalPoint2Y={focalPoint2Y}
+          edgeSegments={edgeSegments}
+          extrudeDistance={extrudeDistance}
+          thickness={thickness}
           onVertexClick={onVertexClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />

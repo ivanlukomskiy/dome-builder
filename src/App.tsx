@@ -5,6 +5,7 @@ import {
   applyAddedVertexTransforms,
   applyVertexTransforms,
   buildAddedGeometry,
+  computeModelExtent,
   computePolyhedron,
   DEFAULT_VERTEX_TRANSFORM,
   findLayerGroup,
@@ -16,7 +17,10 @@ import {
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
 
+export type ViewMode = 'edit' | 'preview'
+
 function App() {
+  const [mode, setMode] = useState<ViewMode>('edit')
   const [shape, setShape] = useState<ShapeType>('octahedron')
   const [axis, setAxis] = useState<AxisType>('vertex')
   const [subdivisions, setSubdivisions] = useState(3)
@@ -32,6 +36,14 @@ function App() {
   const [addedVertices, setAddedVertices] = useState<Map<number, THREE.Vector3>>(new Map())
   const [addedFaces, setAddedFaces] = useState<Face[]>([])
   const [nextAddedVertexId, setNextAddedVertexId] = useState(-1)
+
+  // Focal points: two fixed points on the main axis (x = 0, radius = 0), each at a height
+  // given as a fraction of the model's total height, offset from the model's vertical center.
+  const [focalZ1, setFocalZ1] = useState(0)
+  const [focalZ2, setFocalZ2] = useState(0)
+  const [edgeSegments, setEdgeSegments] = useState(8)
+  const [extrudeDistance, setExtrudeDistance] = useState(0.05)
+  const [thickness, setThickness] = useState(0.03)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
@@ -49,6 +61,10 @@ function App() {
     () => applyAddedVertexTransforms(addedVertices, data.vertices, vertexTransforms),
     [addedVertices, data.vertices, vertexTransforms],
   )
+
+  const modelExtent = useMemo(() => computeModelExtent(data.vertices), [data.vertices])
+  const focalPoint1Y = focalZ1 * modelExtent.totalHeight
+  const focalPoint2Y = focalZ2 * modelExtent.totalHeight
 
   // Default to showing half the layers (rounded up) whenever the shape/axis/subdivision choice changes.
   useEffect(() => {
@@ -174,6 +190,8 @@ function App() {
   return (
     <div className="app">
       <Sidebar
+        mode={mode}
+        onModeChange={setMode}
         shape={shape}
         onShapeChange={setShape}
         axis={axis}
@@ -192,6 +210,16 @@ function App() {
         onResetTransform={handleResetTransform}
         canAddPoints={canAddPoints}
         onAddPoints={handleAddPoints}
+        focalZ1={focalZ1}
+        onFocalZ1Change={setFocalZ1}
+        focalZ2={focalZ2}
+        onFocalZ2Change={setFocalZ2}
+        edgeSegments={edgeSegments}
+        onEdgeSegmentsChange={setEdgeSegments}
+        extrudeDistance={extrudeDistance}
+        onExtrudeDistanceChange={setExtrudeDistance}
+        thickness={thickness}
+        onThicknessChange={setThickness}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -200,6 +228,7 @@ function App() {
         onCancelAll={handleCancelAll}
       />
       <Viewport
+        mode={mode}
         data={data}
         layerCount={layerCount}
         transformedVertices={transformedVertices}
@@ -207,6 +236,11 @@ function App() {
         selectedVertexIndices={selectedVertexIndices}
         addedVertices={transformedAddedVertices}
         addedFaces={addedFaces}
+        focalPoint1Y={focalPoint1Y}
+        focalPoint2Y={focalPoint2Y}
+        edgeSegments={edgeSegments}
+        extrudeDistance={extrudeDistance}
+        thickness={thickness}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />

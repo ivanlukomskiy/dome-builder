@@ -561,3 +561,140 @@ export function buildAddedGeometry(
 
   return { vertices, faces, nextId }
 }
+
+// A point's semi-major radius with respect to two foci on the main (vertical) axis: half the
+// sum of its distances to each focus. This is the "a" of the confocal ellipsoid of revolution
+// (foci on the axis) that the point sits on - the family of ellipsoids sharing those two foci.
+export function semiMajorRadius(point: THREE.Vector3, focal1Y: number, focal2Y: number): number {
+  const distTo1 = Math.hypot(point.x, point.y - focal1Y, point.z)
+  const distTo2 = Math.hypot(point.x, point.y - focal2Y, point.z)
+  return (distTo1 + distTo2) / 2
+}
+
+const RADIAL_EPS = 1e-9
+
+// Rescales (guideX, guideY, guideZ) away from the center between the two foci, along its own
+// direction from that center, until its semi-major radius equals `targetA`. Scaling along a
+// fixed direction from the foci's center always has exactly one solution (unlike solving for
+// height at a fixed horizontal offset, which can demand a horizontal reach the target
+// ellipsoid can't actually provide) - and it preserves the point's radial coordinates, since
+// its direction from the center is exactly what's being held fixed.
+function scaleToSemiMajorRadius(
+  guideX: number,
+  guideY: number,
+  guideZ: number,
+  centerY: number,
+  focalHalfDistance: number,
+  targetA: number,
+): THREE.Vector3 {
+  const a = Math.max(targetA, focalHalfDistance)
+  const bSquared = Math.max(a * a - focalHalfDistance * focalHalfDistance, RADIAL_EPS)
+  const offAxisRadius = Math.hypot(guideX, guideZ)
+  const axialOffset = guideY - centerY
+
+  const denomSquared = (offAxisRadius * offAxisRadius) / bSquared + (axialOffset * axialOffset) / (a * a)
+  if (denomSquared < RADIAL_EPS) return new THREE.Vector3(0, centerY + a, 0)
+
+  const scale = 1 / Math.sqrt(denomSquared)
+  return new THREE.Vector3(guideX * scale, centerY + axialOffset * scale, guideZ * scale)
+}
+
+// Turns a straight edge into `segments` sub-segments that bulge into a smooth arc: each
+// intermediate point starts as a plain straight-line interpolation (fixing its radial
+// coordinates - its direction from the center between the two foci), then is rescaled from
+// that center along that same direction until its semi-major radius matches the value
+// linearly interpolated between the edge's two endpoints - so the edge follows the
+// confocal-ellipsoid family from one endpoint's ellipsoid to the other's.
+export function computeArcEdgePoints(
+  p1: THREE.Vector3,
+  p2: THREE.Vector3,
+  focal1Y: number,
+  focal2Y: number,
+  segments: number,
+): THREE.Vector3[] {
+  const count = Math.max(1, Math.round(segments))
+  if (count === 1) return [p1, p2]
+
+  const centerY = (focal1Y + focal2Y) / 2
+  const focalHalfDistance = Math.abs(focal2Y - focal1Y) / 2
+  const a1 = semiMajorRadius(p1, focal1Y, focal2Y)
+  const a2 = semiMajorRadius(p2, focal1Y, focal2Y)
+
+  const points: THREE.Vector3[] = []
+  for (let k = 0; k <= count; k++) {
+    const t = k / count
+    const guideX = p1.x + (p2.x - p1.x) * t
+    const guideZ = p1.z + (p2.z - p1.z) * t
+    const guideY = p1.y + (p2.y - p1.y) * t
+    const targetA = a1 + (a2 - a1) * t
+    points.push(scaleToSemiMajorRadius(guideX, guideY, guideZ, centerY, focalHalfDistance, targetA))
+  }
+  return points
+}
+
+function pushQuad(
+  triangles: THREE.Vector3[],
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  c: THREE.Vector3,
+  d: THREE.Vector3,
+): void {
+  triangles.push(a, b, c)
+  triangles.push(a, c, d)
+}
+
+// Symmetrically extrudes an arc (as produced by computeArcEdgePoints) into a solid beam: each
+// point is offset by half `width` toward the ellipsoid center and half away from it (giving
+// the strut its width, in the same plane as the arc and the ellipsoids' center), and then that
+// whole ribbon is offset by half `thickness` each way along its own surface normal (giving it
+// depth, perpendicular to that plane). The original arc stays exactly centered inside the
+// resulting box-shaped tube. Returns a flat, non-indexed list of triangle vertices (three per
+// triangle, ready to feed straight into a BufferGeometry) covering all four side faces.
+export function extrudeArcToBeam(
+  arcPoints: THREE.Vector3[],
+  centerY: number,
+  width: number,
+  thickness: number,
+): THREE.Vector3[] {
+  const halfWidth = width / 2
+  const halfThickness = thickness / 2
+  const center = new THREE.Vector3(0, centerY, 0)
+  const last = arcPoints.length - 1
+
+  const cross = arcPoints.map((p, i) => {
+    const towardCenter = center.clone().sub(p)
+    if (towardCenter.lengthSq() < RADIAL_EPS) towardCenter.set(0, 1, 0)
+    else towardCenter.normalize()
+
+    const prev = arcPoints[Math.max(i - 1, 0)]
+    const next = arcPoints[Math.min(i + 1, last)]
+    const tangent = next.clone().sub(prev)
+    if (tangent.lengthSq() < RADIAL_EPS) tangent.set(1, 0, 0)
+    else tangent.normalize()
+
+    const binormal = new THREE.Vector3().crossVectors(tangent, towardCenter)
+    if (binormal.lengthSq() < RADIAL_EPS) binormal.crossVectors(tangent, new THREE.Vector3(0, 1, 0))
+    if (binormal.lengthSq() < RADIAL_EPS) binormal.set(0, 0, 1)
+    else binormal.normalize()
+
+    const outer = p.clone().addScaledVector(towardCenter, -halfWidth)
+    const inner = p.clone().addScaledVector(towardCenter, halfWidth)
+    return {
+      outerTop: outer.clone().addScaledVector(binormal, halfThickness),
+      outerBottom: outer.clone().addScaledVector(binormal, -halfThickness),
+      innerTop: inner.clone().addScaledVector(binormal, halfThickness),
+      innerBottom: inner.clone().addScaledVector(binormal, -halfThickness),
+    }
+  })
+
+  const triangles: THREE.Vector3[] = []
+  for (let i = 0; i < cross.length - 1; i++) {
+    const a = cross[i]
+    const b = cross[i + 1]
+    pushQuad(triangles, a.outerTop, b.outerTop, b.outerBottom, a.outerBottom) // outer face
+    pushQuad(triangles, a.innerBottom, b.innerBottom, b.innerTop, a.innerTop) // inner face
+    pushQuad(triangles, a.outerTop, a.innerTop, b.innerTop, b.outerTop) // top face
+    pushQuad(triangles, a.outerBottom, b.outerBottom, b.innerBottom, a.innerBottom) // bottom face
+  }
+  return triangles
+}

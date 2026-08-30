@@ -1,3 +1,4 @@
+import type { ViewMode } from '../App'
 import type {
   AxisType,
   PolyhedronData,
@@ -14,7 +15,14 @@ import {
   SHAPE_LABELS,
 } from '../lib/polyhedra'
 
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: 'edit', label: 'Edit' },
+  { value: 'preview', label: 'Preview' },
+]
+
 interface SidebarProps {
+  mode: ViewMode
+  onModeChange: (mode: ViewMode) => void
   shape: ShapeType
   onShapeChange: (shape: ShapeType) => void
   axis: AxisType
@@ -33,6 +41,16 @@ interface SidebarProps {
   onResetTransform: () => void
   canAddPoints: boolean
   onAddPoints: () => void
+  focalZ1: number
+  onFocalZ1Change: (value: number) => void
+  focalZ2: number
+  onFocalZ2Change: (value: number) => void
+  edgeSegments: number
+  onEdgeSegmentsChange: (value: number) => void
+  extrudeDistance: number
+  onExtrudeDistanceChange: (value: number) => void
+  thickness: number
+  onThicknessChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -62,6 +80,8 @@ function sharedTransformValue(
 }
 
 export function Sidebar({
+  mode,
+  onModeChange,
   shape,
   onShapeChange,
   axis,
@@ -80,6 +100,16 @@ export function Sidebar({
   onResetTransform,
   canAddPoints,
   onAddPoints,
+  focalZ1,
+  onFocalZ1Change,
+  focalZ2,
+  onFocalZ2Change,
+  edgeSegments,
+  onEdgeSegmentsChange,
+  extrudeDistance,
+  onExtrudeDistanceChange,
+  thickness,
+  onThicknessChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -102,123 +132,226 @@ export function Sidebar({
     onTransformChange(field, toRadians ? (num * Math.PI) / 180 : num)
   }
 
+  const handleFocalChange = (onChange: (value: number) => void, raw: string) => {
+    if (raw === '' || raw === '-') return
+    const num = Number(raw)
+    if (Number.isNaN(num)) return
+    onChange(num)
+  }
+
   return (
     <aside className="sidebar">
       <h1>Dome Builder</h1>
 
       <section className="control-group">
-        <h2>Shape</h2>
-        {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
-          <label key={s} className="radio-row">
-            <input
-              type="radio"
-              name="shape"
-              checked={shape === s}
-              onChange={() => onShapeChange(s)}
-            />
-            {SHAPE_LABELS[s]}
-          </label>
-        ))}
-      </section>
-
-      <section className="control-group">
-        <h2>Main axis</h2>
-        {axisOptions.map((opt) => (
-          <label key={opt.value} className="radio-row">
-            <input
-              type="radio"
-              name="axis"
-              checked={axis === opt.value}
-              onChange={() => onAxisChange(opt.value)}
-            />
-            <span>
-              {opt.label}
-              <span className="hint">
-                {opt.axisCount} axes &middot; {opt.fold}-fold
-              </span>
-            </span>
-          </label>
-        ))}
-      </section>
-
-      <section className="control-group">
-        <h2>Subdivisions</h2>
-        <div className="layer-slider-row">
-          <input
-            type="range"
-            min={MIN_SUBDIVISIONS}
-            max={MAX_SUBDIVISIONS}
-            value={subdivisions}
-            onChange={(e) => onSubdivisionsChange(Number(e.target.value))}
-          />
-          <span className="layer-count">
-            {subdivisions} / {MAX_SUBDIVISIONS}
-          </span>
-        </div>
-      </section>
-
-      <section className="control-group">
-        <h2>Layers</h2>
-        <div className="layer-slider-row">
-          <input
-            type="range"
-            min={1}
-            max={maxLayers}
-            value={layerCount}
-            onChange={(e) => onLayerCountChange(Number(e.target.value))}
-          />
-          <span className="layer-count">
-            {layerCount} / {maxLayers}
-          </span>
-        </div>
-      </section>
-
-      <section className="control-group">
-        <h2>Edit vertices</h2>
         <div className="segmented-control">
-          {SELECTION_MODE_OPTIONS.map((opt) => (
+          {VIEW_MODE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              className={selectionMode === opt.value ? 'active' : ''}
-              onClick={() => onSelectionModeChange(opt.value)}
+              className={mode === opt.value ? 'active' : ''}
+              onClick={() => onModeChange(opt.value)}
             >
               {opt.label}
             </button>
           ))}
         </div>
-        <p className="hint">
-          {selectedCount > 0
-            ? `${selectedCount} ${selectedCount !== 1 ? 'vertices' : 'vertex'} selected`
-            : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
-        </p>
-        <div className="button-row">
-          <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
-            Delete
-          </button>
-          <button disabled={!canUndo} onClick={onUndo}>
-            Undo
-          </button>
-          <button disabled={!canRedo} onClick={onRedo}>
-            Redo
-          </button>
-          <button
-            disabled={!canUndo && !canRedo && selectedCount === 0}
-            onClick={onCancelAll}
-          >
-            Cancel All
-          </button>
-        </div>
-        <div className="button-row">
-          <button disabled={!canAddPoints} onClick={onAddPoints}>
-            Add Points
-          </button>
-        </div>
-        {selectedCount > 0 && !canAddPoints && (
-          <p className="hint">Select an even number of points to pair them up.</p>
-        )}
       </section>
 
-      {selectedCount > 0 && (
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Shape</h2>
+          {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
+            <label key={s} className="radio-row">
+              <input
+                type="radio"
+                name="shape"
+                checked={shape === s}
+                onChange={() => onShapeChange(s)}
+              />
+              {SHAPE_LABELS[s]}
+            </label>
+          ))}
+        </section>
+      )}
+
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Main axis</h2>
+          {axisOptions.map((opt) => (
+            <label key={opt.value} className="radio-row">
+              <input
+                type="radio"
+                name="axis"
+                checked={axis === opt.value}
+                onChange={() => onAxisChange(opt.value)}
+              />
+              <span>
+                {opt.label}
+                <span className="hint">
+                  {opt.axisCount} axes &middot; {opt.fold}-fold
+                </span>
+              </span>
+            </label>
+          ))}
+        </section>
+      )}
+
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Subdivisions</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={MIN_SUBDIVISIONS}
+              max={MAX_SUBDIVISIONS}
+              value={subdivisions}
+              onChange={(e) => onSubdivisionsChange(Number(e.target.value))}
+            />
+            <span className="layer-count">
+              {subdivisions} / {MAX_SUBDIVISIONS}
+            </span>
+          </div>
+        </section>
+      )}
+
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Layers</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={1}
+              max={maxLayers}
+              value={layerCount}
+              onChange={(e) => onLayerCountChange(Number(e.target.value))}
+            />
+            <span className="layer-count">
+              {layerCount} / {maxLayers}
+            </span>
+          </div>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Focal Points</h2>
+          <div className="transform-field">
+            <label>Focal point 1 (z)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={focalZ1}
+              onChange={(e) => handleFocalChange(onFocalZ1Change, e.target.value)}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Focal point 2 (z)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={focalZ2}
+              onChange={(e) => handleFocalChange(onFocalZ2Change, e.target.value)}
+            />
+          </div>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Edge Curvature</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={1}
+              max={32}
+              value={edgeSegments}
+              onChange={(e) => onEdgeSegmentsChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{edgeSegments} segments</span>
+          </div>
+          <p className="hint">
+            Each edge is bent through the confocal ellipsoids of the two focal points.
+          </p>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={0.3}
+              step={0.005}
+              value={extrudeDistance}
+              onChange={(e) => onExtrudeDistanceChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{extrudeDistance.toFixed(3)}</span>
+          </div>
+          <p className="hint">
+            Width: extrudes each arc symmetrically toward/away from the ellipsoids' center.
+          </p>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={0.15}
+              step={0.0025}
+              value={thickness}
+              onChange={(e) => onThicknessChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{thickness.toFixed(4)}</span>
+          </div>
+          <p className="hint">
+            Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
+            it into a solid beam.
+          </p>
+        </section>
+      )}
+
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Edit vertices</h2>
+          <div className="segmented-control">
+            {SELECTION_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={selectionMode === opt.value ? 'active' : ''}
+                onClick={() => onSelectionModeChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            {selectedCount > 0
+              ? `${selectedCount} ${selectedCount !== 1 ? 'vertices' : 'vertex'} selected`
+              : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
+          </p>
+          <div className="button-row">
+            <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
+              Delete
+            </button>
+            <button disabled={!canUndo} onClick={onUndo}>
+              Undo
+            </button>
+            <button disabled={!canRedo} onClick={onRedo}>
+              Redo
+            </button>
+            <button
+              disabled={!canUndo && !canRedo && selectedCount === 0}
+              onClick={onCancelAll}
+            >
+              Cancel All
+            </button>
+          </div>
+          <div className="button-row">
+            <button disabled={!canAddPoints} onClick={onAddPoints}>
+              Add Points
+            </button>
+          </div>
+          {selectedCount > 0 && !canAddPoints && (
+            <p className="hint">Select an even number of points to pair them up.</p>
+          )}
+        </section>
+      )}
+
+      {mode === 'edit' && selectedCount > 0 && (
         <section className="control-group">
           <h2>Transform</h2>
           <div className="transform-field">
