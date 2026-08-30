@@ -1,3 +1,4 @@
+import type { ViewMode } from '../App'
 import type {
   AxisType,
   PolyhedronData,
@@ -14,7 +15,14 @@ import {
   SHAPE_LABELS,
 } from '../lib/polyhedra'
 
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: 'edit', label: 'Edit' },
+  { value: 'preview', label: 'Preview' },
+]
+
 interface SidebarProps {
+  mode: ViewMode
+  onModeChange: (mode: ViewMode) => void
   shape: ShapeType
   onShapeChange: (shape: ShapeType) => void
   axis: AxisType
@@ -66,6 +74,8 @@ function sharedTransformValue(
 }
 
 export function Sidebar({
+  mode,
+  onModeChange,
   shape,
   onShapeChange,
   axis,
@@ -120,6 +130,20 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <h1>Dome Builder</h1>
+
+      <section className="control-group">
+        <div className="segmented-control">
+          {VIEW_MODE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={mode === opt.value ? 'active' : ''}
+              onClick={() => onModeChange(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="control-group">
         <h2>Shape</h2>
@@ -188,74 +212,78 @@ export function Sidebar({
         </div>
       </section>
 
-      <section className="control-group">
-        <h2>Focal Points</h2>
-        <div className="transform-field">
-          <label>Focal point 1 (z)</label>
-          <input
-            type="number"
-            step={0.05}
-            value={focalZ1}
-            onChange={(e) => handleFocalChange(onFocalZ1Change, e.target.value)}
-          />
-        </div>
-        <div className="transform-field">
-          <label>Focal point 2 (z)</label>
-          <input
-            type="number"
-            step={0.05}
-            value={focalZ2}
-            onChange={(e) => handleFocalChange(onFocalZ2Change, e.target.value)}
-          />
-        </div>
-      </section>
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Focal Points</h2>
+          <div className="transform-field">
+            <label>Focal point 1 (z)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={focalZ1}
+              onChange={(e) => handleFocalChange(onFocalZ1Change, e.target.value)}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Focal point 2 (z)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={focalZ2}
+              onChange={(e) => handleFocalChange(onFocalZ2Change, e.target.value)}
+            />
+          </div>
+        </section>
+      )}
 
-      <section className="control-group">
-        <h2>Edit vertices</h2>
-        <div className="segmented-control">
-          {SELECTION_MODE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={selectionMode === opt.value ? 'active' : ''}
-              onClick={() => onSelectionModeChange(opt.value)}
-            >
-              {opt.label}
+      {mode === 'edit' && (
+        <section className="control-group">
+          <h2>Edit vertices</h2>
+          <div className="segmented-control">
+            {SELECTION_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={selectionMode === opt.value ? 'active' : ''}
+                onClick={() => onSelectionModeChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            {selectedCount > 0
+              ? `${selectedCount} ${selectedCount !== 1 ? 'vertices' : 'vertex'} selected`
+              : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
+          </p>
+          <div className="button-row">
+            <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
+              Delete
             </button>
-          ))}
-        </div>
-        <p className="hint">
-          {selectedCount > 0
-            ? `${selectedCount} ${selectedCount !== 1 ? 'vertices' : 'vertex'} selected`
-            : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
-        </p>
-        <div className="button-row">
-          <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
-            Delete
-          </button>
-          <button disabled={!canUndo} onClick={onUndo}>
-            Undo
-          </button>
-          <button disabled={!canRedo} onClick={onRedo}>
-            Redo
-          </button>
-          <button
-            disabled={!canUndo && !canRedo && selectedCount === 0}
-            onClick={onCancelAll}
-          >
-            Cancel All
-          </button>
-        </div>
-        <div className="button-row">
-          <button disabled={!canAddPoints} onClick={onAddPoints}>
-            Add Points
-          </button>
-        </div>
-        {selectedCount > 0 && !canAddPoints && (
-          <p className="hint">Select an even number of points to pair them up.</p>
-        )}
-      </section>
+            <button disabled={!canUndo} onClick={onUndo}>
+              Undo
+            </button>
+            <button disabled={!canRedo} onClick={onRedo}>
+              Redo
+            </button>
+            <button
+              disabled={!canUndo && !canRedo && selectedCount === 0}
+              onClick={onCancelAll}
+            >
+              Cancel All
+            </button>
+          </div>
+          <div className="button-row">
+            <button disabled={!canAddPoints} onClick={onAddPoints}>
+              Add Points
+            </button>
+          </div>
+          {selectedCount > 0 && !canAddPoints && (
+            <p className="hint">Select an even number of points to pair them up.</p>
+          )}
+        </section>
+      )}
 
-      {selectedCount > 0 && (
+      {mode === 'edit' && selectedCount > 0 && (
         <section className="control-group">
           <h2>Transform</h2>
           <div className="transform-field">

@@ -1,10 +1,12 @@
 import { useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
+import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
 
 interface DomeMeshProps {
+  mode: ViewMode
   data: PolyhedronData
   layerCount: number
   transformedVertices: THREE.Vector3[]
@@ -18,6 +20,7 @@ interface DomeMeshProps {
 }
 
 export function DomeMesh({
+  mode,
   data,
   layerCount,
   transformedVertices,
@@ -151,52 +154,58 @@ export function DomeMesh({
       <lineSegments geometry={addedEdgeGeometry}>
         <lineBasicMaterial color="#571b3a" />
       </lineSegments>
-      {sliced.keptVertexIndices.map((idx) => {
-        const v = sliced.vertices[idx]
-        const isSelected = selectedVertexIndices.has(idx)
-        return (
-          <mesh
-            key={idx}
-            position={[v.x, v.y, v.z]}
-            onClick={(e) => {
-              e.stopPropagation()
-              onVertexClick(idx)
-            }}
-            onPointerOver={handlePointerOver}
-            onPointerOut={handlePointerOut}
-          >
-            <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
-            <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
+      {mode === 'edit' &&
+        sliced.keptVertexIndices.map((idx) => {
+          const v = sliced.vertices[idx]
+          const isSelected = selectedVertexIndices.has(idx)
+          return (
+            <mesh
+              key={idx}
+              position={[v.x, v.y, v.z]}
+              onClick={(e) => {
+                e.stopPropagation()
+                onVertexClick(idx)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
+              <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
+            </mesh>
+          )
+        })}
+      {mode === 'edit' &&
+        Array.from(visibleAddedVertexIds).map((idx) => {
+          const v = addedVertices.get(idx)!
+          const isSelected = selectedVertexIndices.has(idx)
+          return (
+            <mesh
+              key={idx}
+              position={[v.x, v.y, v.z]}
+              onClick={(e) => {
+                e.stopPropagation()
+                onVertexClick(idx)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
+              <meshStandardMaterial color={isSelected ? '#f5a623' : '#e0729f'} />
+            </mesh>
+          )
+        })}
+      {mode === 'preview' && (
+        <>
+          <mesh position={[0, focalPoint1Y, 0]}>
+            <sphereGeometry args={[0.032, 16, 16]} />
+            <meshStandardMaterial color="#f5e050" />
           </mesh>
-        )
-      })}
-      {Array.from(visibleAddedVertexIds).map((idx) => {
-        const v = addedVertices.get(idx)!
-        const isSelected = selectedVertexIndices.has(idx)
-        return (
-          <mesh
-            key={idx}
-            position={[v.x, v.y, v.z]}
-            onClick={(e) => {
-              e.stopPropagation()
-              onVertexClick(idx)
-            }}
-            onPointerOver={handlePointerOver}
-            onPointerOut={handlePointerOut}
-          >
-            <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
-            <meshStandardMaterial color={isSelected ? '#f5a623' : '#e0729f'} />
+          <mesh position={[0, focalPoint2Y, 0]}>
+            <sphereGeometry args={[0.032, 16, 16]} />
+            <meshStandardMaterial color="#f5e050" />
           </mesh>
-        )
-      })}
-      <mesh position={[0, focalPoint1Y, 0]}>
-        <sphereGeometry args={[0.032, 16, 16]} />
-        <meshStandardMaterial color="#f5e050" />
-      </mesh>
-      <mesh position={[0, focalPoint2Y, 0]}>
-        <sphereGeometry args={[0.032, 16, 16]} />
-        <meshStandardMaterial color="#f5e050" />
-      </mesh>
+        </>
+      )}
     </group>
   )
 }

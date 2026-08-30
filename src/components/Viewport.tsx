@@ -1,10 +1,12 @@
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import type * as THREE from 'three'
+import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
 
 interface ViewportProps {
+  mode: ViewMode
   data: PolyhedronData
   layerCount: number
   transformedVertices: THREE.Vector3[]
@@ -19,6 +21,7 @@ interface ViewportProps {
 }
 
 export function Viewport({
+  mode,
   data,
   layerCount,
   transformedVertices,
@@ -47,6 +50,7 @@ export function Viewport({
           infiniteGrid
         />
         <DomeMesh
+          mode={mode}
           data={data}
           layerCount={layerCount}
           transformedVertices={transformedVertices}

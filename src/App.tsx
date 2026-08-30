@@ -17,7 +17,10 @@ import {
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
 
+export type ViewMode = 'edit' | 'preview'
+
 function App() {
+  const [mode, setMode] = useState<ViewMode>('edit')
   const [shape, setShape] = useState<ShapeType>('octahedron')
   const [axis, setAxis] = useState<AxisType>('vertex')
   const [subdivisions, setSubdivisions] = useState(3)
@@ -184,6 +187,8 @@ function App() {
   return (
     <div className="app">
       <Sidebar
+        mode={mode}
+        onModeChange={setMode}
         shape={shape}
         onShapeChange={setShape}
         axis={axis}
@@ -214,6 +219,7 @@ function App() {
         onCancelAll={handleCancelAll}
       />
       <Viewport
+        mode={mode}
         data={data}
         layerCount={layerCount}
         transformedVertices={transformedVertices}
