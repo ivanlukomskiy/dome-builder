@@ -12,6 +12,8 @@ interface ViewportProps {
   selectedVertexIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
+  focalPoint1Y: number
+  focalPoint2Y: number
   onVertexClick: (index: number) => void
   onDeselectAll: () => void
 }
@@ -24,6 +26,8 @@ export function Viewport({
   selectedVertexIndices,
   addedVertices,
   addedFaces,
+  focalPoint1Y,
+  focalPoint2Y,
   onVertexClick,
   onDeselectAll,
 }: ViewportProps) {
@@ -50,6 +54,8 @@ export function Viewport({
           selectedVertexIndices={selectedVertexIndices}
           addedVertices={addedVertices}
           addedFaces={addedFaces}
+          focalPoint1Y={focalPoint1Y}
+          focalPoint2Y={focalPoint2Y}
           onVertexClick={onVertexClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />

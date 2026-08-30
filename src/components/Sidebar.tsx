@@ -33,6 +33,10 @@ interface SidebarProps {
   onResetTransform: () => void
   canAddPoints: boolean
   onAddPoints: () => void
+  focalZ1: number
+  onFocalZ1Change: (value: number) => void
+  focalZ2: number
+  onFocalZ2Change: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -80,6 +84,10 @@ export function Sidebar({
   onResetTransform,
   canAddPoints,
   onAddPoints,
+  focalZ1,
+  onFocalZ1Change,
+  focalZ2,
+  onFocalZ2Change,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -100,6 +108,13 @@ export function Sidebar({
     const num = Number(raw)
     if (Number.isNaN(num)) return
     onTransformChange(field, toRadians ? (num * Math.PI) / 180 : num)
+  }
+
+  const handleFocalChange = (onChange: (value: number) => void, raw: string) => {
+    if (raw === '' || raw === '-') return
+    const num = Number(raw)
+    if (Number.isNaN(num)) return
+    onChange(num)
   }
 
   return (
@@ -170,6 +185,28 @@ export function Sidebar({
           <span className="layer-count">
             {layerCount} / {maxLayers}
           </span>
+        </div>
+      </section>
+
+      <section className="control-group">
+        <h2>Focal Points</h2>
+        <div className="transform-field">
+          <label>Focal point 1 (z)</label>
+          <input
+            type="number"
+            step={0.05}
+            value={focalZ1}
+            onChange={(e) => handleFocalChange(onFocalZ1Change, e.target.value)}
+          />
+        </div>
+        <div className="transform-field">
+          <label>Focal point 2 (z)</label>
+          <input
+            type="number"
+            step={0.05}
+            value={focalZ2}
+            onChange={(e) => handleFocalChange(onFocalZ2Change, e.target.value)}
+          />
         </div>
       </section>
 

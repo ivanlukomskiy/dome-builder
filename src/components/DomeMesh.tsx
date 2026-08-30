@@ -12,6 +12,8 @@ interface DomeMeshProps {
   selectedVertexIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
+  focalPoint1Y: number
+  focalPoint2Y: number
   onVertexClick: (index: number) => void
 }
 
@@ -23,6 +25,8 @@ export function DomeMesh({
   selectedVertexIndices,
   addedVertices,
   addedFaces,
+  focalPoint1Y,
+  focalPoint2Y,
   onVertexClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
@@ -185,6 +189,14 @@ export function DomeMesh({
           </mesh>
         )
       })}
+      <mesh position={[0, focalPoint1Y, 0]}>
+        <sphereGeometry args={[0.032, 16, 16]} />
+        <meshStandardMaterial color="#f5e050" />
+      </mesh>
+      <mesh position={[0, focalPoint2Y, 0]}>
+        <sphereGeometry args={[0.032, 16, 16]} />
+        <meshStandardMaterial color="#f5e050" />
+      </mesh>
     </group>
   )
 }

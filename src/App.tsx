@@ -5,6 +5,7 @@ import {
   applyAddedVertexTransforms,
   applyVertexTransforms,
   buildAddedGeometry,
+  computeModelExtent,
   computePolyhedron,
   DEFAULT_VERTEX_TRANSFORM,
   findLayerGroup,
@@ -33,6 +34,11 @@ function App() {
   const [addedFaces, setAddedFaces] = useState<Face[]>([])
   const [nextAddedVertexId, setNextAddedVertexId] = useState(-1)
 
+  // Focal points: two fixed points on the main axis (x = 0, radius = 0), each at a height
+  // given as a fraction of the model's total height, offset from the model's vertical center.
+  const [focalZ1, setFocalZ1] = useState(0)
+  const [focalZ2, setFocalZ2] = useState(0)
+
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
     [shape, axis, subdivisions],
@@ -49,6 +55,10 @@ function App() {
     () => applyAddedVertexTransforms(addedVertices, data.vertices, vertexTransforms),
     [addedVertices, data.vertices, vertexTransforms],
   )
+
+  const modelExtent = useMemo(() => computeModelExtent(data.vertices), [data.vertices])
+  const focalPoint1Y = focalZ1 * modelExtent.totalHeight
+  const focalPoint2Y = focalZ2 * modelExtent.totalHeight
 
   // Default to showing half the layers (rounded up) whenever the shape/axis/subdivision choice changes.
   useEffect(() => {
@@ -192,6 +202,10 @@ function App() {
         onResetTransform={handleResetTransform}
         canAddPoints={canAddPoints}
         onAddPoints={handleAddPoints}
+        focalZ1={focalZ1}
+        onFocalZ1Change={setFocalZ1}
+        focalZ2={focalZ2}
+        onFocalZ2Change={setFocalZ2}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -207,6 +221,8 @@ function App() {
         selectedVertexIndices={selectedVertexIndices}
         addedVertices={transformedAddedVertices}
         addedFaces={addedFaces}
+        focalPoint1Y={focalPoint1Y}
+        focalPoint2Y={focalPoint2Y}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />
