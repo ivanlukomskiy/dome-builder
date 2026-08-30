@@ -3,6 +3,18 @@ import * as THREE from 'three'
 export type ShapeType = 'octahedron' | 'icosahedron' | 'goldberg'
 export type AxisType = 'vertex' | 'face' | 'edge'
 
+export type SelectionMode = 'point' | 'layer' | 'symmetric'
+
+export const SELECTION_MODE_OPTIONS: { value: SelectionMode; label: string; hint: string }[] = [
+  { value: 'point', label: 'Points', hint: 'Click a vertex to select it' },
+  { value: 'layer', label: 'Layer', hint: 'Click a vertex to select its whole layer' },
+  {
+    value: 'symmetric',
+    label: 'Symmetric',
+    hint: 'Click a vertex to select its symmetric group',
+  },
+]
+
 // Goldberg polyhedra are the classic dual of a geodesic icosahedron, so they always
 // borrow the icosahedron's raw vertex/face data and axis options.
 type BaseShapeType = 'octahedron' | 'icosahedron'
@@ -343,12 +355,52 @@ export function sliceLayers(data: PolyhedronData, layerCount: number): SlicedPol
   }
 }
 
-// The rotationally-symmetric group a vertex belongs to: every vertex at the same
-// height (the same Layer), since a layer is exactly the ring of vertices the
-// polyhedron's symmetry carries into one another around the main axis.
-export function findSymmetricGroup(data: PolyhedronData, vertexIndex: number): number[] {
+// Every vertex on the same layer (same height) as the given vertex.
+export function findLayerGroup(data: PolyhedronData, vertexIndex: number): number[] {
   const layer = data.layers.find((l) => l.vertexIndices.includes(vertexIndex))
   return layer ? layer.vertexIndices : [vertexIndex]
+}
+
+const ROTATION_EPS = 1e-4
+
+// The orbit of a vertex under the shape's rotational symmetry about the main (vertical)
+// axis: up to `fold` vertices on the same layer, evenly spaced around the axis, that the
+// polyhedron's symmetry carries into one another. A vertex sitting on the axis itself
+// (radius ~0, e.g. an apex) has no distinct rotational partners.
+export function findRotationalSymmetryGroup(
+  data: PolyhedronData,
+  fold: number,
+  vertexIndex: number,
+): number[] {
+  const layer = data.layers.find((l) => l.vertexIndices.includes(vertexIndex))
+  if (!layer) return [vertexIndex]
+
+  const clicked = data.vertices[vertexIndex]
+  const radius = Math.hypot(clicked.x, clicked.z)
+  if (radius < ROTATION_EPS) return [vertexIndex]
+
+  const group = new Set<number>()
+  const angleStep = (2 * Math.PI) / fold
+  for (let k = 0; k < fold; k++) {
+    const angle = angleStep * k
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const rx = clicked.x * cos - clicked.z * sin
+    const rz = clicked.x * sin + clicked.z * cos
+
+    let bestIdx = -1
+    let bestDist = Infinity
+    for (const idx of layer.vertexIndices) {
+      const v = data.vertices[idx]
+      const dist = Math.hypot(v.x - rx, v.z - rz)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestIdx = idx
+      }
+    }
+    if (bestIdx !== -1 && bestDist < 1e-3) group.add(bestIdx)
+  }
+  return Array.from(group)
 }
 
 export function removeVertices(

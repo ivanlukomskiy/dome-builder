@@ -1,5 +1,11 @@
-import type { AxisType, PolyhedronData, ShapeType } from '../lib/polyhedra'
-import { MAX_SUBDIVISIONS, MIN_SUBDIVISIONS, SHAPE_AXES, SHAPE_LABELS } from '../lib/polyhedra'
+import type { AxisType, PolyhedronData, SelectionMode, ShapeType } from '../lib/polyhedra'
+import {
+  MAX_SUBDIVISIONS,
+  MIN_SUBDIVISIONS,
+  SELECTION_MODE_OPTIONS,
+  SHAPE_AXES,
+  SHAPE_LABELS,
+} from '../lib/polyhedra'
 
 interface SidebarProps {
   shape: ShapeType
@@ -11,6 +17,8 @@ interface SidebarProps {
   layerCount: number
   onLayerCountChange: (count: number) => void
   data: PolyhedronData
+  selectionMode: SelectionMode
+  onSelectionModeChange: (mode: SelectionMode) => void
   selectedCount: number
   canUndo: boolean
   canRedo: boolean
@@ -30,6 +38,8 @@ export function Sidebar({
   layerCount,
   onLayerCountChange,
   data,
+  selectionMode,
+  onSelectionModeChange,
   selectedCount,
   canUndo,
   canRedo,
@@ -114,10 +124,21 @@ export function Sidebar({
 
       <section className="control-group">
         <h2>Edit vertices</h2>
+        <div className="segmented-control">
+          {SELECTION_MODE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={selectionMode === opt.value ? 'active' : ''}
+              onClick={() => onSelectionModeChange(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <p className="hint">
           {selectedCount > 0
             ? `${selectedCount} ${selectedCount !== 1 ? 'vertices' : 'vertex'} selected`
-            : 'Click a vertex to select it'}
+            : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
         </p>
         <div className="button-row">
           <button disabled={selectedCount === 0} onClick={onDeleteSelected}>

@@ -75,6 +75,38 @@ body,
   cursor: pointer;
 }
 
+.segmented-control {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.segmented-control button {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: #21242c;
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.segmented-control button:last-child {
+  border-right: none;
+}
+
+.segmented-control button:hover:not(.active) {
+  color: var(--text);
+}
+
+.segmented-control button.active {
+  color: #fff;
+  background: var(--accent);
+}
+
 .hint {
   display: block;
   font-size: 11px;

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AxisType, ShapeType } from './lib/polyhedra'
-import { computePolyhedron } from './lib/polyhedra'
+import type { AxisType, SelectionMode, ShapeType } from './lib/polyhedra'
+import {
+  computePolyhedron,
+  findLayerGroup,
+  findRotationalSymmetryGroup,
+  SHAPE_AXES,
+} from './lib/polyhedra'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
 
@@ -9,6 +14,7 @@ function App() {
   const [axis, setAxis] = useState<AxisType>('vertex')
   const [subdivisions, setSubdivisions] = useState(3)
   const [layerCount, setLayerCount] = useState(2)
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('point')
 
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
   const [deletedGroups, setDeletedGroups] = useState<number[][]>([])
@@ -35,12 +41,23 @@ function App() {
 
   const handleVertexClick = (index: number) => {
     if (deletedVertexIndices.has(index)) return
+
+    let group: number[]
+    if (selectionMode === 'layer') {
+      group = findLayerGroup(data, index)
+    } else if (selectionMode === 'symmetric') {
+      const fold = SHAPE_AXES[shape].find((opt) => opt.value === axis)!.fold
+      group = findRotationalSymmetryGroup(data, fold, index)
+    } else {
+      group = [index]
+    }
+
     setSelectedVertexIndices((prev) => {
       const next = new Set(prev)
-      if (next.has(index)) {
-        next.delete(index)
-      } else {
-        next.add(index)
+      const allSelected = group.every((i) => next.has(i))
+      for (const i of group) {
+        if (allSelected) next.delete(i)
+        else next.add(i)
       }
       return next
     })
@@ -67,6 +84,10 @@ function App() {
     setDeletedGroups([...deletedGroups, last])
   }
 
+  const handleDeselectAll = () => {
+    setSelectedVertexIndices(new Set())
+  }
+
   const handleCancelAll = () => {
     setDeletedGroups([])
     setRedoStack([])
@@ -85,6 +106,8 @@ function App() {
         layerCount={layerCount}
         onLayerCountChange={setLayerCount}
         data={data}
+        selectionMode={selectionMode}
+        onSelectionModeChange={setSelectionMode}
         selectedCount={selectedVertexIndices.size}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
@@ -99,6 +122,7 @@ function App() {
         deletedVertexIndices={deletedVertexIndices}
         selectedVertexIndices={selectedVertexIndices}
         onVertexClick={handleVertexClick}
+        onDeselectAll={handleDeselectAll}
       />
     </div>
   )

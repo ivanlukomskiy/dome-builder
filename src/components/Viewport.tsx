@@ -9,6 +9,7 @@ interface ViewportProps {
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
   onVertexClick: (index: number) => void
+  onDeselectAll: () => void
 }
 
 export function Viewport({
@@ -17,10 +18,11 @@ export function Viewport({
   deletedVertexIndices,
   selectedVertexIndices,
   onVertexClick,
+  onDeselectAll,
 }: ViewportProps) {
   return (
     <div className="viewport">
-      <Canvas camera={{ position: [3.5, 2.8, 4], fov: 45 }}>
+      <Canvas camera={{ position: [3.5, 2.8, 4], fov: 45 }} onPointerMissed={onDeselectAll}>
         <color attach="background" args={['#12141a']} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 8, 5]} intensity={1.1} />
