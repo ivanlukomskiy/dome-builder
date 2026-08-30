@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AxisType, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
+import type * as THREE from 'three'
+import type { AxisType, Face, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
 import {
+  applyAddedVertexTransforms,
+  applyVertexTransforms,
+  buildAddedGeometry,
   computePolyhedron,
   DEFAULT_VERTEX_TRANSFORM,
   findLayerGroup,
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
+  resolveVertexPosition,
   SHAPE_AXES,
 } from './lib/polyhedra'
 import { Sidebar } from './components/Sidebar'
@@ -24,10 +29,25 @@ function App() {
   const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
     new Map(),
   )
+  const [addedVertices, setAddedVertices] = useState<Map<number, THREE.Vector3>>(new Map())
+  const [addedFaces, setAddedFaces] = useState<Face[]>([])
+  const [nextAddedVertexId, setNextAddedVertexId] = useState(-1)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
     [shape, axis, subdivisions],
+  )
+
+  const transformedVertices = useMemo(
+    () => applyVertexTransforms(data.vertices, vertexTransforms),
+    [data.vertices, vertexTransforms],
+  )
+
+  // addedVertices holds each added point's default (as-created) position; transforms are
+  // layered on top the same way they are for canonical vertices.
+  const transformedAddedVertices = useMemo(
+    () => applyAddedVertexTransforms(addedVertices, data.vertices, vertexTransforms),
+    [addedVertices, data.vertices, vertexTransforms],
   )
 
   // Default to showing half the layers (rounded up) whenever the shape/axis/subdivision choice changes.
@@ -35,18 +55,33 @@ function App() {
     setLayerCount(Math.ceil(data.layers.length / 2))
   }, [data])
 
-  // Vertex-deletion and transform edits only make sense for the dome config they were made against.
+  // Vertex-deletion, transform, and added-geometry edits only make sense for the dome config
+  // they were made against.
   useEffect(() => {
     setSelectedVertexIndices(new Set())
     setDeletedGroups([])
     setRedoStack([])
     setVertexTransforms(new Map())
+    setAddedVertices(new Map())
+    setAddedFaces([])
+    setNextAddedVertexId(-1)
   }, [shape, axis, subdivisions, layerCount])
 
   const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
 
   const handleVertexClick = (index: number) => {
     if (deletedVertexIndices.has(index)) return
+
+    // Added vertices don't belong to a layer or symmetry group - always a plain toggle.
+    if (index < 0) {
+      setSelectedVertexIndices((prev) => {
+        const next = new Set(prev)
+        if (next.has(index)) next.delete(index)
+        else next.add(index)
+        return next
+      })
+      return
+    }
 
     let group: number[]
     if (selectionMode === 'layer') {
@@ -122,6 +157,23 @@ function App() {
     })
   }
 
+  const canAddPoints = selectedVertexIndices.size > 0 && selectedVertexIndices.size % 2 === 0
+
+  const handleAddPoints = () => {
+    if (!canAddPoints) return
+    const positionOf = (index: number) =>
+      resolveVertexPosition(index, transformedVertices, transformedAddedVertices)
+    const { vertices, faces, nextId } = buildAddedGeometry(
+      Array.from(selectedVertexIndices),
+      positionOf,
+      nextAddedVertexId,
+    )
+    setAddedVertices((prev) => new Map([...prev, ...vertices]))
+    setAddedFaces((prev) => [...prev, ...faces])
+    setNextAddedVertexId(nextId)
+    setSelectedVertexIndices(new Set())
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -141,6 +193,8 @@ function App() {
         vertexTransforms={vertexTransforms}
         onTransformChange={handleTransformChange}
         onResetTransform={handleResetTransform}
+        canAddPoints={canAddPoints}
+        onAddPoints={handleAddPoints}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -151,9 +205,11 @@ function App() {
       <Viewport
         data={data}
         layerCount={layerCount}
+        transformedVertices={transformedVertices}
         deletedVertexIndices={deletedVertexIndices}
         selectedVertexIndices={selectedVertexIndices}
-        vertexTransforms={vertexTransforms}
+        addedVertices={transformedAddedVertices}
+        addedFaces={addedFaces}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />

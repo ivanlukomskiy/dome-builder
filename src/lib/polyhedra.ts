@@ -419,6 +419,43 @@ export function isDefaultVertexTransform(t: VertexTransform): boolean {
   return t.z === 0 && t.r === 0 && t.theta === 0
 }
 
+export interface ModelExtent {
+  totalHeight: number
+  maxRadius: number
+}
+
+// The reference scale transforms are measured against: the untransformed canonical model's
+// own height and max radial distance from the main axis. Kept fixed regardless of what's
+// currently selected, sliced, or transformed, so fractional edits stay stable.
+export function computeModelExtent(canonicalVertices: THREE.Vector3[]): ModelExtent {
+  let minY = Infinity
+  let maxY = -Infinity
+  let maxRadius = 0
+  for (const v of canonicalVertices) {
+    if (v.y < minY) minY = v.y
+    if (v.y > maxY) maxY = v.y
+    maxRadius = Math.max(maxRadius, Math.hypot(v.x, v.z))
+  }
+  return { totalHeight: maxY - minY, maxRadius }
+}
+
+export function applyVertexTransform(
+  v: THREE.Vector3,
+  t: VertexTransform,
+  extent: ModelExtent,
+): THREE.Vector3 {
+  if (isDefaultVertexTransform(t)) return v
+
+  const radius = Math.hypot(v.x, v.z)
+  const angle = Math.atan2(v.z, v.x) + t.theta
+  const newRadius = radius + t.r * extent.maxRadius
+  return new THREE.Vector3(
+    newRadius * Math.cos(angle),
+    v.y + t.z * extent.totalHeight,
+    newRadius * Math.sin(angle),
+  )
+}
+
 // Applies per-vertex transforms, measuring height/radius fractions against the untransformed
 // model's own extent so edits stay stable regardless of what's currently selected or sliced.
 export function applyVertexTransforms(
@@ -426,30 +463,28 @@ export function applyVertexTransforms(
   transforms: ReadonlyMap<number, VertexTransform>,
 ): THREE.Vector3[] {
   if (transforms.size === 0) return vertices
-
-  let minY = Infinity
-  let maxY = -Infinity
-  let maxRadius = 0
-  for (const v of vertices) {
-    if (v.y < minY) minY = v.y
-    if (v.y > maxY) maxY = v.y
-    maxRadius = Math.max(maxRadius, Math.hypot(v.x, v.z))
-  }
-  const totalHeight = maxY - minY
-
+  const extent = computeModelExtent(vertices)
   return vertices.map((v, idx) => {
     const t = transforms.get(idx)
-    if (!t || isDefaultVertexTransform(t)) return v
-
-    const radius = Math.hypot(v.x, v.z)
-    const angle = Math.atan2(v.z, v.x) + t.theta
-    const newRadius = radius + t.r * maxRadius
-    return new THREE.Vector3(
-      newRadius * Math.cos(angle),
-      v.y + t.z * totalHeight,
-      newRadius * Math.sin(angle),
-    )
+    return t ? applyVertexTransform(v, t, extent) : v
   })
+}
+
+// Same idea for added vertices: their default (untransformed) position is wherever they were
+// created, but the z/r/theta fractions are still measured against the canonical model's extent
+// so an added point's transform behaves the same way a canonical vertex's does.
+export function applyAddedVertexTransforms(
+  baseAddedVertices: ReadonlyMap<number, THREE.Vector3>,
+  canonicalVertices: THREE.Vector3[],
+  transforms: ReadonlyMap<number, VertexTransform>,
+): Map<number, THREE.Vector3> {
+  const extent = computeModelExtent(canonicalVertices)
+  const result = new Map<number, THREE.Vector3>()
+  for (const [id, pos] of baseAddedVertices) {
+    const t = transforms.get(id)
+    result.set(id, t ? applyVertexTransform(pos, t, extent) : pos)
+  }
+  return result
 }
 
 export function removeVertices(
@@ -463,4 +498,55 @@ export function removeVertices(
     keptEdges: sliced.keptEdges.filter(([a, b]) => !removed.has(a) && !removed.has(b)),
     keptFaces: sliced.keptFaces.filter((f) => f.every((i) => !removed.has(i))),
   }
+}
+
+// Vertex indices are non-negative for the shape's own (canonical) vertices, looked up in
+// `canonicalVertices`. A user-added vertex instead gets a negative id, looked up in `added` -
+// this keeps the two spaces collision-free without needing a combined array.
+export function resolveVertexPosition(
+  index: number,
+  canonicalVertices: THREE.Vector3[],
+  added: ReadonlyMap<number, THREE.Vector3>,
+): THREE.Vector3 {
+  return index >= 0 ? canonicalVertices[index] : added.get(index)!
+}
+
+export interface AddedGeometry {
+  vertices: Map<number, THREE.Vector3>
+  faces: Face[]
+  nextId: number
+}
+
+// Greedily pairs up the given vertices by nearest neighbor: take one, find the closest
+// remaining vertex to it, add a new vertex at their midpoint, and connect all three into a
+// triangular face. Repeats until every input vertex has been paired. Requires an even count.
+export function buildAddedGeometry(
+  selectedIndices: number[],
+  positionOf: (index: number) => THREE.Vector3,
+  startId: number,
+): AddedGeometry {
+  const pool = [...selectedIndices]
+  const vertices = new Map<number, THREE.Vector3>()
+  const faces: Face[] = []
+  let nextId = startId
+
+  while (pool.length > 0) {
+    const a = pool.shift()!
+    let closestPos = 0
+    let closestDist = Infinity
+    for (let i = 0; i < pool.length; i++) {
+      const dist = positionOf(a).distanceTo(positionOf(pool[i]))
+      if (dist < closestDist) {
+        closestDist = dist
+        closestPos = i
+      }
+    }
+    const b = pool.splice(closestPos, 1)[0]
+    const midpoint = positionOf(a).clone().add(positionOf(b)).multiplyScalar(0.5)
+    vertices.set(nextId, midpoint)
+    faces.push([a, b, nextId])
+    nextId -= 1
+  }
+
+  return { vertices, faces, nextId }
 }

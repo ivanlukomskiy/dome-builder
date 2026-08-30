@@ -1,35 +1,87 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import type { PolyhedronData, VertexTransform } from '../lib/polyhedra'
-import { applyVertexTransforms, removeVertices, sliceLayers } from '../lib/polyhedra'
+import type { Face, PolyhedronData } from '../lib/polyhedra'
+import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
 
 interface DomeMeshProps {
   data: PolyhedronData
   layerCount: number
+  transformedVertices: THREE.Vector3[]
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
-  vertexTransforms: ReadonlyMap<number, VertexTransform>
+  addedVertices: ReadonlyMap<number, THREE.Vector3>
+  addedFaces: Face[]
   onVertexClick: (index: number) => void
 }
 
 export function DomeMesh({
   data,
   layerCount,
+  transformedVertices,
   deletedVertexIndices,
   selectedVertexIndices,
-  vertexTransforms,
+  addedVertices,
+  addedFaces,
   onVertexClick,
 }: DomeMeshProps) {
-  const transformedVertices = useMemo(
-    () => applyVertexTransforms(data.vertices, vertexTransforms),
-    [data.vertices, vertexTransforms],
-  )
-
   const sliced = useMemo(() => {
     const layered = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
     return removeVertices(layered, deletedVertexIndices)
   }, [data, transformedVertices, layerCount, deletedVertexIndices])
+
+  // An added face/vertex only shows while everything it was built from is still present:
+  // its canonical anchors must still be in view (kept by the layer slice and not deleted),
+  // and its new midpoint vertex must not itself have been deleted.
+  const keptSet = useMemo(() => new Set(sliced.keptVertexIndices), [sliced])
+  const visibleAddedFaces = useMemo(
+    () =>
+      addedFaces.filter((face) =>
+        face.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx))),
+      ),
+    [addedFaces, keptSet, deletedVertexIndices],
+  )
+  const resolvePosition = useCallback(
+    (idx: number) => resolveVertexPosition(idx, transformedVertices, addedVertices),
+    [transformedVertices, addedVertices],
+  )
+
+  const visibleAddedVertexIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const face of visibleAddedFaces) {
+      for (const idx of face) if (idx < 0) ids.add(idx)
+    }
+    return ids
+  }, [visibleAddedFaces])
+
+  const addedFaceGeometry = useMemo(() => {
+    const positions: number[] = []
+    for (const [i0, i1, i2] of visibleAddedFaces) {
+      const v0 = resolvePosition(i0)
+      const v1 = resolvePosition(i1)
+      const v2 = resolvePosition(i2)
+      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geom.computeVertexNormals()
+    return geom
+  }, [visibleAddedFaces, resolvePosition])
+
+  const addedEdgeGeometry = useMemo(() => {
+    const positions: number[] = []
+    for (const [i0, i1, i2] of visibleAddedFaces) {
+      const v0 = resolvePosition(i0)
+      const v1 = resolvePosition(i1)
+      const v2 = resolvePosition(i2)
+      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
+      positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
+      positions.push(v2.x, v2.y, v2.z, v0.x, v0.y, v0.z)
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return geom
+  }, [visibleAddedFaces, resolvePosition])
 
   const edgeGeometry = useMemo(() => {
     const positions: number[] = []
@@ -83,6 +135,18 @@ export function DomeMesh({
       <lineSegments geometry={edgeGeometry}>
         <lineBasicMaterial color="#1b3a57" />
       </lineSegments>
+      <mesh geometry={addedFaceGeometry}>
+        <meshStandardMaterial
+          color="#d55b9b"
+          transparent
+          opacity={0.4}
+          side={THREE.DoubleSide}
+          roughness={0.6}
+        />
+      </mesh>
+      <lineSegments geometry={addedEdgeGeometry}>
+        <lineBasicMaterial color="#571b3a" />
+      </lineSegments>
       {sliced.keptVertexIndices.map((idx) => {
         const v = sliced.vertices[idx]
         const isSelected = selectedVertexIndices.has(idx)
@@ -99,6 +163,25 @@ export function DomeMesh({
           >
             <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
             <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
+          </mesh>
+        )
+      })}
+      {Array.from(visibleAddedVertexIds).map((idx) => {
+        const v = addedVertices.get(idx)!
+        const isSelected = selectedVertexIndices.has(idx)
+        return (
+          <mesh
+            key={idx}
+            position={[v.x, v.y, v.z]}
+            onClick={(e) => {
+              e.stopPropagation()
+              onVertexClick(idx)
+            }}
+            onPointerOver={handlePointerOver}
+            onPointerOut={handlePointerOut}
+          >
+            <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
+            <meshStandardMaterial color={isSelected ? '#f5a623' : '#e0729f'} />
           </mesh>
         )
       })}

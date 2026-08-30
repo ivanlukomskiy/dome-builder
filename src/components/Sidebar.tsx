@@ -31,6 +31,8 @@ interface SidebarProps {
   vertexTransforms: ReadonlyMap<number, VertexTransform>
   onTransformChange: (field: keyof VertexTransform, value: number) => void
   onResetTransform: () => void
+  canAddPoints: boolean
+  onAddPoints: () => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -76,6 +78,8 @@ export function Sidebar({
   vertexTransforms,
   onTransformChange,
   onResetTransform,
+  canAddPoints,
+  onAddPoints,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -204,6 +208,14 @@ export function Sidebar({
             Cancel All
           </button>
         </div>
+        <div className="button-row">
+          <button disabled={!canAddPoints} onClick={onAddPoints}>
+            Add Points
+          </button>
+        </div>
+        {selectedCount > 0 && !canAddPoints && (
+          <p className="hint">Select an even number of points to pair them up.</p>
+        )}
       </section>
 
       {selectedCount > 0 && (

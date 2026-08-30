@@ -1,14 +1,17 @@
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
-import type { PolyhedronData, VertexTransform } from '../lib/polyhedra'
+import type * as THREE from 'three'
+import type { Face, PolyhedronData } from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
 
 interface ViewportProps {
   data: PolyhedronData
   layerCount: number
+  transformedVertices: THREE.Vector3[]
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
-  vertexTransforms: ReadonlyMap<number, VertexTransform>
+  addedVertices: ReadonlyMap<number, THREE.Vector3>
+  addedFaces: Face[]
   onVertexClick: (index: number) => void
   onDeselectAll: () => void
 }
@@ -16,9 +19,11 @@ interface ViewportProps {
 export function Viewport({
   data,
   layerCount,
+  transformedVertices,
   deletedVertexIndices,
   selectedVertexIndices,
-  vertexTransforms,
+  addedVertices,
+  addedFaces,
   onVertexClick,
   onDeselectAll,
 }: ViewportProps) {
@@ -40,9 +45,11 @@ export function Viewport({
         <DomeMesh
           data={data}
           layerCount={layerCount}
+          transformedVertices={transformedVertices}
           deletedVertexIndices={deletedVertexIndices}
           selectedVertexIndices={selectedVertexIndices}
-          vertexTransforms={vertexTransforms}
+          addedVertices={addedVertices}
+          addedFaces={addedFaces}
           onVertexClick={onVertexClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
