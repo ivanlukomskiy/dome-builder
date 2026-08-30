@@ -1,7 +1,11 @@
 import * as THREE from 'three'
 
-export type ShapeType = 'octahedron' | 'icosahedron'
+export type ShapeType = 'octahedron' | 'icosahedron' | 'goldberg'
 export type AxisType = 'vertex' | 'face' | 'edge'
+
+// Goldberg polyhedra are the classic dual of a geodesic icosahedron, so they always
+// borrow the icosahedron's raw vertex/face data and axis options.
+type BaseShapeType = 'octahedron' | 'icosahedron'
 
 export interface AxisOption {
   value: AxisType
@@ -13,6 +17,7 @@ export interface AxisOption {
 export const SHAPE_LABELS: Record<ShapeType, string> = {
   octahedron: 'Octahedron',
   icosahedron: 'Icosahedron',
+  goldberg: 'Goldberg Polyhedron',
 }
 
 export const SHAPE_AXES: Record<ShapeType, AxisOption[]> = {
@@ -26,16 +31,28 @@ export const SHAPE_AXES: Record<ShapeType, AxisOption[]> = {
     { value: 'face', label: 'Opposite face centers', axisCount: 10, fold: 3 },
     { value: 'edge', label: 'Opposite edge midpoints', axisCount: 15, fold: 2 },
   ],
+  goldberg: [
+    { value: 'vertex', label: 'Opposite vertices', axisCount: 6, fold: 5 },
+    { value: 'face', label: 'Opposite face centers', axisCount: 10, fold: 3 },
+    { value: 'edge', label: 'Opposite edge midpoints', axisCount: 15, fold: 2 },
+  ],
 }
 
-type Face = [number, number, number]
+// A face is an ordered ring of vertex indices tracing its outward-facing boundary.
+// Raw shape data and subdivision always deal in triangles; the Goldberg dual produces
+// pentagons/hexagons, so downstream code (edges, layers, rendering) treats faces generically.
+type TriFace = [number, number, number]
+export type Face = number[]
 type Edge = [number, number]
 
 // Canonical vertex/face data, matching three.js's own Octahedron/IcosahedronGeometry
 // construction, so winding (outward normals) is already correct.
 const PHI = (1 + Math.sqrt(5)) / 2
 
-const RAW_SHAPE_DATA: Record<ShapeType, { vertices: [number, number, number][]; faces: Face[] }> = {
+const RAW_SHAPE_DATA: Record<
+  BaseShapeType,
+  { vertices: [number, number, number][]; faces: TriFace[] }
+> = {
   octahedron: {
     vertices: [
       [1, 0, 0],
@@ -100,13 +117,13 @@ export const MIN_SUBDIVISIONS = 1
 export const MAX_SUBDIVISIONS = 4
 
 function subdivideFace(
-  face: Face,
+  face: TriFace,
   baseVertices: THREE.Vector3[],
   freq: number,
   radius: number,
   pointMap: Map<string, number>,
   outVertices: THREE.Vector3[],
-  outFaces: Face[],
+  outFaces: TriFace[],
 ): void {
   const [ia, ib, ic] = face
   const A = baseVertices[ia]
@@ -148,14 +165,14 @@ function subdivideFace(
 
 function subdividePolyhedron(
   vertices: THREE.Vector3[],
-  faces: Face[],
+  faces: TriFace[],
   subdivisions: number,
-): { vertices: THREE.Vector3[]; faces: Face[] } {
+): { vertices: THREE.Vector3[]; faces: TriFace[] } {
   if (subdivisions <= 1) return { vertices, faces }
 
   const radius = vertices[0].length()
   const newVertices: THREE.Vector3[] = []
-  const newFaces: Face[] = []
+  const newFaces: TriFace[] = []
   const pointMap = new Map<string, number>()
   for (const face of faces) {
     subdivideFace(face, vertices, subdivisions, radius, pointMap, newVertices, newFaces)
@@ -163,14 +180,60 @@ function subdividePolyhedron(
   return { vertices: newVertices, faces: newFaces }
 }
 
+// Builds the planar dual of a closed, consistently-wound triangle mesh: one dual vertex
+// per input face (its centroid, projected back onto the sphere), and one dual face per
+// input vertex (the ring of surrounding face-centroids). This is exactly how a Goldberg
+// polyhedron is derived from a geodesic icosahedron.
+function computeDualPolyhedron(
+  vertices: THREE.Vector3[],
+  faces: TriFace[],
+): { vertices: THREE.Vector3[]; faces: Face[] } {
+  const radius = vertices[0].length()
+  const dualVertices = faces.map((face) => {
+    const centroid = new THREE.Vector3()
+    for (const idx of face) centroid.add(vertices[idx])
+    return centroid.multiplyScalar(1 / face.length).normalize().multiplyScalar(radius)
+  })
+
+  const edgeToFace = new Map<string, number>()
+  faces.forEach((face, fi) => {
+    for (let i = 0; i < face.length; i++) {
+      edgeToFace.set(`${face[i]}_${face[(i + 1) % face.length]}`, fi)
+    }
+  })
+
+  const facesByVertex = new Map<number, number>()
+  faces.forEach((face, fi) => {
+    for (const v of face) {
+      if (!facesByVertex.has(v)) facesByVertex.set(v, fi)
+    }
+  })
+
+  const dualFaces: Face[] = []
+  for (const [v, startFace] of facesByVertex) {
+    const ring: number[] = []
+    let currentFace = startFace
+    do {
+      ring.push(currentFace)
+      const face = faces[currentFace]
+      const idx = face.indexOf(v)
+      const prev = face[(idx + 2) % face.length]
+      const nextFace = edgeToFace.get(`${v}_${prev}`)
+      if (nextFace === undefined) break
+      currentFace = nextFace
+    } while (currentFace !== startFace && ring.length <= faces.length)
+    dualFaces.push(ring)
+  }
+
+  return { vertices: dualVertices, faces: dualFaces }
+}
+
 function computeEdges(faces: Face[]): Edge[] {
   const seen = new Map<string, Edge>()
-  for (const [a, b, c] of faces) {
-    for (const [x, y] of [
-      [a, b],
-      [b, c],
-      [c, a],
-    ] as Edge[]) {
+  for (const face of faces) {
+    for (let i = 0; i < face.length; i++) {
+      const x = face[i]
+      const y = face[(i + 1) % face.length]
       const key = x < y ? `${x}_${y}` : `${y}_${x}`
       if (!seen.has(key)) seen.set(key, x < y ? [x, y] : [y, x])
     }
@@ -219,7 +282,8 @@ export function computePolyhedron(
   axisType: AxisType,
   subdivisions = MIN_SUBDIVISIONS,
 ): PolyhedronData {
-  const raw = RAW_SHAPE_DATA[shape]
+  const baseShape: BaseShapeType = shape === 'goldberg' ? 'icosahedron' : shape
+  const raw = RAW_SHAPE_DATA[baseShape]
   const baseVertices = raw.vertices.map((v) => new THREE.Vector3(...v))
   const baseFaces = raw.faces
   const baseEdges = computeEdges(baseFaces)
@@ -227,16 +291,21 @@ export function computePolyhedron(
   const axisVec = getAxisVector(baseVertices, baseFaces, baseEdges, axisType)
 
   const clamped = Math.min(Math.max(subdivisions, MIN_SUBDIVISIONS), MAX_SUBDIVISIONS)
-  const { vertices: subdividedVertices, faces } = subdividePolyhedron(
+  const { vertices: subdividedVertices, faces: subdividedFaces } = subdividePolyhedron(
     baseVertices,
     baseFaces,
     clamped,
   )
+
+  const { vertices: finalVertices, faces } =
+    shape === 'goldberg'
+      ? computeDualPolyhedron(subdividedVertices, subdividedFaces)
+      : { vertices: subdividedVertices, faces: subdividedFaces }
   const edges = computeEdges(faces)
 
   const up = new THREE.Vector3(0, 1, 0)
   const quat = new THREE.Quaternion().setFromUnitVectors(axisVec, up)
-  const vertices = subdividedVertices.map((v) => v.clone().applyQuaternion(quat))
+  const vertices = finalVertices.map((v) => v.clone().applyQuaternion(quat))
 
   const order = vertices.map((_, i) => i).sort((a, b) => vertices[b].y - vertices[a].y)
   const layers: Layer[] = []

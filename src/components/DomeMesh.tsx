@@ -26,9 +26,13 @@ export function DomeMesh({ data, layerCount }: DomeMeshProps) {
   const faceGeometry = useMemo(() => {
     const positions: number[] = []
     for (const face of sliced.keptFaces) {
-      for (const idx of face) {
-        const v = sliced.vertices[idx]
-        positions.push(v.x, v.y, v.z)
+      // Fan-triangulate each face (a triangle for triangular meshes, or a
+      // pentagon/hexagon for a Goldberg polyhedron's dual faces) from vertex 0.
+      const v0 = sliced.vertices[face[0]]
+      for (let i = 1; i < face.length - 1; i++) {
+        const v1 = sliced.vertices[face[i]]
+        const v2 = sliced.vertices[face[i + 1]]
+        positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
       }
     }
     const geom = new THREE.BufferGeometry()
