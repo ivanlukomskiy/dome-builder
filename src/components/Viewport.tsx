@@ -6,9 +6,18 @@ import { DomeMesh } from './DomeMesh'
 interface ViewportProps {
   data: PolyhedronData
   layerCount: number
+  deletedVertexIndices: ReadonlySet<number>
+  selectedVertexIndices: ReadonlySet<number>
+  onVertexClick: (index: number) => void
 }
 
-export function Viewport({ data, layerCount }: ViewportProps) {
+export function Viewport({
+  data,
+  layerCount,
+  deletedVertexIndices,
+  selectedVertexIndices,
+  onVertexClick,
+}: ViewportProps) {
   return (
     <div className="viewport">
       <Canvas camera={{ position: [3.5, 2.8, 4], fov: 45 }}>
@@ -24,7 +33,13 @@ export function Viewport({ data, layerCount }: ViewportProps) {
           fadeDistance={20}
           infiniteGrid
         />
-        <DomeMesh data={data} layerCount={layerCount} />
+        <DomeMesh
+          data={data}
+          layerCount={layerCount}
+          deletedVertexIndices={deletedVertexIndices}
+          selectedVertexIndices={selectedVertexIndices}
+          onVertexClick={onVertexClick}
+        />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>
     </div>

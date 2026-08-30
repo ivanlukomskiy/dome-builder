@@ -342,3 +342,24 @@ export function sliceLayers(data: PolyhedronData, layerCount: number): SlicedPol
     keptFaces: data.faces.filter((f) => f.every((i) => kept.has(i))),
   }
 }
+
+// The rotationally-symmetric group a vertex belongs to: every vertex at the same
+// height (the same Layer), since a layer is exactly the ring of vertices the
+// polyhedron's symmetry carries into one another around the main axis.
+export function findSymmetricGroup(data: PolyhedronData, vertexIndex: number): number[] {
+  const layer = data.layers.find((l) => l.vertexIndices.includes(vertexIndex))
+  return layer ? layer.vertexIndices : [vertexIndex]
+}
+
+export function removeVertices(
+  sliced: SlicedPolyhedron,
+  removed: ReadonlySet<number>,
+): SlicedPolyhedron {
+  if (removed.size === 0) return sliced
+  return {
+    vertices: sliced.vertices,
+    keptVertexIndices: sliced.keptVertexIndices.filter((i) => !removed.has(i)),
+    keptEdges: sliced.keptEdges.filter(([a, b]) => !removed.has(a) && !removed.has(b)),
+    keptFaces: sliced.keptFaces.filter((f) => f.every((i) => !removed.has(i))),
+  }
+}

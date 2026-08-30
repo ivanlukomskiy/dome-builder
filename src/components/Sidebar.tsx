@@ -11,6 +11,13 @@ interface SidebarProps {
   layerCount: number
   onLayerCountChange: (count: number) => void
   data: PolyhedronData
+  selectedCount: number
+  canUndo: boolean
+  canRedo: boolean
+  onDeleteSelected: () => void
+  onUndo: () => void
+  onRedo: () => void
+  onCancelAll: () => void
 }
 
 export function Sidebar({
@@ -23,6 +30,13 @@ export function Sidebar({
   layerCount,
   onLayerCountChange,
   data,
+  selectedCount,
+  canUndo,
+  canRedo,
+  onDeleteSelected,
+  onUndo,
+  onRedo,
+  onCancelAll,
 }: SidebarProps) {
   const axisOptions = SHAPE_AXES[shape]
   const maxLayers = data.layers.length
@@ -95,6 +109,32 @@ export function Sidebar({
           <span className="layer-count">
             {layerCount} / {maxLayers}
           </span>
+        </div>
+      </section>
+
+      <section className="control-group">
+        <h2>Edit vertices</h2>
+        <p className="hint">
+          {selectedCount > 0
+            ? `${selectedCount} ${selectedCount !== 1 ? 'vertices' : 'vertex'} selected`
+            : 'Click a vertex to select it'}
+        </p>
+        <div className="button-row">
+          <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
+            Delete
+          </button>
+          <button disabled={!canUndo} onClick={onUndo}>
+            Undo
+          </button>
+          <button disabled={!canRedo} onClick={onRedo}>
+            Redo
+          </button>
+          <button
+            disabled={!canUndo && !canRedo && selectedCount === 0}
+            onClick={onCancelAll}
+          >
+            Cancel All
+          </button>
         </div>
       </section>
     </aside>

@@ -1,15 +1,28 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
+import type { ThreeEvent } from '@react-three/fiber'
 import type { PolyhedronData } from '../lib/polyhedra'
-import { sliceLayers } from '../lib/polyhedra'
+import { removeVertices, sliceLayers } from '../lib/polyhedra'
 
 interface DomeMeshProps {
   data: PolyhedronData
   layerCount: number
+  deletedVertexIndices: ReadonlySet<number>
+  selectedVertexIndices: ReadonlySet<number>
+  onVertexClick: (index: number) => void
 }
 
-export function DomeMesh({ data, layerCount }: DomeMeshProps) {
-  const sliced = useMemo(() => sliceLayers(data, layerCount), [data, layerCount])
+export function DomeMesh({
+  data,
+  layerCount,
+  deletedVertexIndices,
+  selectedVertexIndices,
+  onVertexClick,
+}: DomeMeshProps) {
+  const sliced = useMemo(() => {
+    const layered = sliceLayers(data, layerCount)
+    return removeVertices(layered, deletedVertexIndices)
+  }, [data, layerCount, deletedVertexIndices])
 
   const edgeGeometry = useMemo(() => {
     const positions: number[] = []
@@ -41,6 +54,14 @@ export function DomeMesh({ data, layerCount }: DomeMeshProps) {
     return geom
   }, [sliced])
 
+  const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation()
+    document.body.style.cursor = 'pointer'
+  }
+  const handlePointerOut = () => {
+    document.body.style.cursor = 'auto'
+  }
+
   return (
     <group>
       <mesh geometry={faceGeometry}>
@@ -57,10 +78,20 @@ export function DomeMesh({ data, layerCount }: DomeMeshProps) {
       </lineSegments>
       {sliced.keptVertexIndices.map((idx) => {
         const v = sliced.vertices[idx]
+        const isSelected = selectedVertexIndices.has(idx)
         return (
-          <mesh key={idx} position={[v.x, v.y, v.z]}>
-            <sphereGeometry args={[0.02, 16, 16]} />
-            <meshStandardMaterial color="#4fd97e" />
+          <mesh
+            key={idx}
+            position={[v.x, v.y, v.z]}
+            onClick={(e) => {
+              e.stopPropagation()
+              onVertexClick(idx)
+            }}
+            onPointerOver={handlePointerOver}
+            onPointerOut={handlePointerOut}
+          >
+            <sphereGeometry args={[isSelected ? 0.032 : 0.02, 16, 16]} />
+            <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
           </mesh>
         )
       })}
