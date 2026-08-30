@@ -41,6 +41,7 @@ function App() {
   // given as a fraction of the model's total height, offset from the model's vertical center.
   const [focalZ1, setFocalZ1] = useState(0)
   const [focalZ2, setFocalZ2] = useState(0)
+  const [edgeSegments, setEdgeSegments] = useState(8)
 
   const data = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
@@ -211,6 +212,8 @@ function App() {
         onFocalZ1Change={setFocalZ1}
         focalZ2={focalZ2}
         onFocalZ2Change={setFocalZ2}
+        edgeSegments={edgeSegments}
+        onEdgeSegmentsChange={setEdgeSegments}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -229,6 +232,7 @@ function App() {
         addedFaces={addedFaces}
         focalPoint1Y={focalPoint1Y}
         focalPoint2Y={focalPoint2Y}
+        edgeSegments={edgeSegments}
         onVertexClick={handleVertexClick}
         onDeselectAll={handleDeselectAll}
       />

@@ -45,6 +45,8 @@ interface SidebarProps {
   onFocalZ1Change: (value: number) => void
   focalZ2: number
   onFocalZ2Change: (value: number) => void
+  edgeSegments: number
+  onEdgeSegmentsChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -98,6 +100,8 @@ export function Sidebar({
   onFocalZ1Change,
   focalZ2,
   onFocalZ2Change,
+  edgeSegments,
+  onEdgeSegmentsChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -233,6 +237,25 @@ export function Sidebar({
               onChange={(e) => handleFocalChange(onFocalZ2Change, e.target.value)}
             />
           </div>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Edge Curvature</h2>
+          <div className="layer-slider-row">
+            <input
+              type="range"
+              min={1}
+              max={32}
+              value={edgeSegments}
+              onChange={(e) => onEdgeSegmentsChange(Number(e.target.value))}
+            />
+            <span className="layer-count">{edgeSegments} segments</span>
+          </div>
+          <p className="hint">
+            Each edge is bent through the confocal ellipsoids of the two focal points.
+          </p>
         </section>
       )}
 

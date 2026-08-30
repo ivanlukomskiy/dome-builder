@@ -16,6 +16,7 @@ interface ViewportProps {
   addedFaces: Face[]
   focalPoint1Y: number
   focalPoint2Y: number
+  edgeSegments: number
   onVertexClick: (index: number) => void
   onDeselectAll: () => void
 }
@@ -31,6 +32,7 @@ export function Viewport({
   addedFaces,
   focalPoint1Y,
   focalPoint2Y,
+  edgeSegments,
   onVertexClick,
   onDeselectAll,
 }: ViewportProps) {
@@ -60,6 +62,7 @@ export function Viewport({
           addedFaces={addedFaces}
           focalPoint1Y={focalPoint1Y}
           focalPoint2Y={focalPoint2Y}
+          edgeSegments={edgeSegments}
           onVertexClick={onVertexClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />

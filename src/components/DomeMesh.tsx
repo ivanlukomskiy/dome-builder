@@ -3,7 +3,12 @@ import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
-import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
+import {
+  computeArcEdgePoints,
+  removeVertices,
+  resolveVertexPosition,
+  sliceLayers,
+} from '../lib/polyhedra'
 
 interface DomeMeshProps {
   mode: ViewMode
@@ -16,6 +21,7 @@ interface DomeMeshProps {
   addedFaces: Face[]
   focalPoint1Y: number
   focalPoint2Y: number
+  edgeSegments: number
   onVertexClick: (index: number) => void
 }
 
@@ -30,6 +36,7 @@ export function DomeMesh({
   addedFaces,
   focalPoint1Y,
   focalPoint2Y,
+  edgeSegments,
   onVertexClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
@@ -75,32 +82,48 @@ export function DomeMesh({
     return geom
   }, [visibleAddedFaces, resolvePosition])
 
+  // In preview mode each edge is drawn as a run of small segments that bulge along the
+  // confocal-ellipsoid family for the two focal points, instead of a single straight line.
+  const pushEdge = useCallback(
+    (positions: number[], va: THREE.Vector3, vb: THREE.Vector3) => {
+      if (mode !== 'preview') {
+        positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z)
+        return
+      }
+      const arcPoints = computeArcEdgePoints(va, vb, focalPoint1Y, focalPoint2Y, edgeSegments)
+      for (let i = 0; i < arcPoints.length - 1; i++) {
+        const p0 = arcPoints[i]
+        const p1 = arcPoints[i + 1]
+        positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z)
+      }
+    },
+    [mode, focalPoint1Y, focalPoint2Y, edgeSegments],
+  )
+
   const addedEdgeGeometry = useMemo(() => {
     const positions: number[] = []
     for (const [i0, i1, i2] of visibleAddedFaces) {
       const v0 = resolvePosition(i0)
       const v1 = resolvePosition(i1)
       const v2 = resolvePosition(i2)
-      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
-      positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
-      positions.push(v2.x, v2.y, v2.z, v0.x, v0.y, v0.z)
+      pushEdge(positions, v0, v1)
+      pushEdge(positions, v1, v2)
+      pushEdge(positions, v2, v0)
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     return geom
-  }, [visibleAddedFaces, resolvePosition])
+  }, [visibleAddedFaces, resolvePosition, pushEdge])
 
   const edgeGeometry = useMemo(() => {
     const positions: number[] = []
     for (const [a, b] of sliced.keptEdges) {
-      const va = sliced.vertices[a]
-      const vb = sliced.vertices[b]
-      positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z)
+      pushEdge(positions, sliced.vertices[a], sliced.vertices[b])
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     return geom
-  }, [sliced])
+  }, [sliced, pushEdge])
 
   const faceGeometry = useMemo(() => {
     const positions: number[] = []
@@ -130,27 +153,31 @@ export function DomeMesh({
 
   return (
     <group>
-      <mesh geometry={faceGeometry}>
-        <meshStandardMaterial
-          color="#5b9bd5"
-          transparent
-          opacity={0.4}
-          side={THREE.DoubleSide}
-          roughness={0.6}
-        />
-      </mesh>
+      {mode === 'edit' && (
+        <mesh geometry={faceGeometry}>
+          <meshStandardMaterial
+            color="#5b9bd5"
+            transparent
+            opacity={0.4}
+            side={THREE.DoubleSide}
+            roughness={0.6}
+          />
+        </mesh>
+      )}
       <lineSegments geometry={edgeGeometry}>
         <lineBasicMaterial color="#1b3a57" />
       </lineSegments>
-      <mesh geometry={addedFaceGeometry}>
-        <meshStandardMaterial
-          color="#d55b9b"
-          transparent
-          opacity={0.4}
-          side={THREE.DoubleSide}
-          roughness={0.6}
-        />
-      </mesh>
+      {mode === 'edit' && (
+        <mesh geometry={addedFaceGeometry}>
+          <meshStandardMaterial
+            color="#d55b9b"
+            transparent
+            opacity={0.4}
+            side={THREE.DoubleSide}
+            roughness={0.6}
+          />
+        </mesh>
+      )}
       <lineSegments geometry={addedEdgeGeometry}>
         <lineBasicMaterial color="#571b3a" />
       </lineSegments>
