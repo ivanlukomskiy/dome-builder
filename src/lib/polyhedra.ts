@@ -612,6 +612,86 @@ export function pairByNearestNeighbor(
   return pairs
 }
 
+export interface ModelBounds {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  minZ: number
+  maxZ: number
+}
+
+export interface ModelStats {
+  vertexCount: number
+  edgeCount: number
+  faceCount: number
+  bounds: ModelBounds | null
+}
+
+// Everything the HUD needs to know about the model currently on screen: how many
+// vertices/edges/faces are actually visible (kept by the layer slice, not individually
+// deleted - canonical and added alike, the same rules DomeMesh itself renders by) and the
+// bounding box those visible vertices span, in mm.
+export function computeModelStats(
+  data: PolyhedronData,
+  transformedVertices: THREE.Vector3[],
+  addedVertices: ReadonlyMap<number, THREE.Vector3>,
+  layerCount: number,
+  deletedVertexIndices: ReadonlySet<number>,
+  deletedEdgeIndices: ReadonlySet<number>,
+  deletedFaceIndices: ReadonlySet<number>,
+  addedFaces: Face[],
+  addedEdges: Edge[],
+): ModelStats {
+  const sliced = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
+  const kept = removeVertices(sliced, deletedVertexIndices)
+  const keptSet = new Set(kept.keptVertexIndices)
+
+  const visibleVertexIds = new Set(kept.keptVertexIndices)
+
+  let faceCount = 0
+  data.faces.forEach((f, i) => {
+    if (!deletedFaceIndices.has(i) && f.every((idx) => keptSet.has(idx))) faceCount++
+  })
+  addedFaces.forEach((f, i) => {
+    const id = -(i + 1)
+    if (deletedFaceIndices.has(id)) return
+    if (f.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx)))) {
+      faceCount++
+      for (const idx of f) if (idx < 0) visibleVertexIds.add(idx)
+    }
+  })
+
+  let edgeCount = 0
+  data.edges.forEach(([a, b], i) => {
+    if (!deletedEdgeIndices.has(i) && keptSet.has(a) && keptSet.has(b)) edgeCount++
+  })
+  addedEdges.forEach(([a, b], i) => {
+    const id = -(i + 1)
+    if (deletedEdgeIndices.has(id)) return
+    const aOk = a < 0 ? !deletedVertexIndices.has(a) : keptSet.has(a)
+    const bOk = b < 0 ? !deletedVertexIndices.has(b) : keptSet.has(b)
+    if (aOk && bOk) edgeCount++
+  })
+
+  let bounds: ModelBounds | null = null
+  for (const id of visibleVertexIds) {
+    const p = resolveVertexPosition(id, transformedVertices, addedVertices)
+    if (!bounds) {
+      bounds = { minX: p.x, maxX: p.x, minY: p.y, maxY: p.y, minZ: p.z, maxZ: p.z }
+    } else {
+      bounds.minX = Math.min(bounds.minX, p.x)
+      bounds.maxX = Math.max(bounds.maxX, p.x)
+      bounds.minY = Math.min(bounds.minY, p.y)
+      bounds.maxY = Math.max(bounds.maxY, p.y)
+      bounds.minZ = Math.min(bounds.minZ, p.z)
+      bounds.maxZ = Math.max(bounds.maxZ, p.z)
+    }
+  }
+
+  return { vertexCount: visibleVertexIds.size, edgeCount, faceCount, bounds }
+}
+
 export interface AddedGeometry {
   vertices: Map<number, THREE.Vector3>
   faces: Face[]

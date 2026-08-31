@@ -1,9 +1,12 @@
+import { useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import type * as THREE from 'three'
 import type { EditTarget, ViewMode } from '../App'
 import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
+import { computeModelStats, resolveVertexPosition } from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
+import { Hud } from './Hud'
 
 interface ViewportProps {
   mode: ViewMode
@@ -58,8 +61,52 @@ export function Viewport({
   onFaceClick,
   onDeselectAll,
 }: ViewportProps) {
+  const stats = useMemo(
+    () =>
+      computeModelStats(
+        data,
+        transformedVertices,
+        addedVertices,
+        layerCount,
+        deletedVertexIndices,
+        deletedEdgeIndices,
+        deletedFaceIndices,
+        addedFaces,
+        addedEdges,
+      ),
+    [
+      data,
+      transformedVertices,
+      addedVertices,
+      layerCount,
+      deletedVertexIndices,
+      deletedEdgeIndices,
+      deletedFaceIndices,
+      addedFaces,
+      addedEdges,
+    ],
+  )
+
+  const selectedVertexElevation = useMemo(() => {
+    if (mode !== 'edit' || editTarget !== 'vertices' || selectedVertexIndices.size !== 1 || !stats.bounds) {
+      return null
+    }
+    const [id] = selectedVertexIndices
+    const pos = resolveVertexPosition(id, transformedVertices, addedVertices)
+    return pos.y - stats.bounds.minY
+  }, [mode, editTarget, selectedVertexIndices, transformedVertices, addedVertices, stats.bounds])
+
   return (
     <div className="viewport">
+      <Hud
+        mode={mode}
+        editTarget={editTarget}
+        stats={stats}
+        selectedVertexCount={selectedVertexIndices.size}
+        selectedEdgeCount={selectedEdgeIndices.size}
+        selectedFaceCount={selectedFaceIndices.size}
+        selectedVertexElevation={selectedVertexElevation}
+      />
       <Canvas
         camera={{ position: [8750, 7000, 10000], fov: 45, near: 10, far: 200000 }}
         onPointerMissed={onDeselectAll}

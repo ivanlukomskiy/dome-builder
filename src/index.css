@@ -217,3 +217,16 @@ body,
 .viewport canvas {
   display: block;
 }
+
+.hud {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
