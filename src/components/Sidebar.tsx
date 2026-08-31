@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+import type { ChangeEvent } from 'react'
 import type { ViewMode } from '../App'
 import type {
   AxisType,
@@ -16,11 +18,14 @@ import {
 } from '../lib/polyhedra'
 
 const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: 'new', label: 'New' },
   { value: 'edit', label: 'Edit' },
   { value: 'preview', label: 'Preview' },
 ]
 
 interface SidebarProps {
+  onExportConfig: () => void
+  onImportConfig: (file: File) => void
   mode: ViewMode
   onModeChange: (mode: ViewMode) => void
   shape: ShapeType
@@ -82,6 +87,8 @@ function sharedTransformValue(
 }
 
 export function Sidebar({
+  onExportConfig,
+  onImportConfig,
   mode,
   onModeChange,
   shape,
@@ -143,9 +150,31 @@ export function Sidebar({
     onChange(num)
   }
 
+  const importInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImportFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) onImportConfig(file)
+    e.target.value = ''
+  }
+
   return (
     <aside className="sidebar">
       <h1>Dome Builder</h1>
+
+      <section className="control-group">
+        <div className="button-row">
+          <button onClick={onExportConfig}>Export</button>
+          <button onClick={() => importInputRef.current?.click()}>Import</button>
+        </div>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json"
+          style={{ display: 'none' }}
+          onChange={handleImportFileChange}
+        />
+      </section>
 
       <section className="control-group">
         <div className="segmented-control">
@@ -161,7 +190,7 @@ export function Sidebar({
         </div>
       </section>
 
-      {mode === 'edit' && (
+      {mode === 'new' && (
         <section className="control-group">
           <h2>Shape</h2>
           {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
@@ -178,7 +207,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'edit' && (
+      {mode === 'new' && (
         <section className="control-group">
           <h2>Main axis</h2>
           {axisOptions.map((opt) => (
@@ -200,7 +229,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'edit' && (
+      {mode === 'new' && (
         <section className="control-group">
           <h2>Subdivisions</h2>
           <div className="layer-slider-row">
@@ -218,7 +247,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'edit' && (
+      {mode === 'new' && (
         <section className="control-group">
           <h2>Layers</h2>
           <div className="layer-slider-row">
@@ -236,22 +265,24 @@ export function Sidebar({
         </section>
       )}
 
-      <section className="control-group">
-        <h2>Center</h2>
-        <div className="transform-field">
-          <label>Center (z)</label>
-          <input
-            type="number"
-            step={0.05}
-            value={centerZ}
-            onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
-          />
-        </div>
-        <div className="button-row">
-          <button onClick={onGroundCenter}>Ground the Center</button>
-        </div>
-        <p className="hint">Sets the center&rsquo;s height to match the lowest visible vertex.</p>
-      </section>
+      {mode !== 'new' && (
+        <section className="control-group">
+          <h2>Center</h2>
+          <div className="transform-field">
+            <label>Center (z)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={centerZ}
+              onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
+            />
+          </div>
+          <div className="button-row">
+            <button onClick={onGroundCenter}>Ground the Center</button>
+          </div>
+          <p className="hint">Sets the center&rsquo;s height to match the lowest visible vertex.</p>
+        </section>
+      )}
 
       {mode === 'preview' && (
         <section className="control-group">

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import type * as THREE from 'three'
-import type { AxisType, Face, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
+import * as THREE from 'three'
+import type {
+  AxisType,
+  Face,
+  PolyhedronData,
+  SelectionMode,
+  ShapeType,
+  VertexTransform,
+} from './lib/polyhedra'
 import {
   applyAddedVertexTransforms,
   applyVertexTransforms,
@@ -20,39 +27,94 @@ import {
 } from './lib/polyhedra'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
+import type { DomeConfig, DomeState } from './lib/config'
+import {
+  deserializeConfig,
+  downloadConfigAsJson,
+  loadInitialState,
+  readConfigFromFile,
+  saveConfigToLocalStorage,
+  serializeConfig,
+} from './lib/config'
 
-export type ViewMode = 'edit' | 'preview'
+export type ViewMode = 'new' | 'edit' | 'preview'
+
+const DEFAULT_SHAPE: ShapeType = 'octahedron'
+const DEFAULT_AXIS: AxisType = 'vertex'
+const DEFAULT_SUBDIVISIONS = 3
+const DEFAULT_BASE_DATA = computePolyhedron(DEFAULT_SHAPE, DEFAULT_AXIS, DEFAULT_SUBDIVISIONS)
+
+const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
+const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
+const EMPTY_FACES: Face[] = []
 
 function App() {
-  const [mode, setMode] = useState<ViewMode>('edit')
-  const [shape, setShape] = useState<ShapeType>('octahedron')
-  const [axis, setAxis] = useState<AxisType>('vertex')
-  const [subdivisions, setSubdivisions] = useState(3)
-  const [layerCount, setLayerCount] = useState(2)
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>('symmetric')
+  // Restored once, on first render, from whatever was auto-saved last time (see the autosave
+  // effect below); null if there's nothing saved, in which case every field below falls back
+  // to its hardcoded default and the app opens on the "New" tab.
+  const [initial] = useState(() => loadInitialState())
 
-  const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
-  const [deletedGroups, setDeletedGroups] = useState<number[][]>([])
-  const [redoStack, setRedoStack] = useState<number[][]>([])
-  const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
-    new Map(),
-  )
-  const [addedVertices, setAddedVertices] = useState<Map<number, THREE.Vector3>>(new Map())
-  const [addedFaces, setAddedFaces] = useState<Face[]>([])
-  const [nextAddedVertexId, setNextAddedVertexId] = useState(-1)
+  const [mode, setMode] = useState<ViewMode>(initial ? 'edit' : 'new')
 
-  // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at a height given as a
-  // fraction of the model's total height, offset from the model's vertical center.
-  const [centerZ, setCenterZ] = useState(0)
-  const [edgeSegments, setEdgeSegments] = useState(8)
-  const [extrudeDistance, setExtrudeDistance] = useState(0.05)
-  const [thickness, setThickness] = useState(0.03)
-  const [cornerLength, setCornerLength] = useState(0.15)
+  // "New" tab picker: how to generate a shape. Purely a recipe for the live preview below -
+  // once a pick is committed (see handleModeChange), only the resulting vertex/face/edge data
+  // matters, so none of this is persisted.
+  const [shape, setShape] = useState<ShapeType>(DEFAULT_SHAPE)
+  const [axis, setAxis] = useState<AxisType>(DEFAULT_AXIS)
+  const [subdivisions, setSubdivisions] = useState(DEFAULT_SUBDIVISIONS)
+  const [shapeDirty, setShapeDirty] = useState(false)
 
-  const data = useMemo(
+  const previewData = useMemo(
     () => computePolyhedron(shape, axis, subdivisions),
     [shape, axis, subdivisions],
   )
+
+  // Applies a "New" tab pick and keeps the layer count defaulted to half the resulting layers,
+  // same as the shape itself would suggest.
+  const setNewShapeParams = (nextShape: ShapeType, nextAxis: AxisType, nextSubdivisions: number) => {
+    setShape(nextShape)
+    setAxis(nextAxis)
+    setSubdivisions(nextSubdivisions)
+    setShapeDirty(true)
+    const next = computePolyhedron(nextShape, nextAxis, nextSubdivisions)
+    setLayerCount(Math.ceil(next.layers.length / 2))
+  }
+  const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions)
+  const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions)
+  const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s)
+
+  // The committed geometry actually being edited/previewed - vertices, faces, and edges, plain
+  // and concrete. Only changes when a "New" tab pick is committed (or a config is loaded).
+  const [baseData, setBaseData] = useState<PolyhedronData>(initial?.baseData ?? DEFAULT_BASE_DATA)
+
+  const [layerCount, setLayerCount] = useState(
+    initial?.layerCount ?? Math.ceil(DEFAULT_BASE_DATA.layers.length / 2),
+  )
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>(
+    initial?.selectionMode ?? 'symmetric',
+  )
+
+  const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
+  const [deletedGroups, setDeletedGroups] = useState<number[][]>(initial?.deletedGroups ?? [])
+  const [redoStack, setRedoStack] = useState<number[][]>([])
+  const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
+    new Map(initial?.vertexTransforms ?? []),
+  )
+  const [addedVertices, setAddedVertices] = useState<Map<number, THREE.Vector3>>(
+    new Map(initial?.addedVertices ?? []),
+  )
+  const [addedFaces, setAddedFaces] = useState<Face[]>(initial?.addedFaces ?? [])
+  const [nextAddedVertexId, setNextAddedVertexId] = useState(initial?.nextAddedVertexId ?? -1)
+
+  // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at a height given as a
+  // fraction of the model's total height, offset from the model's vertical center.
+  const [centerZ, setCenterZ] = useState(initial?.centerZ ?? 0)
+  const [edgeSegments, setEdgeSegments] = useState(initial?.edgeSegments ?? 8)
+  const [extrudeDistance, setExtrudeDistance] = useState(initial?.extrudeDistance ?? 0.05)
+  const [thickness, setThickness] = useState(initial?.thickness ?? 0.03)
+  const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? 0.15)
+
+  const data = baseData
 
   const transformedVertices = useMemo(
     () => applyVertexTransforms(data.vertices, vertexTransforms),
@@ -67,29 +129,17 @@ function App() {
   )
 
   const modelExtent = useMemo(() => computeModelExtent(data.vertices), [data.vertices])
-  const centerY = centerZ * modelExtent.totalHeight
-
-  // Default to showing half the layers (rounded up) whenever the shape/axis/subdivision choice changes.
-  useEffect(() => {
-    setLayerCount(Math.ceil(data.layers.length / 2))
-  }, [data])
-
-  // Vertex-deletion, transform, and added-geometry edits only make sense for the dome config
-  // they were made against.
-  useEffect(() => {
-    setSelectedVertexIndices(new Set())
-    setDeletedGroups([])
-    setRedoStack([])
-    setVertexTransforms(new Map())
-    setAddedVertices(new Map())
-    setAddedFaces([])
-    setNextAddedVertexId(-1)
-  }, [shape, axis, subdivisions, layerCount])
+  const previewModelExtent = useMemo(
+    () => computeModelExtent(previewData.vertices),
+    [previewData],
+  )
+  const activeExtent = mode === 'new' ? previewModelExtent : modelExtent
+  const centerY = centerZ * activeExtent.totalHeight
 
   const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
 
   const handleVertexClick = (index: number) => {
-    if (deletedVertexIndices.has(index)) return
+    if (mode !== 'edit' || deletedVertexIndices.has(index)) return
 
     // Grouping is always done against base (untransformed) positions, canonical vertices
     // and added ones alike, so it stays stable regardless of any transform edits.
@@ -103,6 +153,8 @@ function App() {
     if (selectionMode === 'layer') {
       group = findLayerGroup(index, candidateIds, positionOf)
     } else if (selectionMode === 'symmetric') {
+      // The "New" tab's shape/axis choice no longer describes committed geometry after edits,
+      // but it's still the best guess we have for the model's rotational symmetry.
       const fold = SHAPE_AXES[shape].find((opt) => opt.value === axis)!.fold
       group = findRotationalSymmetryGroup(index, candidateIds, positionOf, fold)
     } else {
@@ -240,20 +292,108 @@ function App() {
     setCenterZ(modelExtent.totalHeight > 0 ? minY / modelExtent.totalHeight : 0)
   }
 
+  // Leaving "New" with a shape actually picked commits it as the geometry to edit, discarding
+  // whatever was being edited before (its vertex indices no longer mean anything against the
+  // new shape). Just passing through "New" without touching its controls leaves everything as
+  // it was - e.g. a config loaded from disk stays untouched if you only glance at the tab.
+  const handleModeChange = (newMode: ViewMode) => {
+    if (mode === 'new' && newMode !== 'new' && shapeDirty) {
+      setBaseData(previewData)
+      setDeletedGroups([])
+      setRedoStack([])
+      setVertexTransforms(new Map())
+      setAddedVertices(new Map())
+      setAddedFaces([])
+      setNextAddedVertexId(-1)
+      setSelectedVertexIndices(new Set())
+      setShapeDirty(false)
+    }
+    setMode(newMode)
+  }
+
+  const applyConfig = (state: DomeState) => {
+    setBaseData(state.baseData)
+    setLayerCount(state.layerCount)
+    setSelectionMode(state.selectionMode)
+    setCenterZ(state.centerZ)
+    setEdgeSegments(state.edgeSegments)
+    setExtrudeDistance(state.extrudeDistance)
+    setThickness(state.thickness)
+    setCornerLength(state.cornerLength)
+    setDeletedGroups(state.deletedGroups)
+    setRedoStack([])
+    setVertexTransforms(new Map(state.vertexTransforms))
+    setAddedVertices(new Map(state.addedVertices))
+    setAddedFaces(state.addedFaces)
+    setNextAddedVertexId(state.nextAddedVertexId)
+    setSelectedVertexIndices(new Set())
+    setShapeDirty(false)
+    setMode('edit')
+  }
+
+  const buildConfig = (): DomeConfig =>
+    serializeConfig({
+      baseData,
+      layerCount,
+      selectionMode,
+      centerZ,
+      edgeSegments,
+      extrudeDistance,
+      thickness,
+      cornerLength,
+      deletedGroups,
+      vertexTransforms,
+      addedVertices,
+      addedFaces,
+      nextAddedVertexId,
+    })
+
+  // Auto-save on every change to any config field, so the next page load can restore it.
+  useEffect(() => {
+    saveConfigToLocalStorage(buildConfig())
+  }, [
+    baseData,
+    layerCount,
+    selectionMode,
+    centerZ,
+    edgeSegments,
+    extrudeDistance,
+    thickness,
+    cornerLength,
+    deletedGroups,
+    vertexTransforms,
+    addedVertices,
+    addedFaces,
+    nextAddedVertexId,
+  ])
+
+  const handleExportConfig = () => {
+    downloadConfigAsJson(buildConfig())
+  }
+
+  const handleImportConfig = async (file: File) => {
+    const config = await readConfigFromFile(file)
+    applyConfig(deserializeConfig(config))
+  }
+
+  const isNew = mode === 'new'
+
   return (
     <div className="app">
       <Sidebar
+        onExportConfig={handleExportConfig}
+        onImportConfig={handleImportConfig}
         mode={mode}
-        onModeChange={setMode}
+        onModeChange={handleModeChange}
         shape={shape}
-        onShapeChange={setShape}
+        onShapeChange={handleShapeChange}
         axis={axis}
-        onAxisChange={setAxis}
+        onAxisChange={handleAxisChange}
         subdivisions={subdivisions}
-        onSubdivisionsChange={setSubdivisions}
+        onSubdivisionsChange={handleSubdivisionsChange}
         layerCount={layerCount}
         onLayerCountChange={setLayerCount}
-        data={data}
+        data={previewData}
         selectionMode={selectionMode}
         onSelectionModeChange={setSelectionMode}
         selectedCount={selectedVertexIndices.size}
@@ -284,13 +424,13 @@ function App() {
       />
       <Viewport
         mode={mode}
-        data={data}
+        data={isNew ? previewData : data}
         layerCount={layerCount}
-        transformedVertices={transformedVertices}
-        deletedVertexIndices={deletedVertexIndices}
-        selectedVertexIndices={selectedVertexIndices}
-        addedVertices={transformedAddedVertices}
-        addedFaces={addedFaces}
+        transformedVertices={isNew ? previewData.vertices : transformedVertices}
+        deletedVertexIndices={isNew ? EMPTY_INDEX_SET : deletedVertexIndices}
+        selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
+        addedVertices={isNew ? EMPTY_VERTEX_MAP : transformedAddedVertices}
+        addedFaces={isNew ? EMPTY_FACES : addedFaces}
         centerY={centerY}
         edgeSegments={edgeSegments}
         extrudeDistance={extrudeDistance}

@@ -189,7 +189,7 @@ export function DomeMesh({
 
   return (
     <group>
-      {mode === 'edit' && (
+      {(mode === 'edit' || mode === 'new') && (
         <mesh geometry={faceGeometry}>
           <meshStandardMaterial
             color="#5b9bd5"
@@ -200,7 +200,7 @@ export function DomeMesh({
           />
         </mesh>
       )}
-      {mode === 'edit' && (
+      {(mode === 'edit' || mode === 'new') && (
         <lineSegments geometry={edgeGeometry}>
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>

@@ -55,7 +55,7 @@ export const SHAPE_AXES: Record<ShapeType, AxisOption[]> = {
 // pentagons/hexagons, so downstream code (edges, layers, rendering) treats faces generically.
 type TriFace = [number, number, number]
 export type Face = number[]
-type Edge = [number, number]
+export type Edge = [number, number]
 
 // Canonical vertex/face data, matching three.js's own Octahedron/IcosahedronGeometry
 // construction, so winding (outward normals) is already correct.
@@ -267,6 +267,24 @@ export interface PolyhedronData {
 
 const HEIGHT_EPS = 1e-4
 
+// Groups vertices into horizontal layers by height, sorted top (index 0) to bottom - purely
+// geometric, so it works equally well on a freshly generated polyhedron or on vertices
+// restored from a saved config.
+export function computeLayers(vertices: THREE.Vector3[]): Layer[] {
+  const order = vertices.map((_, i) => i).sort((a, b) => vertices[b].y - vertices[a].y)
+  const layers: Layer[] = []
+  for (const idx of order) {
+    const y = vertices[idx].y
+    const current = layers[layers.length - 1]
+    if (current && Math.abs(current.height - y) < HEIGHT_EPS) {
+      current.vertexIndices.push(idx)
+    } else {
+      layers.push({ height: y, vertexIndices: [idx] })
+    }
+  }
+  return layers
+}
+
 function getAxisVector(
   vertices: THREE.Vector3[],
   faces: Face[],
@@ -319,19 +337,7 @@ export function computePolyhedron(
   const quat = new THREE.Quaternion().setFromUnitVectors(axisVec, up)
   const vertices = finalVertices.map((v) => v.clone().applyQuaternion(quat))
 
-  const order = vertices.map((_, i) => i).sort((a, b) => vertices[b].y - vertices[a].y)
-  const layers: Layer[] = []
-  for (const idx of order) {
-    const y = vertices[idx].y
-    const current = layers[layers.length - 1]
-    if (current && Math.abs(current.height - y) < HEIGHT_EPS) {
-      current.vertexIndices.push(idx)
-    } else {
-      layers.push({ height: y, vertexIndices: [idx] })
-    }
-  }
-
-  return { vertices, faces, edges, layers }
+  return { vertices, faces, edges, layers: computeLayers(vertices) }
 }
 
 export interface SlicedPolyhedron {
