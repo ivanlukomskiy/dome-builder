@@ -48,6 +48,12 @@ const DEFAULT_BASE_DATA = computePolyhedron(
   DEFAULT_DIAMETER_MM,
 )
 
+const DEFAULT_CENTER_Z = 0
+const DEFAULT_EDGE_SEGMENTS = 8
+const DEFAULT_EXTRUDE_DISTANCE = 125
+const DEFAULT_THICKNESS = 75
+const DEFAULT_CORNER_LENGTH = 375
+
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
 const EMPTY_FACES: Face[] = []
@@ -125,11 +131,13 @@ function App() {
   const [nextAddedVertexId, setNextAddedVertexId] = useState(initial?.nextAddedVertexId ?? -1)
 
   // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at this height in mm.
-  const [centerZ, setCenterZ] = useState(initial?.centerZ ?? 0)
-  const [edgeSegments, setEdgeSegments] = useState(initial?.edgeSegments ?? 8)
-  const [extrudeDistance, setExtrudeDistance] = useState(initial?.extrudeDistance ?? 125)
-  const [thickness, setThickness] = useState(initial?.thickness ?? 75)
-  const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? 375)
+  const [centerZ, setCenterZ] = useState(initial?.centerZ ?? DEFAULT_CENTER_Z)
+  const [edgeSegments, setEdgeSegments] = useState(initial?.edgeSegments ?? DEFAULT_EDGE_SEGMENTS)
+  const [extrudeDistance, setExtrudeDistance] = useState(
+    initial?.extrudeDistance ?? DEFAULT_EXTRUDE_DISTANCE,
+  )
+  const [thickness, setThickness] = useState(initial?.thickness ?? DEFAULT_THICKNESS)
+  const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? DEFAULT_CORNER_LENGTH)
 
   const data = baseData
 
@@ -303,8 +311,10 @@ function App() {
 
   // Leaving "New" with a shape actually picked commits it as the geometry to edit, discarding
   // whatever was being edited before (its vertex indices no longer mean anything against the
-  // new shape). Just passing through "New" without touching its controls leaves everything as
-  // it was - e.g. a config loaded from disk stays untouched if you only glance at the tab.
+  // new shape) and resetting every other tab's settings (center, edge curvature, ...) back to
+  // their defaults, since they were tuned for a dome that no longer exists. Just passing
+  // through "New" without touching its controls leaves everything as it was - e.g. a config
+  // loaded from disk stays untouched if you only glance at the tab.
   const handleModeChange = (newMode: ViewMode) => {
     if (mode === 'new' && newMode !== 'new' && shapeDirty) {
       setBaseData(previewData)
@@ -315,6 +325,11 @@ function App() {
       setAddedFaces([])
       setNextAddedVertexId(-1)
       setSelectedVertexIndices(new Set())
+      setCenterZ(DEFAULT_CENTER_Z)
+      setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
+      setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
+      setThickness(DEFAULT_THICKNESS)
+      setCornerLength(DEFAULT_CORNER_LENGTH)
       setShapeDirty(false)
     }
     setMode(newMode)
