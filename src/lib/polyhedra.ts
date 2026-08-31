@@ -526,9 +526,27 @@ export function resolveVertexPosition(
 }
 
 // An edge's own "position", for grouping purposes (layer/symmetric selection work the same way
-// for edges as for vertices, just keyed off this midpoint instead of the vertex itself).
-export function edgeMidpoint(edge: Edge, vertices: THREE.Vector3[]): THREE.Vector3 {
-  return vertices[edge[0]].clone().add(vertices[edge[1]]).multiplyScalar(0.5)
+// for edges as for vertices, just keyed off this midpoint instead of the vertex itself). Takes
+// a generic positionOf since an edge (canonical or added) can reference added vertices too.
+export function edgeMidpoint(edge: Edge, positionOf: (id: number) => THREE.Vector3): THREE.Vector3 {
+  return positionOf(edge[0]).clone().add(positionOf(edge[1])).multiplyScalar(0.5)
+}
+
+// a_b, order-independent - the shared key two vertex ids resolve to regardless of which order
+// an edge lists them in.
+export function edgeKey(a: number, b: number): string {
+  return a < b ? `${a}_${b}` : `${b}_${a}`
+}
+
+// Every edge that already exists between two vertices, canonical or added, keyed the same
+// order-independent way - so a new edge only gets created when one is genuinely missing.
+// Signed the same way added vertices/faces are: non-negative indexes into `canonicalEdges`,
+// negative into `addedEdges` via -(index + 1).
+export function buildEdgeIndex(canonicalEdges: Edge[], addedEdges: Edge[]): Map<string, number> {
+  const index = new Map<string, number>()
+  canonicalEdges.forEach(([a, b], i) => index.set(edgeKey(a, b), i))
+  addedEdges.forEach(([a, b], i) => index.set(edgeKey(a, b), -(i + 1)))
+  return index
 }
 
 // A face's own "position", same idea as edgeMidpoint - takes a generic positionOf since a face
@@ -561,24 +579,16 @@ export function findEdgeTriangles(edgeIndices: number[], edges: Edge[]): [number
   return triangles
 }
 
-export interface AddedGeometry {
-  vertices: Map<number, THREE.Vector3>
-  faces: Face[]
-  nextId: number
-}
-
-// Greedily pairs up the given vertices by nearest neighbor: take one, find the closest
-// remaining vertex to it, add a new vertex at their midpoint, and connect all three into a
-// triangular face. Repeats until every input vertex has been paired. Requires an even count.
-export function buildAddedGeometry(
-  selectedIndices: number[],
-  positionOf: (index: number) => THREE.Vector3,
-  startId: number,
-): AddedGeometry {
-  const pool = [...selectedIndices]
-  const vertices = new Map<number, THREE.Vector3>()
-  const faces: Face[] = []
-  let nextId = startId
+// Greedily pairs up the given ids by nearest neighbor: take one, find the closest remaining id
+// to it, pair them off, repeat until every id has been paired. Requires an even count. Shared
+// by "Add Points" (bridges each pair with a new midpoint) and "Connect Vertices" (joins each
+// pair directly).
+export function pairByNearestNeighbor(
+  ids: number[],
+  positionOf: (id: number) => THREE.Vector3,
+): [number, number][] {
+  const pool = [...ids]
+  const pairs: [number, number][] = []
 
   while (pool.length > 0) {
     const a = pool.shift()!
@@ -592,6 +602,29 @@ export function buildAddedGeometry(
       }
     }
     const b = pool.splice(closestPos, 1)[0]
+    pairs.push([a, b])
+  }
+  return pairs
+}
+
+export interface AddedGeometry {
+  vertices: Map<number, THREE.Vector3>
+  faces: Face[]
+  nextId: number
+}
+
+// Pairs up the given vertices by nearest neighbor, adding a new vertex at each pair's midpoint
+// and connecting all three into a triangular face.
+export function buildAddedGeometry(
+  selectedIndices: number[],
+  positionOf: (index: number) => THREE.Vector3,
+  startId: number,
+): AddedGeometry {
+  const vertices = new Map<number, THREE.Vector3>()
+  const faces: Face[] = []
+  let nextId = startId
+
+  for (const [a, b] of pairByNearestNeighbor(selectedIndices, positionOf)) {
     const midpoint = positionOf(a).clone().add(positionOf(b)).multiplyScalar(0.5)
     vertices.set(nextId, midpoint)
     faces.push([a, b, nextId])

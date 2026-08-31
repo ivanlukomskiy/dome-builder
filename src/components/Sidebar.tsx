@@ -58,6 +58,7 @@ interface SidebarProps {
   onResetTransform: () => void
   canAddPoints: boolean
   onAddPoints: () => void
+  onConnectVertices: () => void
   onAdjustToSphere: () => void
   selectedEdgeCount: number
   selectedEdgeIndices: ReadonlySet<number>
@@ -158,6 +159,7 @@ export function Sidebar({
   onResetTransform,
   canAddPoints,
   onAddPoints,
+  onConnectVertices,
   onAdjustToSphere,
   selectedEdgeCount,
   selectedEdgeIndices,
@@ -506,10 +508,17 @@ export function Sidebar({
             <button disabled={!canAddPoints} onClick={onAddPoints}>
               Add Points
             </button>
+            <button disabled={!canAddPoints} onClick={onConnectVertices}>
+              Connect Vertices
+            </button>
           </div>
           {selectedCount > 0 && !canAddPoints && (
             <p className="hint">Select an even number of points to pair them up.</p>
           )}
+          <p className="hint">
+            Connect Vertices pairs them by nearest neighbor and joins each pair with a direct
+            edge, skipping any pair that's already connected.
+          </p>
           <div className="button-row">
             <button onClick={onAdjustToSphere}>Adjust to a Sphere</button>
           </div>

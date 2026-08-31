@@ -2,7 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import type * as THREE from 'three'
 import type { EditTarget, ViewMode } from '../App'
-import type { Face, PolyhedronData } from '../lib/polyhedra'
+import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
 
 interface ViewportProps {
@@ -20,6 +20,7 @@ interface ViewportProps {
   deletedFaceIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
+  addedEdges: Edge[]
   centerY: number
   edgeSegments: number
   extrudeDistance: number
@@ -46,6 +47,7 @@ export function Viewport({
   deletedFaceIndices,
   addedVertices,
   addedFaces,
+  addedEdges,
   centerY,
   edgeSegments,
   extrudeDistance,
@@ -95,6 +97,7 @@ export function Viewport({
           deletedFaceIndices={deletedFaceIndices}
           addedVertices={addedVertices}
           addedFaces={addedFaces}
+          addedEdges={addedEdges}
           centerY={centerY}
           edgeSegments={edgeSegments}
           extrudeDistance={extrudeDistance}

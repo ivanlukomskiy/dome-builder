@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
-import type { Face, PolyhedronData } from '../lib/polyhedra'
+import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
 import {
   computeEdgePolyline,
   extrudeArcToBeam,
@@ -71,6 +71,7 @@ interface DomeMeshProps {
   deletedFaceIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
+  addedEdges: Edge[]
   centerY: number
   edgeSegments: number
   extrudeDistance: number
@@ -96,6 +97,7 @@ export function DomeMesh({
   deletedFaceIndices,
   addedVertices,
   addedFaces,
+  addedEdges,
   centerY,
   edgeSegments,
   extrudeDistance,
@@ -189,22 +191,6 @@ export function DomeMesh({
     return geom
   }, [visibleAddedFaces, resolvePosition])
 
-  // Edit mode draws each edge as a plain straight line.
-  const addedEdgeGeometry = useMemo(() => {
-    const positions: number[] = []
-    for (const [i0, i1, i2] of visibleAddedFaces) {
-      const v0 = resolvePosition(i0)
-      const v1 = resolvePosition(i1)
-      const v2 = resolvePosition(i2)
-      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
-      positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
-      positions.push(v2.x, v2.y, v2.z, v0.x, v0.y, v0.z)
-    }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    return geom
-  }, [visibleAddedFaces, resolvePosition])
-
   // The canonical edges currently in view, keeping each one's index into `data.edges` around -
   // that index is what selection, deletion, and thickness overrides are keyed by.
   const visibleEdgeEntries = useMemo(
@@ -213,6 +199,24 @@ export function DomeMesh({
         .map((edge, index) => ({ edge, index }))
         .filter(({ edge: [a, b], index }) => keptSet.has(a) && keptSet.has(b) && !deletedEdgeIndices.has(index)),
     [data.edges, keptSet, deletedEdgeIndices],
+  )
+
+  // Added edges currently in view - the ones "Add Points" (or a canonical edge that got
+  // deleted) created beyond the canonical set. Signed the same way added vertices/faces are
+  // (negative, via -(index in addedEdges) - 1), and independent of any face: an edge stays
+  // visible as long as its own endpoints are and it isn't itself deleted, whether or not the
+  // face it was originally built for still stands.
+  const visibleAddedEdgeEntries = useMemo(
+    () =>
+      addedEdges
+        .map((edge, i) => ({ edge, index: -(i + 1) }))
+        .filter(
+          ({ edge: [a, b], index }) =>
+            !deletedEdgeIndices.has(index) &&
+            (a < 0 ? !deletedVertexIndices.has(a) : keptSet.has(a)) &&
+            (b < 0 ? !deletedVertexIndices.has(b) : keptSet.has(b)),
+        ),
+    [addedEdges, keptSet, deletedVertexIndices, deletedEdgeIndices],
   )
 
   const edgeGeometry = useMemo(() => {
@@ -226,6 +230,18 @@ export function DomeMesh({
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     return geom
   }, [visibleEdgeEntries, sliced.vertices])
+
+  const addedEdgeGeometry = useMemo(() => {
+    const positions: number[] = []
+    for (const { edge: [a, b] } of visibleAddedEdgeEntries) {
+      const va = resolvePosition(a)
+      const vb = resolvePosition(b)
+      positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z)
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return geom
+  }, [visibleAddedEdgeEntries, resolvePosition])
 
   // Preview mode instead turns each edge into a solid beam: turn it into a polyline with
   // mitered corners (straight tangent lead-ins at each end, bridged either by a sharp point or
@@ -264,23 +280,24 @@ export function DomeMesh({
 
   const addedEdgeBeamGeometry = useMemo(() => {
     const positions: number[] = []
-    for (const [i0, i1, i2] of visibleAddedFaces) {
-      const v0 = resolvePosition(i0)
-      const v1 = resolvePosition(i1)
-      const v2 = resolvePosition(i2)
-      for (const [a, b] of [
-        [v0, v1],
-        [v1, v2],
-        [v2, v0],
-      ] as const) {
-        for (const v of buildBeam(a, b, thickness)) positions.push(v.x, v.y, v.z)
+    const colors: number[] = []
+    for (const { edge: [a, b], index } of visibleAddedEdgeEntries) {
+      const override = edgeThickness.get(index)
+      const beamThickness = override ?? thickness
+      const color = edgeThicknessColor(override)
+      const va = resolvePosition(a)
+      const vb = resolvePosition(b)
+      for (const v of buildBeam(va, vb, beamThickness)) {
+        positions.push(v.x, v.y, v.z)
+        colors.push(color.r, color.g, color.b)
       }
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
     geom.computeVertexNormals()
     return geom
-  }, [visibleAddedFaces, resolvePosition, buildBeam, thickness])
+  }, [visibleAddedEdgeEntries, resolvePosition, buildBeam, edgeThickness, thickness])
 
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
@@ -340,7 +357,7 @@ export function DomeMesh({
           />
         </mesh>
       )}
-      {mode === 'edit' && (
+      {(editingVertices || editingFaces) && (
         <lineSegments geometry={addedEdgeGeometry}>
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
@@ -352,11 +369,7 @@ export function DomeMesh({
       )}
       {mode === 'preview' && (
         <mesh geometry={addedEdgeBeamGeometry}>
-          <meshStandardMaterial
-            color={`#${EDGE_DEFAULT_COLOR.getHexString()}`}
-            side={THREE.DoubleSide}
-            roughness={0.5}
-          />
+          <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.5} />
         </mesh>
       )}
       {editingVertices &&
@@ -407,6 +420,37 @@ export function DomeMesh({
         visibleEdgeEntries.map(({ edge: [a, b], index }) => {
           const va = sliced.vertices[a]
           const vb = sliced.vertices[b]
+          const mid = va.clone().add(vb).multiplyScalar(0.5)
+          const direction = vb.clone().sub(va)
+          const length = direction.length()
+          const quaternion = new THREE.Quaternion().setFromUnitVectors(
+            up,
+            direction.normalize(),
+          )
+          const isSelected = selectedEdgeIndices.has(index)
+          return (
+            <mesh
+              key={index}
+              position={[mid.x, mid.y, mid.z]}
+              quaternion={quaternion}
+              onClick={(e) => {
+                e.stopPropagation()
+                onEdgeClick(index)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <cylinderGeometry args={[EDGE_MARKER_RADIUS, EDGE_MARKER_RADIUS, length, 8]} />
+              <meshStandardMaterial
+                color={edgeMarkerColor(edgeThickness.get(index), isSelected)}
+              />
+            </mesh>
+          )
+        })}
+      {editingEdges &&
+        visibleAddedEdgeEntries.map(({ edge: [a, b], index }) => {
+          const va = resolvePosition(a)
+          const vb = resolvePosition(b)
           const mid = va.clone().add(vb).multiplyScalar(0.5)
           const direction = vb.clone().sub(va)
           const length = direction.length()

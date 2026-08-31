@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import type {
   AxisType,
+  Edge,
   Face,
   PolyhedronData,
   SelectionMode,
@@ -12,17 +13,20 @@ import {
   applyAddedVertexTransforms,
   applyVertexTransforms,
   buildAddedGeometry,
+  buildEdgeIndex,
   computePolyhedron,
   computeTransformToPosition,
   computeVisibleVertexIds,
   DEFAULT_DIAMETER_MM,
   DEFAULT_VERTEX_TRANSFORM,
+  edgeKey,
   edgeMidpoint,
   faceCentroid,
   findEdgeTriangles,
   findLayerGroup,
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
+  pairByNearestNeighbor,
   resolveVertexPosition,
   scaleToRadius,
   SHAPE_AXES,
@@ -46,6 +50,12 @@ export type EditTarget = 'vertices' | 'edges' | 'faces'
 // Face ids are signed like added-vertex ids: non-negative indexes into `data.faces`
 // (canonical), negative into `addedFaces` via -(index + 1).
 function faceIdToAddedIndex(id: number): number {
+  return -id - 1
+}
+
+// Same signed scheme for edge ids: non-negative indexes into `data.edges` (canonical),
+// negative into `addedEdges` via -(index + 1).
+function edgeIdToAddedIndex(id: number): number {
   return -id - 1
 }
 
@@ -81,6 +91,7 @@ const DEFAULT_CORNER_LENGTH = 375
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
 const EMPTY_FACES: Face[] = []
+const EMPTY_EDGES: Edge[] = []
 const EMPTY_EDGE_THICKNESS: ReadonlyMap<number, number> = new Map()
 
 function App() {
@@ -168,6 +179,7 @@ function App() {
     new Map(initial?.addedVertices ?? []),
   )
   const [addedFaces, setAddedFaces] = useState<Face[]>(initial?.addedFaces ?? [])
+  const [addedEdges, setAddedEdges] = useState<Edge[]>(initial?.addedEdges ?? [])
   const [nextAddedVertexId, setNextAddedVertexId] = useState(initial?.nextAddedVertexId ?? -1)
 
   // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at this height in mm.
@@ -227,14 +239,19 @@ function App() {
   const handleEdgeClick = (index: number) => {
     if (mode !== 'edit' || editTarget !== 'edges') return
 
-    const positionOf = (id: number) => edgeMidpoint(data.edges[id], data.vertices)
-    const candidateIds = data.edges.map((_, i) => i)
+    const edgeById = (eid: number): Edge => (eid >= 0 ? data.edges[eid] : addedEdges[edgeIdToAddedIndex(eid)])
+    const positionOf = (vid: number) => resolveVertexPosition(vid, data.vertices, addedVertices)
+    const midpointOf = (eid: number) => edgeMidpoint(edgeById(eid), positionOf)
+    const candidateIds = [
+      ...data.edges.map((_, i) => i),
+      ...addedEdges.map((_, i) => -(i + 1)),
+    ]
 
     let group: number[]
     if (selectionMode === 'layer') {
-      group = findLayerGroup(index, candidateIds, positionOf)
+      group = findLayerGroup(index, candidateIds, midpointOf)
     } else if (selectionMode === 'symmetric') {
-      group = findRotationalSymmetryGroup(index, candidateIds, positionOf, symmetryFold())
+      group = findRotationalSymmetryGroup(index, candidateIds, midpointOf, symmetryFold())
     } else {
       group = [index]
     }
@@ -285,7 +302,10 @@ function App() {
   // one from its own (still-present) border edges works.
   const creatableFaces = useMemo(() => {
     if (mode !== 'edit' || editTarget !== 'edges') return []
-    const triangles = findEdgeTriangles(Array.from(selectedEdgeIndices), data.edges)
+    // Only canonical edges can close a triangle here - findEdgeTriangles indexes into
+    // `data.edges`, so a selected added edge (a negative id) wouldn't resolve correctly.
+    const canonicalSelected = Array.from(selectedEdgeIndices).filter((i) => i >= 0)
+    const triangles = findEdgeTriangles(canonicalSelected, data.edges)
     const key = (f: number[]) => [...f].sort((a, b) => a - b).join(',')
     const existing = new Set<string>()
     data.faces.forEach((f, i) => {
@@ -303,15 +323,21 @@ function App() {
     setSelectedEdgeIndices(new Set())
   }
 
-  // Deleting an edge cascades: any face (canonical or added) that has it as one of its own
-  // sides can no longer stand, and a canonical vertex it touched that's left with no other
-  // surviving edge is a stray point, not worth keeping either.
+  // Deleting an edge (canonical or added) cascades: any face (canonical or added) that has it
+  // as one of its own sides can no longer stand, and a canonical vertex it touched that's left
+  // with no other surviving edge (canonical or added) is a stray point, not worth keeping
+  // either. An added vertex left in the same situation needs no special handling - it already
+  // disappears on its own once the face it was built for is gone.
   const handleDeleteSelectedEdges = () => {
     if (selectedEdgeIndices.size === 0) return
 
-    const edgeKey = (a: number, b: number) => (a < b ? `${a}_${b}` : `${b}_${a}`)
+    const edgeById = (eid: number): Edge => (eid >= 0 ? data.edges[eid] : addedEdges[edgeIdToAddedIndex(eid)])
+
     const deletedEdgeKeys = new Set(
-      Array.from(selectedEdgeIndices).map((i) => edgeKey(data.edges[i][0], data.edges[i][1])),
+      Array.from(selectedEdgeIndices).map((i) => {
+        const [a, b] = edgeById(i)
+        return edgeKey(a, b)
+      }),
     )
     const faceUsesADeletedEdge = (face: Face) =>
       face.some((v, i) => deletedEdgeKeys.has(edgeKey(v, face[(i + 1) % face.length])))
@@ -327,18 +353,26 @@ function App() {
 
     // A canonical vertex touched by a deleted edge, left with no other surviving edge, is stray.
     const remainingDegree = new Map<number, number>()
-    data.edges.forEach((e, i) => {
-      if (selectedEdgeIndices.has(i) || deletedEdgeIndices.has(i)) return
+    const countEdge = (e: Edge) => {
       remainingDegree.set(e[0], (remainingDegree.get(e[0]) ?? 0) + 1)
       remainingDegree.set(e[1], (remainingDegree.get(e[1]) ?? 0) + 1)
+    }
+    data.edges.forEach((e, i) => {
+      if (!selectedEdgeIndices.has(i) && !deletedEdgeIndices.has(i)) countEdge(e)
     })
+    addedEdges.forEach((e, i) => {
+      const id = -(i + 1)
+      if (!selectedEdgeIndices.has(id) && !deletedEdgeIndices.has(id)) countEdge(e)
+    })
+
     const touchedVertices = new Set<number>()
     for (const i of selectedEdgeIndices) {
-      touchedVertices.add(data.edges[i][0])
-      touchedVertices.add(data.edges[i][1])
+      const [a, b] = edgeById(i)
+      touchedVertices.add(a)
+      touchedVertices.add(b)
     }
     const strayVertices = Array.from(touchedVertices).filter(
-      (v) => !remainingDegree.has(v) && !deletedVertexIndices.has(v),
+      (v) => v >= 0 && !remainingDegree.has(v) && !deletedVertexIndices.has(v),
     )
 
     setDeletedEdgeIndices((prev) => new Set([...prev, ...selectedEdgeIndices]))
@@ -426,10 +460,20 @@ function App() {
     })
   }
 
-  const canAddPoints = selectedVertexIndices.size > 0 && selectedVertexIndices.size % 2 === 0
+  const canPairVertices = selectedVertexIndices.size > 0 && selectedVertexIndices.size % 2 === 0
+
+  // The connections that currently, actually exist between vertices - canonical or added,
+  // excluding any that have been deleted. A deleted edge's data is still sitting in `data.edges`
+  // (only its id is in `deletedEdgeIndices`), so without filtering it out here, "is this pair
+  // already connected" would say yes for a connection the user just removed.
+  const buildLiveEdgeIndex = () =>
+    buildEdgeIndex(
+      data.edges.filter((_, i) => !deletedEdgeIndices.has(i)),
+      addedEdges.filter((_, i) => !deletedEdgeIndices.has(-(i + 1))),
+    )
 
   const handleAddPoints = () => {
-    if (!canAddPoints) return
+    if (!canPairVertices) return
     const positionOf = (index: number) =>
       resolveVertexPosition(index, transformedVertices, transformedAddedVertices)
     const { vertices, faces, nextId } = buildAddedGeometry(
@@ -437,9 +481,36 @@ function App() {
       positionOf,
       nextAddedVertexId,
     )
+    // Each new triangle's 2 sides to its fresh midpoint are always missing edges (the midpoint
+    // never existed before); its "base" side (the original pair) only needs one if that pair
+    // wasn't already connected.
+    const edgeIndex = buildLiveEdgeIndex()
+    const newEdges: Edge[] = []
+    for (const [a, b, mid] of faces) {
+      newEdges.push([a, mid], [mid, b])
+      if (!edgeIndex.has(edgeKey(a, b))) newEdges.push([a, b])
+    }
     setAddedVertices((prev) => new Map([...prev, ...vertices]))
     setAddedFaces((prev) => [...prev, ...faces])
+    setAddedEdges((prev) => [...prev, ...newEdges])
     setNextAddedVertexId(nextId)
+    setSelectedVertexIndices(new Set())
+  }
+
+  // Pairs up the selected vertices by nearest neighbor (same pairing "Add Points" uses) and
+  // connects each pair with a direct edge, skipping any pair that's already connected - no
+  // midpoint, no face, just the strut.
+  const handleConnectVertices = () => {
+    if (!canPairVertices) return
+    const positionOf = (index: number) =>
+      resolveVertexPosition(index, transformedVertices, transformedAddedVertices)
+    const pairs = pairByNearestNeighbor(Array.from(selectedVertexIndices), positionOf)
+    const edgeIndex = buildLiveEdgeIndex()
+    const newEdges: Edge[] = []
+    for (const [a, b] of pairs) {
+      if (!edgeIndex.has(edgeKey(a, b))) newEdges.push([a, b])
+    }
+    if (newEdges.length > 0) setAddedEdges((prev) => [...prev, ...newEdges])
     setSelectedVertexIndices(new Set())
   }
 
@@ -509,6 +580,7 @@ function App() {
     setVertexTransforms(new Map())
     setAddedVertices(new Map())
     setAddedFaces([])
+    setAddedEdges([])
     setNextAddedVertexId(-1)
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
@@ -544,6 +616,7 @@ function App() {
     setVertexTransforms(new Map(state.vertexTransforms))
     setAddedVertices(new Map(state.addedVertices))
     setAddedFaces(state.addedFaces)
+    setAddedEdges(state.addedEdges)
     setNextAddedVertexId(state.nextAddedVertexId)
     setEdgeThickness(new Map(state.edgeThickness))
     setDeletedFaceIndices(new Set(state.deletedFaceIndices))
@@ -570,6 +643,7 @@ function App() {
       addedVertices,
       addedFaces,
       nextAddedVertexId,
+      addedEdges,
       edgeThickness,
       deletedFaceIndices,
       deletedEdgeIndices,
@@ -592,6 +666,7 @@ function App() {
     addedVertices,
     addedFaces,
     nextAddedVertexId,
+    addedEdges,
     edgeThickness,
     deletedFaceIndices,
     deletedEdgeIndices,
@@ -638,8 +713,9 @@ function App() {
         vertexTransforms={vertexTransforms}
         onTransformChange={handleTransformChange}
         onResetTransform={handleResetTransform}
-        canAddPoints={canAddPoints}
+        canAddPoints={canPairVertices}
         onAddPoints={handleAddPoints}
+        onConnectVertices={handleConnectVertices}
         onAdjustToSphere={handleAdjustToSphere}
         selectedEdgeCount={selectedEdgeIndices.size}
         selectedEdgeIndices={selectedEdgeIndices}
@@ -684,6 +760,7 @@ function App() {
         deletedFaceIndices={isNew ? EMPTY_INDEX_SET : deletedFaceIndices}
         addedVertices={isNew ? EMPTY_VERTEX_MAP : transformedAddedVertices}
         addedFaces={isNew ? EMPTY_FACES : addedFaces}
+        addedEdges={isNew ? EMPTY_EDGES : addedEdges}
         centerY={centerY}
         edgeSegments={edgeSegments}
         extrudeDistance={extrudeDistance}
