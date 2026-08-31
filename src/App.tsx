@@ -12,10 +12,10 @@ import {
   applyAddedVertexTransforms,
   applyVertexTransforms,
   buildAddedGeometry,
-  computeModelExtent,
   computePolyhedron,
   computeTransformToPosition,
   computeVisibleVertexIds,
+  DEFAULT_DIAMETER_MM,
   DEFAULT_VERTEX_TRANSFORM,
   findLayerGroup,
   findRotationalSymmetryGroup,
@@ -23,7 +23,6 @@ import {
   resolveVertexPosition,
   scaleToRadius,
   SHAPE_AXES,
-  sphereRadius,
 } from './lib/polyhedra'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
@@ -42,7 +41,12 @@ export type ViewMode = 'new' | 'edit' | 'preview'
 const DEFAULT_SHAPE: ShapeType = 'octahedron'
 const DEFAULT_AXIS: AxisType = 'vertex'
 const DEFAULT_SUBDIVISIONS = 3
-const DEFAULT_BASE_DATA = computePolyhedron(DEFAULT_SHAPE, DEFAULT_AXIS, DEFAULT_SUBDIVISIONS)
+const DEFAULT_BASE_DATA = computePolyhedron(
+  DEFAULT_SHAPE,
+  DEFAULT_AXIS,
+  DEFAULT_SUBDIVISIONS,
+  DEFAULT_DIAMETER_MM,
+)
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
@@ -62,26 +66,40 @@ function App() {
   const [shape, setShape] = useState<ShapeType>(DEFAULT_SHAPE)
   const [axis, setAxis] = useState<AxisType>(DEFAULT_AXIS)
   const [subdivisions, setSubdivisions] = useState(DEFAULT_SUBDIVISIONS)
+  const [diameter, setDiameter] = useState(DEFAULT_DIAMETER_MM)
   const [shapeDirty, setShapeDirty] = useState(false)
 
   const previewData = useMemo(
-    () => computePolyhedron(shape, axis, subdivisions),
-    [shape, axis, subdivisions],
+    () => computePolyhedron(shape, axis, subdivisions, diameter),
+    [shape, axis, subdivisions, diameter],
   )
 
   // Applies a "New" tab pick and keeps the layer count defaulted to half the resulting layers,
   // same as the shape itself would suggest.
-  const setNewShapeParams = (nextShape: ShapeType, nextAxis: AxisType, nextSubdivisions: number) => {
+  const setNewShapeParams = (
+    nextShape: ShapeType,
+    nextAxis: AxisType,
+    nextSubdivisions: number,
+    nextDiameter: number,
+  ) => {
     setShape(nextShape)
     setAxis(nextAxis)
     setSubdivisions(nextSubdivisions)
+    setDiameter(nextDiameter)
     setShapeDirty(true)
-    const next = computePolyhedron(nextShape, nextAxis, nextSubdivisions)
+    const next = computePolyhedron(nextShape, nextAxis, nextSubdivisions, nextDiameter)
     setLayerCount(Math.ceil(next.layers.length / 2))
   }
-  const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions)
-  const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions)
-  const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s)
+  const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions, diameter)
+  const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions, diameter)
+  const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s, diameter)
+  // In "New" a diameter change is part of the shape recipe (regenerates the preview and marks
+  // it dirty to commit); in "Edit" it's just the target size "Adjust to a Sphere" snaps onto,
+  // so it doesn't touch the committed geometry on its own.
+  const handleDiameterChange = (d: number) => {
+    if (mode === 'new') setNewShapeParams(shape, axis, subdivisions, d)
+    else setDiameter(d)
+  }
 
   // The committed geometry actually being edited/previewed - vertices, faces, and edges, plain
   // and concrete. Only changes when a "New" tab pick is committed (or a config is loaded).
@@ -106,13 +124,12 @@ function App() {
   const [addedFaces, setAddedFaces] = useState<Face[]>(initial?.addedFaces ?? [])
   const [nextAddedVertexId, setNextAddedVertexId] = useState(initial?.nextAddedVertexId ?? -1)
 
-  // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at a height given as a
-  // fraction of the model's total height, offset from the model's vertical center.
+  // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at this height in mm.
   const [centerZ, setCenterZ] = useState(initial?.centerZ ?? 0)
   const [edgeSegments, setEdgeSegments] = useState(initial?.edgeSegments ?? 8)
-  const [extrudeDistance, setExtrudeDistance] = useState(initial?.extrudeDistance ?? 0.05)
-  const [thickness, setThickness] = useState(initial?.thickness ?? 0.03)
-  const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? 0.15)
+  const [extrudeDistance, setExtrudeDistance] = useState(initial?.extrudeDistance ?? 125)
+  const [thickness, setThickness] = useState(initial?.thickness ?? 75)
+  const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? 375)
 
   const data = baseData
 
@@ -124,17 +141,11 @@ function App() {
   // addedVertices holds each added point's default (as-created) position; transforms are
   // layered on top the same way they are for canonical vertices.
   const transformedAddedVertices = useMemo(
-    () => applyAddedVertexTransforms(addedVertices, data.vertices, vertexTransforms),
-    [addedVertices, data.vertices, vertexTransforms],
+    () => applyAddedVertexTransforms(addedVertices, vertexTransforms),
+    [addedVertices, vertexTransforms],
   )
 
-  const modelExtent = useMemo(() => computeModelExtent(data.vertices), [data.vertices])
-  const previewModelExtent = useMemo(
-    () => computeModelExtent(previewData.vertices),
-    [previewData],
-  )
-  const activeExtent = mode === 'new' ? previewModelExtent : modelExtent
-  const centerY = centerZ * activeExtent.totalHeight
+  const centerY = centerZ
 
   const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
 
@@ -242,9 +253,9 @@ function App() {
     setSelectedVertexIndices(new Set())
   }
 
-  // Snaps every (non-deleted) vertex onto a common sphere around the gravity center: first the
-  // mean of everyone's current distance from that center, then each vertex is moved along its
-  // own ray from the center out to that mean distance, replacing any transform it already had.
+  // Snaps every (non-deleted) vertex onto the sphere of the given diameter around the gravity
+  // center, moving each vertex along its own ray from that center out to that fixed radius,
+  // replacing any transform it already had.
   const handleAdjustToSphere = () => {
     const canonicalIds = data.vertices.map((_, i) => i).filter((i) => !deletedVertexIndices.has(i))
     const addedIds = Array.from(addedVertices.keys()).filter((id) => !deletedVertexIndices.has(id))
@@ -256,16 +267,14 @@ function App() {
     const canonicalPositionOf = (id: number) =>
       id >= 0 ? data.vertices[id] : addedVertices.get(id)!
 
-    const meanRadius =
-      allIds.reduce((sum, id) => sum + sphereRadius(currentPositionOf(id), centerY), 0) /
-      allIds.length
+    const targetRadius = diameter / 2
 
     setVertexTransforms((prev) => {
       const next = new Map(prev)
       for (const id of allIds) {
         const current = currentPositionOf(id)
-        const target = scaleToRadius(current.x, current.y, current.z, centerY, meanRadius)
-        const t = computeTransformToPosition(canonicalPositionOf(id), target, modelExtent)
+        const target = scaleToRadius(current.x, current.y, current.z, centerY, targetRadius)
+        const t = computeTransformToPosition(canonicalPositionOf(id), target)
         if (isDefaultVertexTransform(t)) next.delete(id)
         else next.set(id, t)
       }
@@ -289,7 +298,7 @@ function App() {
       (min, id) => Math.min(min, positionOf(id).y),
       Infinity,
     )
-    setCenterZ(modelExtent.totalHeight > 0 ? minY / modelExtent.totalHeight : 0)
+    setCenterZ(minY)
   }
 
   // Leaving "New" with a shape actually picked commits it as the geometry to edit, discarding
@@ -391,6 +400,8 @@ function App() {
         onAxisChange={handleAxisChange}
         subdivisions={subdivisions}
         onSubdivisionsChange={handleSubdivisionsChange}
+        diameter={diameter}
+        onDiameterChange={handleDiameterChange}
         layerCount={layerCount}
         onLayerCountChange={setLayerCount}
         data={previewData}

@@ -307,10 +307,14 @@ function getAxisVector(
   return vertices[a].clone().add(vertices[b]).multiplyScalar(0.5).normalize()
 }
 
+// The dome's real-world size: the diameter (in mm) of the sphere its vertices sit on.
+export const DEFAULT_DIAMETER_MM = 5000
+
 export function computePolyhedron(
   shape: ShapeType,
   axisType: AxisType,
   subdivisions = MIN_SUBDIVISIONS,
+  diameter = DEFAULT_DIAMETER_MM,
 ): PolyhedronData {
   const baseShape: BaseShapeType = shape === 'goldberg' ? 'icosahedron' : shape
   const raw = RAW_SHAPE_DATA[baseShape]
@@ -335,7 +339,12 @@ export function computePolyhedron(
 
   const up = new THREE.Vector3(0, 1, 0)
   const quat = new THREE.Quaternion().setFromUnitVectors(axisVec, up)
-  const vertices = finalVertices.map((v) => v.clone().applyQuaternion(quat))
+  // Every vertex sits on the raw shape's own radius (subdivision/dual construction both
+  // normalize onto it); rescale that onto the requested real-world diameter, in mm.
+  const scale = diameter / 2 / baseVertices[0].length()
+  const vertices = finalVertices.map((v) =>
+    v.clone().applyQuaternion(quat).multiplyScalar(scale),
+  )
 
   return { vertices, faces, edges, layers: computeLayers(vertices) }
 }
@@ -421,9 +430,8 @@ export function findRotationalSymmetryGroup(
 }
 
 // Per-vertex adjustment away from its default (canonical) position. All fields are 0
-// at the default position: z shifts elevation by a fraction of the model's total height,
-// r shifts radial distance from the main axis by a fraction of the model's max radius,
-// and theta rotates the vertex around the main (vertical) axis, in radians.
+// at the default position: z shifts elevation in mm, r shifts radial distance from the
+// main axis in mm, and theta rotates the vertex around the main (vertical) axis, in radians.
 export interface VertexTransform {
   z: number
   r: number
@@ -436,70 +444,36 @@ export function isDefaultVertexTransform(t: VertexTransform): boolean {
   return t.z === 0 && t.r === 0 && t.theta === 0
 }
 
-export interface ModelExtent {
-  totalHeight: number
-  maxRadius: number
-}
-
-// The reference scale transforms are measured against: the untransformed canonical model's
-// own height and max radial distance from the main axis. Kept fixed regardless of what's
-// currently selected, sliced, or transformed, so fractional edits stay stable.
-export function computeModelExtent(canonicalVertices: THREE.Vector3[]): ModelExtent {
-  let minY = Infinity
-  let maxY = -Infinity
-  let maxRadius = 0
-  for (const v of canonicalVertices) {
-    if (v.y < minY) minY = v.y
-    if (v.y > maxY) maxY = v.y
-    maxRadius = Math.max(maxRadius, Math.hypot(v.x, v.z))
-  }
-  return { totalHeight: maxY - minY, maxRadius }
-}
-
-export function applyVertexTransform(
-  v: THREE.Vector3,
-  t: VertexTransform,
-  extent: ModelExtent,
-): THREE.Vector3 {
+export function applyVertexTransform(v: THREE.Vector3, t: VertexTransform): THREE.Vector3 {
   if (isDefaultVertexTransform(t)) return v
 
   const radius = Math.hypot(v.x, v.z)
   const angle = Math.atan2(v.z, v.x) + t.theta
-  const newRadius = radius + t.r * extent.maxRadius
-  return new THREE.Vector3(
-    newRadius * Math.cos(angle),
-    v.y + t.z * extent.totalHeight,
-    newRadius * Math.sin(angle),
-  )
+  const newRadius = radius + t.r
+  return new THREE.Vector3(newRadius * Math.cos(angle), v.y + t.z, newRadius * Math.sin(angle))
 }
 
-// Applies per-vertex transforms, measuring height/radius fractions against the untransformed
-// model's own extent so edits stay stable regardless of what's currently selected or sliced.
 export function applyVertexTransforms(
   vertices: THREE.Vector3[],
   transforms: ReadonlyMap<number, VertexTransform>,
 ): THREE.Vector3[] {
   if (transforms.size === 0) return vertices
-  const extent = computeModelExtent(vertices)
   return vertices.map((v, idx) => {
     const t = transforms.get(idx)
-    return t ? applyVertexTransform(v, t, extent) : v
+    return t ? applyVertexTransform(v, t) : v
   })
 }
 
 // Same idea for added vertices: their default (untransformed) position is wherever they were
-// created, but the z/r/theta fractions are still measured against the canonical model's extent
-// so an added point's transform behaves the same way a canonical vertex's does.
+// created.
 export function applyAddedVertexTransforms(
   baseAddedVertices: ReadonlyMap<number, THREE.Vector3>,
-  canonicalVertices: THREE.Vector3[],
   transforms: ReadonlyMap<number, VertexTransform>,
 ): Map<number, THREE.Vector3> {
-  const extent = computeModelExtent(canonicalVertices)
   const result = new Map<number, THREE.Vector3>()
   for (const [id, pos] of baseAddedVertices) {
     const t = transforms.get(id)
-    result.set(id, t ? applyVertexTransform(pos, t, extent) : pos)
+    result.set(id, t ? applyVertexTransform(pos, t) : pos)
   }
   return result
 }
@@ -624,15 +598,14 @@ export function scaleToRadius(
 export function computeTransformToPosition(
   canonicalPos: THREE.Vector3,
   targetPos: THREE.Vector3,
-  extent: ModelExtent,
 ): VertexTransform {
   const baseCylRadius = Math.hypot(canonicalPos.x, canonicalPos.z)
   const targetCylRadius = Math.hypot(targetPos.x, targetPos.z)
   const baseAngle = Math.atan2(canonicalPos.z, canonicalPos.x)
   const targetAngle = Math.atan2(targetPos.z, targetPos.x)
   return {
-    z: extent.totalHeight > RADIAL_EPS ? (targetPos.y - canonicalPos.y) / extent.totalHeight : 0,
-    r: extent.maxRadius > RADIAL_EPS ? (targetCylRadius - baseCylRadius) / extent.maxRadius : 0,
+    z: targetPos.y - canonicalPos.y,
+    r: targetCylRadius - baseCylRadius,
     theta: targetCylRadius > RADIAL_EPS ? targetAngle - baseAngle : 0,
   }
 }

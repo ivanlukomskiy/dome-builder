@@ -42,17 +42,22 @@ export function Viewport({
 }: ViewportProps) {
   return (
     <div className="viewport">
-      <Canvas camera={{ position: [3.5, 2.8, 4], fov: 45 }} onPointerMissed={onDeselectAll}>
+      <Canvas
+        camera={{ position: [8750, 7000, 10000], fov: 45, near: 10, far: 200000 }}
+        onPointerMissed={onDeselectAll}
+      >
         <color attach="background" args={['#12141a']} />
         <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 5]} intensity={1.1} />
-        <directionalLight position={[-4, -2, -4]} intensity={0.25} />
+        <directionalLight position={[12500, 20000, 12500]} intensity={1.1} />
+        <directionalLight position={[-10000, -5000, -10000]} intensity={0.25} />
         <Grid
-          args={[10, 10]}
-          position={[0, -1.6, 0]}
+          args={[25000, 25000]}
+          position={[0, -4000, 0]}
+          cellSize={250}
+          sectionSize={1000}
           cellColor="#2a2e39"
           sectionColor="#3a4050"
-          fadeDistance={20}
+          fadeDistance={50000}
           infiniteGrid
         />
         <DomeMesh

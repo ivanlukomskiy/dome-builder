@@ -11,6 +11,11 @@ import {
   sliceLayers,
 } from '../lib/polyhedra'
 
+// Vertex/center marker sizes, in mm - purely visual, sized to stay visible without dwarfing a
+// typical (few-meter) dome.
+const VERTEX_MARKER_RADIUS = 80
+const SELECTED_VERTEX_MARKER_RADIUS = 115
+
 interface DomeMeshProps {
   mode: ViewMode
   data: PolyhedronData
@@ -246,7 +251,9 @@ export function DomeMesh({
               onPointerOver={handlePointerOver}
               onPointerOut={handlePointerOut}
             >
-              <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
+              <sphereGeometry
+                args={[isSelected ? SELECTED_VERTEX_MARKER_RADIUS : VERTEX_MARKER_RADIUS, 16, 16]}
+              />
               <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
             </mesh>
           )
@@ -266,13 +273,15 @@ export function DomeMesh({
               onPointerOver={handlePointerOver}
               onPointerOut={handlePointerOut}
             >
-              <sphereGeometry args={[isSelected ? 0.045 : 0.032, 16, 16]} />
+              <sphereGeometry
+                args={[isSelected ? SELECTED_VERTEX_MARKER_RADIUS : VERTEX_MARKER_RADIUS, 16, 16]}
+              />
               <meshStandardMaterial color={isSelected ? '#f5a623' : '#e0729f'} />
             </mesh>
           )
         })}
       <mesh position={[0, centerY, 0]}>
-        <sphereGeometry args={[0.032, 16, 16]} />
+        <sphereGeometry args={[VERTEX_MARKER_RADIUS, 16, 16]} />
         <meshStandardMaterial color="#f5e050" />
       </mesh>
     </group>

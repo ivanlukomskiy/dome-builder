@@ -34,6 +34,8 @@ interface SidebarProps {
   onAxisChange: (axis: AxisType) => void
   subdivisions: number
   onSubdivisionsChange: (subdivisions: number) => void
+  diameter: number
+  onDiameterChange: (diameter: number) => void
   layerCount: number
   onLayerCountChange: (count: number) => void
   data: PolyhedronData
@@ -97,6 +99,8 @@ export function Sidebar({
   onAxisChange,
   subdivisions,
   onSubdivisionsChange,
+  diameter,
+  onDiameterChange,
   layerCount,
   onLayerCountChange,
   data,
@@ -190,6 +194,25 @@ export function Sidebar({
         </div>
       </section>
 
+      {(mode === 'new' || mode === 'edit') && (
+        <section className="control-group">
+          <h2>Diameter</h2>
+          <div className="transform-field">
+            <label>Diameter (mm)</label>
+            <input
+              type="number"
+              step={100}
+              min={1}
+              value={diameter}
+              onChange={(e) => handleCenterChange(onDiameterChange, e.target.value)}
+            />
+          </div>
+          {mode === 'edit' && (
+            <p className="hint">The target size &ldquo;Adjust to a Sphere&rdquo; snaps onto.</p>
+          )}
+        </section>
+      )}
+
       {mode === 'new' && (
         <section className="control-group">
           <h2>Shape</h2>
@@ -269,10 +292,10 @@ export function Sidebar({
         <section className="control-group">
           <h2>Center</h2>
           <div className="transform-field">
-            <label>Center (z)</label>
+            <label>Center (z, mm)</label>
             <input
               type="number"
-              step={0.05}
+              step={10}
               value={centerZ}
               onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
             />
@@ -291,12 +314,12 @@ export function Sidebar({
             <input
               type="range"
               min={0}
-              max={0.4}
-              step={0.005}
+              max={1000}
+              step={5}
               value={cornerLength}
               onChange={(e) => onCornerLengthChange(Number(e.target.value))}
             />
-            <span className="layer-count">{cornerLength.toFixed(3)}</span>
+            <span className="layer-count">{cornerLength} mm</span>
           </div>
           <p className="hint">
             Corner length (D): straight lead-in at each end, tangent to the sphere and angled
@@ -318,12 +341,12 @@ export function Sidebar({
             <input
               type="range"
               min={0}
-              max={0.3}
-              step={0.005}
+              max={750}
+              step={5}
               value={extrudeDistance}
               onChange={(e) => onExtrudeDistanceChange(Number(e.target.value))}
             />
-            <span className="layer-count">{extrudeDistance.toFixed(3)}</span>
+            <span className="layer-count">{extrudeDistance} mm</span>
           </div>
           <p className="hint">
             Width: extrudes each arc symmetrically toward/away from the sphere's center.
@@ -332,12 +355,12 @@ export function Sidebar({
             <input
               type="range"
               min={0}
-              max={0.15}
-              step={0.0025}
+              max={375}
+              step={5}
               value={thickness}
               onChange={(e) => onThicknessChange(Number(e.target.value))}
             />
-            <span className="layer-count">{thickness.toFixed(4)}</span>
+            <span className="layer-count">{thickness} mm</span>
           </div>
           <p className="hint">
             Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
@@ -394,8 +417,8 @@ export function Sidebar({
             <button onClick={onAdjustToSphere}>Adjust to a Sphere</button>
           </div>
           <p className="hint">
-            Moves every vertex along its own line from the gravity center out to the mean of
-            everyone's current distance from that center.
+            Moves every vertex along its own line from the gravity center out to the sphere of
+            the diameter set above.
           </p>
         </section>
       )}
@@ -404,20 +427,20 @@ export function Sidebar({
         <section className="control-group">
           <h2>Transform</h2>
           <div className="transform-field">
-            <label>Elevation (z)</label>
+            <label>Elevation (z, mm)</label>
             <input
               type="number"
-              step={0.05}
+              step={10}
               value={zValue ?? ''}
               placeholder={zValue === null ? 'Mixed' : undefined}
               onChange={(e) => handleFieldChange('z', e.target.value)}
             />
           </div>
           <div className="transform-field">
-            <label>Radius (r)</label>
+            <label>Radius (r, mm)</label>
             <input
               type="number"
-              step={0.05}
+              step={10}
               value={rValue ?? ''}
               placeholder={rValue === null ? 'Mixed' : undefined}
               onChange={(e) => handleFieldChange('r', e.target.value)}
