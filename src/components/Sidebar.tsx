@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { ChangeEvent } from 'react'
-import type { EditTarget, ViewMode } from '../App'
+import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import type {
   AxisType,
   PolyhedronData,
@@ -17,8 +17,7 @@ import {
   SHAPE_LABELS,
 } from '../lib/polyhedra'
 
-const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: 'new', label: 'New' },
+const EDIT_OR_PREVIEW_OPTIONS: { value: EditOrPreviewMode; label: string }[] = [
   { value: 'edit', label: 'Edit' },
   { value: 'preview', label: 'Preview' },
 ]
@@ -32,7 +31,10 @@ interface SidebarProps {
   onExportConfig: () => void
   onImportConfig: (file: File) => void
   mode: ViewMode
-  onModeChange: (mode: ViewMode) => void
+  onOpenNew: () => void
+  onCreateNew: () => void
+  onCancelNew: () => void
+  onSwitchMode: (mode: EditOrPreviewMode) => void
   shape: ShapeType
   onShapeChange: (shape: ShapeType) => void
   axis: AxisType
@@ -124,7 +126,10 @@ export function Sidebar({
   onExportConfig,
   onImportConfig,
   mode,
-  onModeChange,
+  onOpenNew,
+  onCreateNew,
+  onCancelNew,
+  onSwitchMode,
   shape,
   onShapeChange,
   axis,
@@ -215,33 +220,51 @@ export function Sidebar({
     <aside className="sidebar">
       <h1>Dome Builder</h1>
 
-      <section className="control-group">
-        <div className="button-row">
-          <button onClick={onExportConfig}>Export</button>
-          <button onClick={() => importInputRef.current?.click()}>Import</button>
-        </div>
-        <input
-          ref={importInputRef}
-          type="file"
-          accept="application/json"
-          style={{ display: 'none' }}
-          onChange={handleImportFileChange}
-        />
-      </section>
+      {mode !== 'new' && (
+        <section className="control-group">
+          <div className="button-row">
+            <button onClick={onExportConfig}>Export</button>
+            <button onClick={() => importInputRef.current?.click()}>Import</button>
+          </div>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json"
+            style={{ display: 'none' }}
+            onChange={handleImportFileChange}
+          />
+        </section>
+      )}
 
-      <section className="control-group">
-        <div className="segmented-control">
-          {VIEW_MODE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={mode === opt.value ? 'active' : ''}
-              onClick={() => onModeChange(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </section>
+      {mode === 'new' ? (
+        <section className="control-group">
+          <div className="button-row">
+            <button onClick={onCreateNew}>Create</button>
+            <button onClick={onCancelNew}>Cancel</button>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="control-group">
+            <div className="button-row">
+              <button onClick={onOpenNew}>New</button>
+            </div>
+          </section>
+          <section className="control-group">
+            <div className="segmented-control">
+              {EDIT_OR_PREVIEW_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={mode === opt.value ? 'active' : ''}
+                  onClick={() => onSwitchMode(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
 
       {(mode === 'new' || mode === 'edit') && (
         <section className="control-group">

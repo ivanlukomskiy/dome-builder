@@ -38,6 +38,7 @@ import {
 } from './lib/config'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
+export type EditOrPreviewMode = 'edit' | 'preview'
 export type EditTarget = 'vertices' | 'edges'
 
 // Shared by both vertex and edge selection: toggles a whole group (an individual pick, a
@@ -81,23 +82,25 @@ function App() {
   const [initial] = useState(() => loadInitialState())
 
   const [mode, setMode] = useState<ViewMode>(initial ? 'edit' : 'new')
+  // Where to land after "New" closes (via Create or Cancel) - wherever we were before opening
+  // it, defaulting to Edit (e.g. on first-ever launch, which opens straight into "New").
+  const [preNewMode, setPreNewMode] = useState<EditOrPreviewMode>('edit')
 
-  // "New" tab picker: how to generate a shape. Purely a recipe for the live preview below -
-  // once a pick is committed (see handleModeChange), only the resulting vertex/face/edge data
-  // matters, so none of this is persisted.
+  // "New" panel: how to generate a shape. Purely a recipe for the live preview below - once a
+  // pick is committed (see handleCreateNew), only the resulting vertex/face/edge data matters,
+  // so none of this is persisted.
   const [shape, setShape] = useState<ShapeType>(DEFAULT_SHAPE)
   const [axis, setAxis] = useState<AxisType>(DEFAULT_AXIS)
   const [subdivisions, setSubdivisions] = useState(DEFAULT_SUBDIVISIONS)
   const [diameter, setDiameter] = useState(DEFAULT_DIAMETER_MM)
-  const [shapeDirty, setShapeDirty] = useState(false)
 
   const previewData = useMemo(
     () => computePolyhedron(shape, axis, subdivisions, diameter),
     [shape, axis, subdivisions, diameter],
   )
 
-  // Applies a "New" tab pick and keeps the layer count defaulted to half the resulting layers,
-  // same as the shape itself would suggest.
+  // Applies a "New" panel pick and keeps the layer count defaulted to half the resulting
+  // layers, same as the shape itself would suggest.
   const setNewShapeParams = (
     nextShape: ShapeType,
     nextAxis: AxisType,
@@ -108,7 +111,6 @@ function App() {
     setAxis(nextAxis)
     setSubdivisions(nextSubdivisions)
     setDiameter(nextDiameter)
-    setShapeDirty(true)
     const next = computePolyhedron(nextShape, nextAxis, nextSubdivisions, nextDiameter)
     setLayerCount(Math.ceil(next.layers.length / 2))
   }
@@ -371,33 +373,40 @@ function App() {
     setCenterZ(minY)
   }
 
-  // Leaving "New" with a shape actually picked commits it as the geometry to edit, discarding
-  // whatever was being edited before (its vertex indices no longer mean anything against the
-  // new shape) and resetting every other tab's settings (center, edge curvature, ...) back to
-  // their defaults, since they were tuned for a dome that no longer exists. Just passing
-  // through "New" without touching its controls leaves everything as it was - e.g. a config
-  // loaded from disk stays untouched if you only glance at the tab.
-  const handleModeChange = (newMode: ViewMode) => {
-    if (mode === 'new' && newMode !== 'new' && shapeDirty) {
-      setBaseData(previewData)
-      setDeletedGroups([])
-      setRedoStack([])
-      setVertexTransforms(new Map())
-      setAddedVertices(new Map())
-      setAddedFaces([])
-      setNextAddedVertexId(-1)
-      setSelectedVertexIndices(new Set())
-      setSelectedEdgeIndices(new Set())
-      setEdgeThickness(new Map())
-      setEditTarget('vertices')
-      setCenterZ(DEFAULT_CENTER_Z)
-      setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
-      setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
-      setThickness(DEFAULT_THICKNESS)
-      setCornerLength(DEFAULT_CORNER_LENGTH)
-      setShapeDirty(false)
-    }
-    setMode(newMode)
+  // "New" opens from a button now, rather than living in the Edit/Preview switcher - remember
+  // where to come back to when it closes.
+  const handleOpenNew = () => {
+    if (mode !== 'new') setPreNewMode(mode)
+    setMode('new')
+  }
+
+  // Create commits whatever's configured in "New" as the geometry to edit, discarding whatever
+  // was being edited before (its vertex indices no longer mean anything against the new shape)
+  // and resetting every other tab's settings (center, edge curvature, ...) back to their
+  // defaults, since they were tuned for a dome that no longer exists.
+  const handleCreateNew = () => {
+    setBaseData(previewData)
+    setDeletedGroups([])
+    setRedoStack([])
+    setVertexTransforms(new Map())
+    setAddedVertices(new Map())
+    setAddedFaces([])
+    setNextAddedVertexId(-1)
+    setSelectedVertexIndices(new Set())
+    setSelectedEdgeIndices(new Set())
+    setEdgeThickness(new Map())
+    setEditTarget('vertices')
+    setCenterZ(DEFAULT_CENTER_Z)
+    setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
+    setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
+    setThickness(DEFAULT_THICKNESS)
+    setCornerLength(DEFAULT_CORNER_LENGTH)
+    setMode(preNewMode)
+  }
+
+  // Cancel closes "New" without touching anything it would have committed.
+  const handleCancelNew = () => {
+    setMode(preNewMode)
   }
 
   const applyConfig = (state: DomeState) => {
@@ -419,7 +428,6 @@ function App() {
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setEditTarget('vertices')
-    setShapeDirty(false)
     setMode('edit')
   }
 
@@ -478,7 +486,10 @@ function App() {
         onExportConfig={handleExportConfig}
         onImportConfig={handleImportConfig}
         mode={mode}
-        onModeChange={handleModeChange}
+        onOpenNew={handleOpenNew}
+        onCreateNew={handleCreateNew}
+        onCancelNew={handleCancelNew}
+        onSwitchMode={setMode}
         shape={shape}
         onShapeChange={handleShapeChange}
         axis={axis}
