@@ -560,14 +560,19 @@ export function faceCentroid(face: Face, positionOf: (id: number) => THREE.Vecto
 // Every triangle hiding among the given edges: any 3 of them whose 6 endpoints resolve to
 // exactly 3 distinct vertices, each appearing twice (the only way 3 distinct edges can do that
 // is by forming a closed loop). Powers "Create Face" - select a batch of edges (e.g. a whole
-// symmetric orbit) and turn every triangle among them into a face in one go.
-export function findEdgeTriangles(edgeIndices: number[], edges: Edge[]): [number, number, number][] {
+// symmetric orbit) and turn every triangle among them into a face in one go. Takes an `edgeById`
+// lookup (rather than a plain array) so the selection can mix canonical and added edges, keyed
+// by the same signed id scheme used everywhere else.
+export function findEdgeTriangles(
+  edgeIndices: number[],
+  edgeById: (id: number) => Edge,
+): [number, number, number][] {
   const triangles: [number, number, number][] = []
   for (let i = 0; i < edgeIndices.length; i++) {
     for (let j = i + 1; j < edgeIndices.length; j++) {
       for (let k = j + 1; k < edgeIndices.length; k++) {
         const counts = new Map<number, number>()
-        for (const e of [edges[edgeIndices[i]], edges[edgeIndices[j]], edges[edgeIndices[k]]]) {
+        for (const e of [edgeById(edgeIndices[i]), edgeById(edgeIndices[j]), edgeById(edgeIndices[k])]) {
           for (const v of e) counts.set(v, (counts.get(v) ?? 0) + 1)
         }
         if (counts.size === 3 && Array.from(counts.values()).every((c) => c === 2)) {

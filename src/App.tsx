@@ -299,13 +299,12 @@ function App() {
   // Points" adds one, just built from existing vertices instead of a fresh midpoint. Skips any
   // triangle that already exists as a currently-visible face (canonical or already-added) to
   // avoid a coincident duplicate - a *deleted* canonical face no longer counts, so recreating
-  // one from its own (still-present) border edges works.
+  // one from its own (still-present) border edges works. Selected edges can be canonical or
+  // added (e.g. a border edge re-created after a delete), so triangles are found across both.
   const creatableFaces = useMemo(() => {
     if (mode !== 'edit' || editTarget !== 'edges') return []
-    // Only canonical edges can close a triangle here - findEdgeTriangles indexes into
-    // `data.edges`, so a selected added edge (a negative id) wouldn't resolve correctly.
-    const canonicalSelected = Array.from(selectedEdgeIndices).filter((i) => i >= 0)
-    const triangles = findEdgeTriangles(canonicalSelected, data.edges)
+    const edgeById = (eid: number): Edge => (eid >= 0 ? data.edges[eid] : addedEdges[edgeIdToAddedIndex(eid)])
+    const triangles = findEdgeTriangles(Array.from(selectedEdgeIndices), edgeById)
     const key = (f: number[]) => [...f].sort((a, b) => a - b).join(',')
     const existing = new Set<string>()
     data.faces.forEach((f, i) => {
@@ -315,7 +314,16 @@ function App() {
       if (!deletedFaceIndices.has(-(i + 1))) existing.add(key(f))
     })
     return triangles.filter((t) => !existing.has(key(t)))
-  }, [mode, editTarget, selectedEdgeIndices, data.edges, data.faces, addedFaces, deletedFaceIndices])
+  }, [
+    mode,
+    editTarget,
+    selectedEdgeIndices,
+    data.edges,
+    data.faces,
+    addedEdges,
+    addedFaces,
+    deletedFaceIndices,
+  ])
 
   const handleCreateFacesFromEdges = () => {
     if (creatableFaces.length === 0) return
