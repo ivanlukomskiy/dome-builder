@@ -25,6 +25,7 @@ const EDIT_OR_PREVIEW_OPTIONS: { value: EditOrPreviewMode; label: string }[] = [
 const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
   { value: 'vertices', label: 'Vertices' },
   { value: 'edges', label: 'Edges' },
+  { value: 'faces', label: 'Faces' },
 ]
 
 interface SidebarProps {
@@ -63,6 +64,10 @@ interface SidebarProps {
   edgeThickness: ReadonlyMap<number, number>
   onEdgeThicknessChange: (value: number) => void
   onResetEdgeThickness: () => void
+  canCreateFace: boolean
+  onCreateFace: () => void
+  selectedFaceCount: number
+  onDeleteSelectedFaces: () => void
   centerZ: number
   onCenterZChange: (value: number) => void
   onGroundCenter: () => void
@@ -158,6 +163,10 @@ export function Sidebar({
   edgeThickness,
   onEdgeThicknessChange,
   onResetEdgeThickness,
+  canCreateFace,
+  onCreateFace,
+  selectedFaceCount,
+  onDeleteSelectedFaces,
   centerZ,
   onCenterZChange,
   onGroundCenter,
@@ -528,6 +537,14 @@ export function Sidebar({
               ? `${selectedEdgeCount} ${selectedEdgeCount !== 1 ? 'edges' : 'edge'} selected`
               : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
           </p>
+          <div className="button-row">
+            <button disabled={!canCreateFace} onClick={onCreateFace}>
+              Create Face
+            </button>
+          </div>
+          <p className="hint">
+            Turns every triangle hiding among the selected edges into a face.
+          </p>
         </section>
       )}
 
@@ -549,6 +566,33 @@ export function Sidebar({
           <div className="button-row">
             <button disabled={!hasEdgeOverrides} onClick={onResetEdgeThickness}>
               Reset Thickness
+            </button>
+          </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'faces' && (
+        <section className="control-group">
+          <h2>Edit faces</h2>
+          <div className="segmented-control">
+            {SELECTION_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={selectionMode === opt.value ? 'active' : ''}
+                onClick={() => onSelectionModeChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            {selectedFaceCount > 0
+              ? `${selectedFaceCount} ${selectedFaceCount !== 1 ? 'faces' : 'face'} selected`
+              : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
+          </p>
+          <div className="button-row">
+            <button disabled={selectedFaceCount === 0} onClick={onDeleteSelectedFaces}>
+              Delete
             </button>
           </div>
         </section>

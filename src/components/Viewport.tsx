@@ -15,6 +15,8 @@ interface ViewportProps {
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
+  selectedFaceIndices: ReadonlySet<number>
+  deletedFaceIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
   centerY: number
@@ -24,6 +26,7 @@ interface ViewportProps {
   cornerLength: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
+  onFaceClick: (id: number) => void
   onDeselectAll: () => void
 }
 
@@ -37,6 +40,8 @@ export function Viewport({
   selectedVertexIndices,
   selectedEdgeIndices,
   edgeThickness,
+  selectedFaceIndices,
+  deletedFaceIndices,
   addedVertices,
   addedFaces,
   centerY,
@@ -46,6 +51,7 @@ export function Viewport({
   cornerLength,
   onVertexClick,
   onEdgeClick,
+  onFaceClick,
   onDeselectAll,
 }: ViewportProps) {
   return (
@@ -82,6 +88,8 @@ export function Viewport({
           selectedVertexIndices={selectedVertexIndices}
           selectedEdgeIndices={selectedEdgeIndices}
           edgeThickness={edgeThickness}
+          selectedFaceIndices={selectedFaceIndices}
+          deletedFaceIndices={deletedFaceIndices}
           addedVertices={addedVertices}
           addedFaces={addedFaces}
           centerY={centerY}
@@ -91,6 +99,7 @@ export function Viewport({
           cornerLength={cornerLength}
           onVertexClick={onVertexClick}
           onEdgeClick={onEdgeClick}
+          onFaceClick={onFaceClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>

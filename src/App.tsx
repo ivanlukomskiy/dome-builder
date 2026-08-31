@@ -18,6 +18,8 @@ import {
   DEFAULT_DIAMETER_MM,
   DEFAULT_VERTEX_TRANSFORM,
   edgeMidpoint,
+  faceCentroid,
+  findEdgeTriangles,
   findLayerGroup,
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
@@ -39,7 +41,13 @@ import {
 
 export type ViewMode = 'new' | 'edit' | 'preview'
 export type EditOrPreviewMode = 'edit' | 'preview'
-export type EditTarget = 'vertices' | 'edges'
+export type EditTarget = 'vertices' | 'edges' | 'faces'
+
+// Face ids are signed like added-vertex ids: non-negative indexes into `data.faces`
+// (canonical), negative into `addedFaces` via -(index + 1).
+function faceIdToAddedIndex(id: number): number {
+  return -id - 1
+}
 
 // Shared by both vertex and edge selection: toggles a whole group (an individual pick, a
 // layer, or a symmetric orbit) on or off together, based on whether it was already fully
@@ -141,8 +149,12 @@ function App() {
 
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
   const [selectedEdgeIndices, setSelectedEdgeIndices] = useState<Set<number>>(new Set())
+  const [selectedFaceIndices, setSelectedFaceIndices] = useState<Set<number>>(new Set())
   const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
     new Map(initial?.edgeThickness ?? []),
+  )
+  const [deletedFaceIndices, setDeletedFaceIndices] = useState<Set<number>>(
+    new Set(initial?.deletedFaceIndices ?? []),
   )
   const [deletedGroups, setDeletedGroups] = useState<number[][]>(initial?.deletedGroups ?? [])
   const [redoStack, setRedoStack] = useState<number[][]>([])
@@ -227,9 +239,64 @@ function App() {
     setSelectedEdgeIndices((prev) => toggleGroupSelection(prev, group))
   }
 
+  const handleFaceClick = (id: number) => {
+    if (mode !== 'edit' || editTarget !== 'faces') return
+
+    const faceById = (fid: number): Face => (fid >= 0 ? data.faces[fid] : addedFaces[faceIdToAddedIndex(fid)])
+    const positionOf = (vid: number) => resolveVertexPosition(vid, data.vertices, addedVertices)
+    const centroidOf = (fid: number) => faceCentroid(faceById(fid), positionOf)
+    const candidateIds = [
+      ...data.faces.map((_, i) => i),
+      ...addedFaces.map((_, i) => -(i + 1)),
+    ]
+
+    let group: number[]
+    if (selectionMode === 'layer') {
+      group = findLayerGroup(id, candidateIds, centroidOf)
+    } else if (selectionMode === 'symmetric') {
+      group = findRotationalSymmetryGroup(id, candidateIds, centroidOf, symmetryFold())
+    } else {
+      group = [id]
+    }
+
+    setSelectedFaceIndices((prev) => toggleGroupSelection(prev, group))
+  }
+
   const handleEditTargetChange = (target: EditTarget) => {
     setEditTarget(target)
     setSelectedVertexIndices(new Set())
+    setSelectedEdgeIndices(new Set())
+    setSelectedFaceIndices(new Set())
+  }
+
+  const handleDeleteSelectedFaces = () => {
+    if (selectedFaceIndices.size === 0) return
+    setDeletedFaceIndices((prev) => new Set([...prev, ...selectedFaceIndices]))
+    setSelectedFaceIndices(new Set())
+  }
+
+  // Any triangle hiding among the selected edges becomes a new face - added the same way "Add
+  // Points" adds one, just built from existing vertices instead of a fresh midpoint. Skips any
+  // triangle that already exists as a currently-visible face (canonical or already-added) to
+  // avoid a coincident duplicate - a *deleted* canonical face no longer counts, so recreating
+  // one from its own (still-present) border edges works.
+  const creatableFaces = useMemo(() => {
+    if (mode !== 'edit' || editTarget !== 'edges') return []
+    const triangles = findEdgeTriangles(Array.from(selectedEdgeIndices), data.edges)
+    const key = (f: number[]) => [...f].sort((a, b) => a - b).join(',')
+    const existing = new Set<string>()
+    data.faces.forEach((f, i) => {
+      if (f.length === 3 && !deletedFaceIndices.has(i)) existing.add(key(f))
+    })
+    addedFaces.forEach((f, i) => {
+      if (!deletedFaceIndices.has(-(i + 1))) existing.add(key(f))
+    })
+    return triangles.filter((t) => !existing.has(key(t)))
+  }, [mode, editTarget, selectedEdgeIndices, data.edges, data.faces, addedFaces, deletedFaceIndices])
+
+  const handleCreateFacesFromEdges = () => {
+    if (creatableFaces.length === 0) return
+    setAddedFaces((prev) => [...prev, ...creatableFaces])
     setSelectedEdgeIndices(new Set())
   }
 
@@ -278,6 +345,7 @@ function App() {
   const handleDeselectAll = () => {
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
+    setSelectedFaceIndices(new Set())
   }
 
   const handleCancelAll = () => {
@@ -394,7 +462,9 @@ function App() {
     setNextAddedVertexId(-1)
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
+    setSelectedFaceIndices(new Set())
     setEdgeThickness(new Map())
+    setDeletedFaceIndices(new Set())
     setEditTarget('vertices')
     setCenterZ(DEFAULT_CENTER_Z)
     setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
@@ -425,8 +495,10 @@ function App() {
     setAddedFaces(state.addedFaces)
     setNextAddedVertexId(state.nextAddedVertexId)
     setEdgeThickness(new Map(state.edgeThickness))
+    setDeletedFaceIndices(new Set(state.deletedFaceIndices))
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
+    setSelectedFaceIndices(new Set())
     setEditTarget('vertices')
     setMode('edit')
   }
@@ -447,6 +519,7 @@ function App() {
       addedFaces,
       nextAddedVertexId,
       edgeThickness,
+      deletedFaceIndices,
     })
 
   // Auto-save on every change to any config field, so the next page load can restore it.
@@ -467,6 +540,7 @@ function App() {
     addedFaces,
     nextAddedVertexId,
     edgeThickness,
+    deletedFaceIndices,
   ])
 
   const handleExportConfig = () => {
@@ -518,6 +592,10 @@ function App() {
         edgeThickness={edgeThickness}
         onEdgeThicknessChange={handleEdgeThicknessChange}
         onResetEdgeThickness={handleResetEdgeThickness}
+        canCreateFace={creatableFaces.length > 0}
+        onCreateFace={handleCreateFacesFromEdges}
+        selectedFaceCount={selectedFaceIndices.size}
+        onDeleteSelectedFaces={handleDeleteSelectedFaces}
         centerZ={centerZ}
         onCenterZChange={setCenterZ}
         onGroundCenter={handleGroundCenter}
@@ -546,6 +624,8 @@ function App() {
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
         selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
+        selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
+        deletedFaceIndices={isNew ? EMPTY_INDEX_SET : deletedFaceIndices}
         addedVertices={isNew ? EMPTY_VERTEX_MAP : transformedAddedVertices}
         addedFaces={isNew ? EMPTY_FACES : addedFaces}
         centerY={centerY}
@@ -555,6 +635,7 @@ function App() {
         cornerLength={cornerLength}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
+        onFaceClick={handleFaceClick}
         onDeselectAll={handleDeselectAll}
       />
     </div>

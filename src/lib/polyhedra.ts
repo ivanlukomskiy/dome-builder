@@ -531,6 +531,36 @@ export function edgeMidpoint(edge: Edge, vertices: THREE.Vector3[]): THREE.Vecto
   return vertices[edge[0]].clone().add(vertices[edge[1]]).multiplyScalar(0.5)
 }
 
+// A face's own "position", same idea as edgeMidpoint - takes a generic positionOf since a face
+// (canonical or added) can reference added vertices too, unlike a canonical edge.
+export function faceCentroid(face: Face, positionOf: (id: number) => THREE.Vector3): THREE.Vector3 {
+  const sum = new THREE.Vector3()
+  for (const idx of face) sum.add(positionOf(idx))
+  return sum.multiplyScalar(1 / face.length)
+}
+
+// Every triangle hiding among the given edges: any 3 of them whose 6 endpoints resolve to
+// exactly 3 distinct vertices, each appearing twice (the only way 3 distinct edges can do that
+// is by forming a closed loop). Powers "Create Face" - select a batch of edges (e.g. a whole
+// symmetric orbit) and turn every triangle among them into a face in one go.
+export function findEdgeTriangles(edgeIndices: number[], edges: Edge[]): [number, number, number][] {
+  const triangles: [number, number, number][] = []
+  for (let i = 0; i < edgeIndices.length; i++) {
+    for (let j = i + 1; j < edgeIndices.length; j++) {
+      for (let k = j + 1; k < edgeIndices.length; k++) {
+        const counts = new Map<number, number>()
+        for (const e of [edges[edgeIndices[i]], edges[edgeIndices[j]], edges[edgeIndices[k]]]) {
+          for (const v of e) counts.set(v, (counts.get(v) ?? 0) + 1)
+        }
+        if (counts.size === 3 && Array.from(counts.values()).every((c) => c === 2)) {
+          triangles.push(Array.from(counts.keys()) as [number, number, number])
+        }
+      }
+    }
+  }
+  return triangles
+}
+
 export interface AddedGeometry {
   vertices: Map<number, THREE.Vector3>
   faces: Face[]

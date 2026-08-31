@@ -19,18 +19,41 @@ const SELECTED_VERTEX_MARKER_RADIUS = 115
 // Clickable-edge cylinder radius while editing edges - deliberately thicker than the plain
 // wireframe line so edges read as the interactive element in that mode.
 const EDGE_MARKER_RADIUS = 40
-const EDGE_SELECTED_COLOR = '#f5a623'
+const SELECTED_COLOR = '#f5a623'
 const EDGE_DEFAULT_COLOR = new THREE.Color('#3a5a7a')
 const EDGE_OVERRIDE_MIN_COLOR = new THREE.Color('#4fd97e')
 const EDGE_OVERRIDE_MAX_COLOR = new THREE.Color('#ff3b3b')
 // Override magnitude (mm) at which the color heatmap maxes out.
 const EDGE_OVERRIDE_COLOR_REFERENCE = 300
 
-function edgeMarkerColor(override: number | undefined, isSelected: boolean): string {
-  if (isSelected) return EDGE_SELECTED_COLOR
-  if (override === undefined) return `#${EDGE_DEFAULT_COLOR.getHexString()}`
+// The heatmap color for a given thickness override (or the default tone if there isn't one) -
+// shared between the clickable edge markers in Edit mode and the beam mesh in Preview, so a
+// dome's strut coloring means the same thing in both places.
+function edgeThicknessColor(override: number | undefined): THREE.Color {
+  if (override === undefined) return EDGE_DEFAULT_COLOR.clone()
   const t = Math.min(override / EDGE_OVERRIDE_COLOR_REFERENCE, 1)
-  return `#${EDGE_OVERRIDE_MIN_COLOR.clone().lerp(EDGE_OVERRIDE_MAX_COLOR, t).getHexString()}`
+  return EDGE_OVERRIDE_MIN_COLOR.clone().lerp(EDGE_OVERRIDE_MAX_COLOR, t)
+}
+
+function edgeMarkerColor(override: number | undefined, isSelected: boolean): string {
+  if (isSelected) return SELECTED_COLOR
+  return `#${edgeThicknessColor(override).getHexString()}`
+}
+
+// Fan-triangulates a face (a triangle, or a pentagon/hexagon for a Goldberg dual face) from its
+// first vertex, into its own small standalone geometry - used for individually clickable faces.
+function buildFanGeometry(positions: THREE.Vector3[]): THREE.BufferGeometry {
+  const verts: number[] = []
+  const v0 = positions[0]
+  for (let i = 1; i < positions.length - 1; i++) {
+    const v1 = positions[i]
+    const v2 = positions[i + 1]
+    verts.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
+  }
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+  geom.computeVertexNormals()
+  return geom
 }
 
 interface DomeMeshProps {
@@ -43,6 +66,8 @@ interface DomeMeshProps {
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
+  selectedFaceIndices: ReadonlySet<number>
+  deletedFaceIndices: ReadonlySet<number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
   centerY: number
@@ -52,6 +77,7 @@ interface DomeMeshProps {
   cornerLength: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
+  onFaceClick: (id: number) => void
 }
 
 export function DomeMesh({
@@ -64,6 +90,8 @@ export function DomeMesh({
   selectedVertexIndices,
   selectedEdgeIndices,
   edgeThickness,
+  selectedFaceIndices,
+  deletedFaceIndices,
   addedVertices,
   addedFaces,
   centerY,
@@ -73,23 +101,47 @@ export function DomeMesh({
   cornerLength,
   onVertexClick,
   onEdgeClick,
+  onFaceClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
     const layered = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
     return removeVertices(layered, deletedVertexIndices)
   }, [data, transformedVertices, layerCount, deletedVertexIndices])
 
-  // An added face/vertex only shows while everything it was built from is still present:
-  // its canonical anchors must still be in view (kept by the layer slice and not deleted),
-  // and its new midpoint vertex must not itself have been deleted.
   const keptSet = useMemo(() => new Set(sliced.keptVertexIndices), [sliced])
-  const visibleAddedFaces = useMemo(
+
+  // The canonical faces currently in view: kept by the layer slice and not individually
+  // deleted. Keeps each face's own index into `data.faces` around, since that's what face
+  // selection and deletion are keyed by.
+  const visibleFaceEntries = useMemo(
     () =>
-      addedFaces.filter((face) =>
-        face.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx))),
-      ),
-    [addedFaces, keptSet, deletedVertexIndices],
+      data.faces
+        .map((face, index) => ({ face, index }))
+        .filter(({ face }) => face.every((i) => keptSet.has(i)))
+        .filter(({ index }) => !deletedFaceIndices.has(index)),
+    [data.faces, keptSet, deletedFaceIndices],
   )
+
+  // Added faces/vertices only show while everything they were built from is still present:
+  // canonical anchors must still be in view (kept by the layer slice and not deleted), any
+  // added-vertex anchor must not itself have been deleted, and the face itself must not have
+  // been deleted (signed the same way added vertices are: -(index in addedFaces) - 1).
+  const visibleAddedFaceEntries = useMemo(
+    () =>
+      addedFaces
+        .map((face, i) => ({ face, id: -(i + 1) }))
+        .filter(
+          ({ face, id }) =>
+            !deletedFaceIndices.has(id) &&
+            face.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx))),
+        ),
+    [addedFaces, keptSet, deletedVertexIndices, deletedFaceIndices],
+  )
+  const visibleAddedFaces = useMemo(
+    () => visibleAddedFaceEntries.map((e) => e.face),
+    [visibleAddedFaceEntries],
+  )
+
   const resolvePosition = useCallback(
     (idx: number) => resolveVertexPosition(idx, transformedVertices, addedVertices),
     [transformedVertices, addedVertices],
@@ -102,6 +154,24 @@ export function DomeMesh({
     }
     return ids
   }, [visibleAddedFaces])
+
+  const faceGeometry = useMemo(() => {
+    const positions: number[] = []
+    for (const { face } of visibleFaceEntries) {
+      // Fan-triangulate each face (a triangle for triangular meshes, or a
+      // pentagon/hexagon for a Goldberg polyhedron's dual faces) from vertex 0.
+      const v0 = sliced.vertices[face[0]]
+      for (let i = 1; i < face.length - 1; i++) {
+        const v1 = sliced.vertices[face[i]]
+        const v2 = sliced.vertices[face[i + 1]]
+        positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
+      }
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geom.computeVertexNormals()
+    return geom
+  }, [visibleFaceEntries, sliced.vertices])
 
   const addedFaceGeometry = useMemo(() => {
     const positions: number[] = []
@@ -169,16 +239,23 @@ export function DomeMesh({
     [centerY, edgeSegments, extrudeDistance, cornerLength],
   )
 
+  // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
+  // the same thing (thickness override, and by how much) in both places.
   const edgeBeamGeometry = useMemo(() => {
     const positions: number[] = []
+    const colors: number[] = []
     for (const { edge: [a, b], index } of visibleEdgeEntries) {
-      const beamThickness = edgeThickness.get(index) ?? thickness
+      const override = edgeThickness.get(index)
+      const beamThickness = override ?? thickness
+      const color = edgeThicknessColor(override)
       for (const v of buildBeam(sliced.vertices[a], sliced.vertices[b], beamThickness)) {
         positions.push(v.x, v.y, v.z)
+        colors.push(color.r, color.g, color.b)
       }
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
     geom.computeVertexNormals()
     return geom
   }, [visibleEdgeEntries, sliced.vertices, buildBeam, edgeThickness, thickness])
@@ -203,24 +280,6 @@ export function DomeMesh({
     return geom
   }, [visibleAddedFaces, resolvePosition, buildBeam, thickness])
 
-  const faceGeometry = useMemo(() => {
-    const positions: number[] = []
-    for (const face of sliced.keptFaces) {
-      // Fan-triangulate each face (a triangle for triangular meshes, or a
-      // pentagon/hexagon for a Goldberg polyhedron's dual faces) from vertex 0.
-      const v0 = sliced.vertices[face[0]]
-      for (let i = 1; i < face.length - 1; i++) {
-        const v1 = sliced.vertices[face[i]]
-        const v2 = sliced.vertices[face[i + 1]]
-        positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
-      }
-    }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geom.computeVertexNormals()
-    return geom
-  }, [sliced])
-
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
     document.body.style.cursor = 'pointer'
@@ -231,12 +290,28 @@ export function DomeMesh({
 
   const editingVertices = mode === 'edit' && editTarget === 'vertices'
   const editingEdges = mode === 'edit' && editTarget === 'edges'
+  const editingFaces = mode === 'edit' && editTarget === 'faces'
 
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), [])
 
+  // One small standalone geometry per visible face (canonical and added alike, sharing the
+  // same signed id scheme as added vertices), only needed while individually clickable.
+  const faceMeshEntries = useMemo(() => {
+    if (!editingFaces) return []
+    const canonical = visibleFaceEntries.map(({ face, index }) => ({
+      id: index,
+      geometry: buildFanGeometry(face.map((idx) => sliced.vertices[idx])),
+    }))
+    const added = visibleAddedFaceEntries.map(({ face, id }) => ({
+      id,
+      geometry: buildFanGeometry(face.map(resolvePosition)),
+    }))
+    return [...canonical, ...added]
+  }, [editingFaces, visibleFaceEntries, visibleAddedFaceEntries, sliced.vertices, resolvePosition])
+
   return (
     <group>
-      {(mode === 'edit' || mode === 'new') && (
+      {!editingFaces && (mode === 'edit' || mode === 'new') && (
         <mesh geometry={faceGeometry}>
           <meshStandardMaterial
             color="#5b9bd5"
@@ -247,15 +322,15 @@ export function DomeMesh({
           />
         </mesh>
       )}
-      {(mode === 'new' || editingVertices) && (
+      {(mode === 'new' || editingVertices || editingFaces) && (
         <lineSegments geometry={edgeGeometry}>
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
       )}
-      {mode === 'edit' && (
+      {!editingFaces && mode === 'edit' && (
         <mesh geometry={addedFaceGeometry}>
           <meshStandardMaterial
-            color="#d55b9b"
+            color="#5b9bd5"
             transparent
             opacity={0.4}
             side={THREE.DoubleSide}
@@ -265,17 +340,21 @@ export function DomeMesh({
       )}
       {mode === 'edit' && (
         <lineSegments geometry={addedEdgeGeometry}>
-          <lineBasicMaterial color="#571b3a" />
+          <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
       )}
       {mode === 'preview' && (
         <mesh geometry={edgeBeamGeometry}>
-          <meshStandardMaterial color="#5b9bd5" side={THREE.DoubleSide} roughness={0.5} />
+          <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.5} />
         </mesh>
       )}
       {mode === 'preview' && (
         <mesh geometry={addedEdgeBeamGeometry}>
-          <meshStandardMaterial color="#d55b9b" side={THREE.DoubleSide} roughness={0.5} />
+          <meshStandardMaterial
+            color={`#${EDGE_DEFAULT_COLOR.getHexString()}`}
+            side={THREE.DoubleSide}
+            roughness={0.5}
+          />
         </mesh>
       )}
       {editingVertices &&
@@ -349,6 +428,28 @@ export function DomeMesh({
               <cylinderGeometry args={[EDGE_MARKER_RADIUS, EDGE_MARKER_RADIUS, length, 8]} />
               <meshStandardMaterial
                 color={edgeMarkerColor(edgeThickness.get(index), isSelected)}
+              />
+            </mesh>
+          )
+        })}
+      {editingFaces &&
+        faceMeshEntries.map(({ id, geometry }) => {
+          const isSelected = selectedFaceIndices.has(id)
+          return (
+            <mesh
+              key={id}
+              geometry={geometry}
+              onClick={(e) => {
+                e.stopPropagation()
+                onFaceClick(id)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <meshStandardMaterial
+                color={isSelected ? SELECTED_COLOR : '#5b9bd5'}
+                side={THREE.DoubleSide}
+                roughness={0.6}
               />
             </mesh>
           )
