@@ -201,7 +201,7 @@ export function Sidebar({
     onEdgeThicknessChange(Math.max(num, 0))
   }
 
-  const handleCenterChange = (onChange: (value: number) => void, raw: string) => {
+  const handleNumericFieldChange = (onChange: (value: number) => void, raw: string) => {
     if (raw === '' || raw === '-') return
     const num = Number(raw)
     if (Number.isNaN(num)) return
@@ -276,7 +276,7 @@ export function Sidebar({
               step={100}
               min={1}
               value={diameter}
-              onChange={(e) => handleCenterChange(onDiameterChange, e.target.value)}
+              onChange={(e) => handleNumericFieldChange(onDiameterChange, e.target.value)}
             />
           </div>
           {mode === 'edit' && (
@@ -369,7 +369,7 @@ export function Sidebar({
               type="number"
               step={10}
               value={centerZ}
-              onChange={(e) => handleCenterChange(onCenterZChange, e.target.value)}
+              onChange={(e) => handleNumericFieldChange(onCenterZChange, e.target.value)}
             />
           </div>
           <div className="button-row">
@@ -382,57 +382,54 @@ export function Sidebar({
       {mode === 'preview' && (
         <section className="control-group">
           <h2>Edge Curvature</h2>
-          <div className="layer-slider-row">
+          <div className="transform-field">
+            <label>Corner length (D, mm)</label>
             <input
-              type="range"
-              min={0}
-              max={1000}
+              type="number"
               step={5}
+              min={0}
               value={cornerLength}
-              onChange={(e) => onCornerLengthChange(Number(e.target.value))}
+              onChange={(e) => handleNumericFieldChange(onCornerLengthChange, e.target.value)}
             />
-            <span className="layer-count">{cornerLength} mm</span>
           </div>
           <p className="hint">
             Corner length (D): straight lead-in at each end, tangent to the sphere and angled
             toward the other end. Meeting lead-ins form a sharp point; otherwise the gap between
             them is smoothed.
           </p>
-          <div className="layer-slider-row">
+          <div className="transform-field">
+            <label>Edge segments</label>
             <input
-              type="range"
+              type="number"
+              step={1}
               min={1}
-              max={32}
               value={edgeSegments}
-              onChange={(e) => onEdgeSegmentsChange(Number(e.target.value))}
+              onChange={(e) => handleNumericFieldChange(onEdgeSegmentsChange, e.target.value)}
             />
-            <span className="layer-count">{edgeSegments} segments</span>
           </div>
           <p className="hint">Each edge is bent through the spheres centered on that point.</p>
-          <div className="layer-slider-row">
+          <div className="transform-field">
+            <label>Width (mm)</label>
             <input
-              type="range"
-              min={0}
-              max={750}
+              type="number"
               step={5}
+              min={0}
               value={extrudeDistance}
-              onChange={(e) => onExtrudeDistanceChange(Number(e.target.value))}
+              onChange={(e) => handleNumericFieldChange(onExtrudeDistanceChange, e.target.value)}
             />
-            <span className="layer-count">{extrudeDistance} mm</span>
           </div>
           <p className="hint">
             Width: extrudes each arc symmetrically toward/away from the sphere's center.
           </p>
-          <div className="layer-slider-row">
+          <div className="transform-field">
+            <label>Thickness (mm)</label>
             <input
-              type="range"
-              min={0}
-              max={375}
+              type="number"
               step={5}
+              min={0}
               value={thickness}
-              onChange={(e) => onThicknessChange(Number(e.target.value))}
+              onChange={(e) => handleNumericFieldChange(onThicknessChange, e.target.value)}
             />
-            <span className="layer-count">{thickness} mm</span>
           </div>
           <p className="hint">
             Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
