@@ -112,9 +112,9 @@ export function Viewport({
         onPointerMissed={onDeselectAll}
       >
         <color attach="background" args={['#12141a']} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[12500, 20000, 12500]} intensity={1.1} />
-        <directionalLight position={[-10000, -5000, -10000]} intensity={0.25} />
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[12500, 20000, 12500]} intensity={2.6} />
+        <directionalLight position={[-10000, -5000, -10000]} intensity={0.6} />
         {/* With infiniteGrid, drei scales the plane's own vertices by (1 + fadeDistance) to
             fake infinite extent - so `args` must stay small (it's not the visible size), or the
             two multiply together into vertex positions in the hundreds of millions and the GPU
