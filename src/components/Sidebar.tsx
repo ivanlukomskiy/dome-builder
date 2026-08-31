@@ -61,6 +61,7 @@ interface SidebarProps {
   onAdjustToSphere: () => void
   selectedEdgeCount: number
   selectedEdgeIndices: ReadonlySet<number>
+  onDeleteSelectedEdges: () => void
   edgeThickness: ReadonlyMap<number, number>
   onEdgeThicknessChange: (value: number) => void
   onResetEdgeThickness: () => void
@@ -160,6 +161,7 @@ export function Sidebar({
   onAdjustToSphere,
   selectedEdgeCount,
   selectedEdgeIndices,
+  onDeleteSelectedEdges,
   edgeThickness,
   onEdgeThicknessChange,
   onResetEdgeThickness,
@@ -536,6 +538,15 @@ export function Sidebar({
             {selectedEdgeCount > 0
               ? `${selectedEdgeCount} ${selectedEdgeCount !== 1 ? 'edges' : 'edge'} selected`
               : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
+          </p>
+          <div className="button-row">
+            <button disabled={selectedEdgeCount === 0} onClick={onDeleteSelectedEdges}>
+              Delete
+            </button>
+          </div>
+          <p className="hint">
+            Also removes any face that had it as a side, and any vertex it leaves with no other
+            edge.
           </p>
           <div className="button-row">
             <button disabled={!canCreateFace} onClick={onCreateFace}>

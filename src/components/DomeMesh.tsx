@@ -65,6 +65,7 @@ interface DomeMeshProps {
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
+  deletedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
   selectedFaceIndices: ReadonlySet<number>
   deletedFaceIndices: ReadonlySet<number>
@@ -89,6 +90,7 @@ export function DomeMesh({
   deletedVertexIndices,
   selectedVertexIndices,
   selectedEdgeIndices,
+  deletedEdgeIndices,
   edgeThickness,
   selectedFaceIndices,
   deletedFaceIndices,
@@ -204,13 +206,13 @@ export function DomeMesh({
   }, [visibleAddedFaces, resolvePosition])
 
   // The canonical edges currently in view, keeping each one's index into `data.edges` around -
-  // that index is what selection and thickness overrides are keyed by.
+  // that index is what selection, deletion, and thickness overrides are keyed by.
   const visibleEdgeEntries = useMemo(
     () =>
       data.edges
         .map((edge, index) => ({ edge, index }))
-        .filter(({ edge: [a, b] }) => keptSet.has(a) && keptSet.has(b)),
-    [data.edges, keptSet],
+        .filter(({ edge: [a, b], index }) => keptSet.has(a) && keptSet.has(b) && !deletedEdgeIndices.has(index)),
+    [data.edges, keptSet, deletedEdgeIndices],
   )
 
   const edgeGeometry = useMemo(() => {

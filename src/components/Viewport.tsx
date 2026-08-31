@@ -14,6 +14,7 @@ interface ViewportProps {
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
+  deletedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
   selectedFaceIndices: ReadonlySet<number>
   deletedFaceIndices: ReadonlySet<number>
@@ -39,6 +40,7 @@ export function Viewport({
   deletedVertexIndices,
   selectedVertexIndices,
   selectedEdgeIndices,
+  deletedEdgeIndices,
   edgeThickness,
   selectedFaceIndices,
   deletedFaceIndices,
@@ -87,6 +89,7 @@ export function Viewport({
           deletedVertexIndices={deletedVertexIndices}
           selectedVertexIndices={selectedVertexIndices}
           selectedEdgeIndices={selectedEdgeIndices}
+          deletedEdgeIndices={deletedEdgeIndices}
           edgeThickness={edgeThickness}
           selectedFaceIndices={selectedFaceIndices}
           deletedFaceIndices={deletedFaceIndices}

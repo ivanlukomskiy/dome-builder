@@ -156,6 +156,9 @@ function App() {
   const [deletedFaceIndices, setDeletedFaceIndices] = useState<Set<number>>(
     new Set(initial?.deletedFaceIndices ?? []),
   )
+  const [deletedEdgeIndices, setDeletedEdgeIndices] = useState<Set<number>>(
+    new Set(initial?.deletedEdgeIndices ?? []),
+  )
   const [deletedGroups, setDeletedGroups] = useState<number[][]>(initial?.deletedGroups ?? [])
   const [redoStack, setRedoStack] = useState<number[][]>([])
   const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
@@ -297,6 +300,53 @@ function App() {
   const handleCreateFacesFromEdges = () => {
     if (creatableFaces.length === 0) return
     setAddedFaces((prev) => [...prev, ...creatableFaces])
+    setSelectedEdgeIndices(new Set())
+  }
+
+  // Deleting an edge cascades: any face (canonical or added) that has it as one of its own
+  // sides can no longer stand, and a canonical vertex it touched that's left with no other
+  // surviving edge is a stray point, not worth keeping either.
+  const handleDeleteSelectedEdges = () => {
+    if (selectedEdgeIndices.size === 0) return
+
+    const edgeKey = (a: number, b: number) => (a < b ? `${a}_${b}` : `${b}_${a}`)
+    const deletedEdgeKeys = new Set(
+      Array.from(selectedEdgeIndices).map((i) => edgeKey(data.edges[i][0], data.edges[i][1])),
+    )
+    const faceUsesADeletedEdge = (face: Face) =>
+      face.some((v, i) => deletedEdgeKeys.has(edgeKey(v, face[(i + 1) % face.length])))
+
+    const nextDeletedFaceIndices = new Set(deletedFaceIndices)
+    data.faces.forEach((f, i) => {
+      if (!nextDeletedFaceIndices.has(i) && faceUsesADeletedEdge(f)) nextDeletedFaceIndices.add(i)
+    })
+    addedFaces.forEach((f, i) => {
+      const id = -(i + 1)
+      if (!nextDeletedFaceIndices.has(id) && faceUsesADeletedEdge(f)) nextDeletedFaceIndices.add(id)
+    })
+
+    // A canonical vertex touched by a deleted edge, left with no other surviving edge, is stray.
+    const remainingDegree = new Map<number, number>()
+    data.edges.forEach((e, i) => {
+      if (selectedEdgeIndices.has(i) || deletedEdgeIndices.has(i)) return
+      remainingDegree.set(e[0], (remainingDegree.get(e[0]) ?? 0) + 1)
+      remainingDegree.set(e[1], (remainingDegree.get(e[1]) ?? 0) + 1)
+    })
+    const touchedVertices = new Set<number>()
+    for (const i of selectedEdgeIndices) {
+      touchedVertices.add(data.edges[i][0])
+      touchedVertices.add(data.edges[i][1])
+    }
+    const strayVertices = Array.from(touchedVertices).filter(
+      (v) => !remainingDegree.has(v) && !deletedVertexIndices.has(v),
+    )
+
+    setDeletedEdgeIndices((prev) => new Set([...prev, ...selectedEdgeIndices]))
+    setDeletedFaceIndices(nextDeletedFaceIndices)
+    if (strayVertices.length > 0) {
+      setDeletedGroups((prev) => [...prev, strayVertices])
+      setRedoStack([])
+    }
     setSelectedEdgeIndices(new Set())
   }
 
@@ -465,6 +515,7 @@ function App() {
     setSelectedFaceIndices(new Set())
     setEdgeThickness(new Map())
     setDeletedFaceIndices(new Set())
+    setDeletedEdgeIndices(new Set())
     setEditTarget('vertices')
     setCenterZ(DEFAULT_CENTER_Z)
     setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
@@ -496,6 +547,7 @@ function App() {
     setNextAddedVertexId(state.nextAddedVertexId)
     setEdgeThickness(new Map(state.edgeThickness))
     setDeletedFaceIndices(new Set(state.deletedFaceIndices))
+    setDeletedEdgeIndices(new Set(state.deletedEdgeIndices))
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
@@ -520,6 +572,7 @@ function App() {
       nextAddedVertexId,
       edgeThickness,
       deletedFaceIndices,
+      deletedEdgeIndices,
     })
 
   // Auto-save on every change to any config field, so the next page load can restore it.
@@ -541,6 +594,7 @@ function App() {
     nextAddedVertexId,
     edgeThickness,
     deletedFaceIndices,
+    deletedEdgeIndices,
   ])
 
   const handleExportConfig = () => {
@@ -589,6 +643,7 @@ function App() {
         onAdjustToSphere={handleAdjustToSphere}
         selectedEdgeCount={selectedEdgeIndices.size}
         selectedEdgeIndices={selectedEdgeIndices}
+        onDeleteSelectedEdges={handleDeleteSelectedEdges}
         edgeThickness={edgeThickness}
         onEdgeThicknessChange={handleEdgeThicknessChange}
         onResetEdgeThickness={handleResetEdgeThickness}
@@ -623,6 +678,7 @@ function App() {
         deletedVertexIndices={isNew ? EMPTY_INDEX_SET : deletedVertexIndices}
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
         selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
+        deletedEdgeIndices={isNew ? EMPTY_INDEX_SET : deletedEdgeIndices}
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
         selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
         deletedFaceIndices={isNew ? EMPTY_INDEX_SET : deletedFaceIndices}
