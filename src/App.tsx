@@ -17,6 +17,7 @@ import {
   computeVisibleVertexIds,
   DEFAULT_DIAMETER_MM,
   DEFAULT_VERTEX_TRANSFORM,
+  edgeMidpoint,
   findLayerGroup,
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
@@ -37,6 +38,20 @@ import {
 } from './lib/config'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
+export type EditTarget = 'vertices' | 'edges'
+
+// Shared by both vertex and edge selection: toggles a whole group (an individual pick, a
+// layer, or a symmetric orbit) on or off together, based on whether it was already fully
+// selected.
+function toggleGroupSelection(prev: ReadonlySet<number>, group: number[]): Set<number> {
+  const next = new Set(prev)
+  const allSelected = group.every((i) => next.has(i))
+  for (const i of group) {
+    if (allSelected) next.delete(i)
+    else next.add(i)
+  }
+  return next
+}
 
 const DEFAULT_SHAPE: ShapeType = 'octahedron'
 const DEFAULT_AXIS: AxisType = 'vertex'
@@ -57,6 +72,7 @@ const DEFAULT_CORNER_LENGTH = 375
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
 const EMPTY_FACES: Face[] = []
+const EMPTY_EDGE_THICKNESS: ReadonlyMap<number, number> = new Map()
 
 function App() {
   // Restored once, on first render, from whatever was auto-saved last time (see the autosave
@@ -118,7 +134,14 @@ function App() {
     initial?.selectionMode ?? 'symmetric',
   )
 
+  // Which kind of element clicking in the viewport selects, while editing.
+  const [editTarget, setEditTarget] = useState<EditTarget>('vertices')
+
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
+  const [selectedEdgeIndices, setSelectedEdgeIndices] = useState<Set<number>>(new Set())
+  const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
+    new Map(initial?.edgeThickness ?? []),
+  )
   const [deletedGroups, setDeletedGroups] = useState<number[][]>(initial?.deletedGroups ?? [])
   const [redoStack, setRedoStack] = useState<number[][]>([])
   const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
@@ -157,8 +180,12 @@ function App() {
 
   const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
 
+  // The "New" tab's shape/axis choice no longer describes committed geometry after edits, but
+  // it's still the best guess we have for the model's rotational symmetry.
+  const symmetryFold = () => SHAPE_AXES[shape].find((opt) => opt.value === axis)!.fold
+
   const handleVertexClick = (index: number) => {
-    if (mode !== 'edit' || deletedVertexIndices.has(index)) return
+    if (mode !== 'edit' || editTarget !== 'vertices' || deletedVertexIndices.has(index)) return
 
     // Grouping is always done against base (untransformed) positions, canonical vertices
     // and added ones alike, so it stays stable regardless of any transform edits.
@@ -172,21 +199,55 @@ function App() {
     if (selectionMode === 'layer') {
       group = findLayerGroup(index, candidateIds, positionOf)
     } else if (selectionMode === 'symmetric') {
-      // The "New" tab's shape/axis choice no longer describes committed geometry after edits,
-      // but it's still the best guess we have for the model's rotational symmetry.
-      const fold = SHAPE_AXES[shape].find((opt) => opt.value === axis)!.fold
-      group = findRotationalSymmetryGroup(index, candidateIds, positionOf, fold)
+      group = findRotationalSymmetryGroup(index, candidateIds, positionOf, symmetryFold())
     } else {
       group = [index]
     }
 
-    setSelectedVertexIndices((prev) => {
-      const next = new Set(prev)
-      const allSelected = group.every((i) => next.has(i))
-      for (const i of group) {
-        if (allSelected) next.delete(i)
-        else next.add(i)
+    setSelectedVertexIndices((prev) => toggleGroupSelection(prev, group))
+  }
+
+  const handleEdgeClick = (index: number) => {
+    if (mode !== 'edit' || editTarget !== 'edges') return
+
+    const positionOf = (id: number) => edgeMidpoint(data.edges[id], data.vertices)
+    const candidateIds = data.edges.map((_, i) => i)
+
+    let group: number[]
+    if (selectionMode === 'layer') {
+      group = findLayerGroup(index, candidateIds, positionOf)
+    } else if (selectionMode === 'symmetric') {
+      group = findRotationalSymmetryGroup(index, candidateIds, positionOf, symmetryFold())
+    } else {
+      group = [index]
+    }
+
+    setSelectedEdgeIndices((prev) => toggleGroupSelection(prev, group))
+  }
+
+  const handleEditTargetChange = (target: EditTarget) => {
+    setEditTarget(target)
+    setSelectedVertexIndices(new Set())
+    setSelectedEdgeIndices(new Set())
+  }
+
+  const handleEdgeThicknessChange = (value: number) => {
+    if (selectedEdgeIndices.size === 0) return
+    setEdgeThickness((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedEdgeIndices) {
+        if (value <= 0) next.delete(idx)
+        else next.set(idx, value)
       }
+      return next
+    })
+  }
+
+  const handleResetEdgeThickness = () => {
+    if (selectedEdgeIndices.size === 0) return
+    setEdgeThickness((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedEdgeIndices) next.delete(idx)
       return next
     })
   }
@@ -214,6 +275,7 @@ function App() {
 
   const handleDeselectAll = () => {
     setSelectedVertexIndices(new Set())
+    setSelectedEdgeIndices(new Set())
   }
 
   const handleCancelAll = () => {
@@ -325,6 +387,9 @@ function App() {
       setAddedFaces([])
       setNextAddedVertexId(-1)
       setSelectedVertexIndices(new Set())
+      setSelectedEdgeIndices(new Set())
+      setEdgeThickness(new Map())
+      setEditTarget('vertices')
       setCenterZ(DEFAULT_CENTER_Z)
       setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
       setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
@@ -350,7 +415,10 @@ function App() {
     setAddedVertices(new Map(state.addedVertices))
     setAddedFaces(state.addedFaces)
     setNextAddedVertexId(state.nextAddedVertexId)
+    setEdgeThickness(new Map(state.edgeThickness))
     setSelectedVertexIndices(new Set())
+    setSelectedEdgeIndices(new Set())
+    setEditTarget('vertices')
     setShapeDirty(false)
     setMode('edit')
   }
@@ -370,6 +438,7 @@ function App() {
       addedVertices,
       addedFaces,
       nextAddedVertexId,
+      edgeThickness,
     })
 
   // Auto-save on every change to any config field, so the next page load can restore it.
@@ -389,6 +458,7 @@ function App() {
     addedVertices,
     addedFaces,
     nextAddedVertexId,
+    edgeThickness,
   ])
 
   const handleExportConfig = () => {
@@ -420,6 +490,8 @@ function App() {
         layerCount={layerCount}
         onLayerCountChange={setLayerCount}
         data={previewData}
+        editTarget={editTarget}
+        onEditTargetChange={handleEditTargetChange}
         selectionMode={selectionMode}
         onSelectionModeChange={setSelectionMode}
         selectedCount={selectedVertexIndices.size}
@@ -430,6 +502,11 @@ function App() {
         canAddPoints={canAddPoints}
         onAddPoints={handleAddPoints}
         onAdjustToSphere={handleAdjustToSphere}
+        selectedEdgeCount={selectedEdgeIndices.size}
+        selectedEdgeIndices={selectedEdgeIndices}
+        edgeThickness={edgeThickness}
+        onEdgeThicknessChange={handleEdgeThicknessChange}
+        onResetEdgeThickness={handleResetEdgeThickness}
         centerZ={centerZ}
         onCenterZChange={setCenterZ}
         onGroundCenter={handleGroundCenter}
@@ -450,11 +527,14 @@ function App() {
       />
       <Viewport
         mode={mode}
+        editTarget={editTarget}
         data={isNew ? previewData : data}
         layerCount={layerCount}
         transformedVertices={isNew ? previewData.vertices : transformedVertices}
         deletedVertexIndices={isNew ? EMPTY_INDEX_SET : deletedVertexIndices}
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
+        selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
+        edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
         addedVertices={isNew ? EMPTY_VERTEX_MAP : transformedAddedVertices}
         addedFaces={isNew ? EMPTY_FACES : addedFaces}
         centerY={centerY}
@@ -463,6 +543,7 @@ function App() {
         thickness={thickness}
         cornerLength={cornerLength}
         onVertexClick={handleVertexClick}
+        onEdgeClick={handleEdgeClick}
         onDeselectAll={handleDeselectAll}
       />
     </div>

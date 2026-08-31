@@ -6,12 +6,12 @@ export type AxisType = 'vertex' | 'face' | 'edge'
 export type SelectionMode = 'point' | 'layer' | 'symmetric'
 
 export const SELECTION_MODE_OPTIONS: { value: SelectionMode; label: string; hint: string }[] = [
-  { value: 'point', label: 'Points', hint: 'Click a vertex to select it' },
-  { value: 'layer', label: 'Layer', hint: 'Click a vertex to select its whole layer' },
+  { value: 'point', label: 'Individual', hint: 'Click one to select it' },
+  { value: 'layer', label: 'Layer', hint: 'Click one to select its whole layer' },
   {
     value: 'symmetric',
     label: 'Symmetric',
-    hint: 'Click a vertex to select its symmetric group',
+    hint: 'Click one to select its symmetric group',
   },
 ]
 
@@ -523,6 +523,12 @@ export function resolveVertexPosition(
   added: ReadonlyMap<number, THREE.Vector3>,
 ): THREE.Vector3 {
   return index >= 0 ? canonicalVertices[index] : added.get(index)!
+}
+
+// An edge's own "position", for grouping purposes (layer/symmetric selection work the same way
+// for edges as for vertices, just keyed off this midpoint instead of the vertex itself).
+export function edgeMidpoint(edge: Edge, vertices: THREE.Vector3[]): THREE.Vector3 {
+  return vertices[edge[0]].clone().add(vertices[edge[1]]).multiplyScalar(0.5)
 }
 
 export interface AddedGeometry {

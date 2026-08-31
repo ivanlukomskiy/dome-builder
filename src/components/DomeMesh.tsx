@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import type { ViewMode } from '../App'
+import type { EditTarget, ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import {
   computeEdgePolyline,
@@ -16,13 +16,33 @@ import {
 const VERTEX_MARKER_RADIUS = 80
 const SELECTED_VERTEX_MARKER_RADIUS = 115
 
+// Clickable-edge cylinder radius while editing edges - deliberately thicker than the plain
+// wireframe line so edges read as the interactive element in that mode.
+const EDGE_MARKER_RADIUS = 40
+const EDGE_SELECTED_COLOR = '#f5a623'
+const EDGE_DEFAULT_COLOR = new THREE.Color('#3a5a7a')
+const EDGE_OVERRIDE_MIN_COLOR = new THREE.Color('#4fd97e')
+const EDGE_OVERRIDE_MAX_COLOR = new THREE.Color('#ff3b3b')
+// Override magnitude (mm) at which the color heatmap maxes out.
+const EDGE_OVERRIDE_COLOR_REFERENCE = 300
+
+function edgeMarkerColor(override: number | undefined, isSelected: boolean): string {
+  if (isSelected) return EDGE_SELECTED_COLOR
+  if (override === undefined) return `#${EDGE_DEFAULT_COLOR.getHexString()}`
+  const t = Math.min(override / EDGE_OVERRIDE_COLOR_REFERENCE, 1)
+  return `#${EDGE_OVERRIDE_MIN_COLOR.clone().lerp(EDGE_OVERRIDE_MAX_COLOR, t).getHexString()}`
+}
+
 interface DomeMeshProps {
   mode: ViewMode
+  editTarget: EditTarget
   data: PolyhedronData
   layerCount: number
   transformedVertices: THREE.Vector3[]
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
+  selectedEdgeIndices: ReadonlySet<number>
+  edgeThickness: ReadonlyMap<number, number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
   centerY: number
@@ -31,15 +51,19 @@ interface DomeMeshProps {
   thickness: number
   cornerLength: number
   onVertexClick: (index: number) => void
+  onEdgeClick: (index: number) => void
 }
 
 export function DomeMesh({
   mode,
+  editTarget,
   data,
   layerCount,
   transformedVertices,
   deletedVertexIndices,
   selectedVertexIndices,
+  selectedEdgeIndices,
+  edgeThickness,
   addedVertices,
   addedFaces,
   centerY,
@@ -48,6 +72,7 @@ export function DomeMesh({
   thickness,
   cornerLength,
   onVertexClick,
+  onEdgeClick,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
     const layered = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
@@ -108,9 +133,19 @@ export function DomeMesh({
     return geom
   }, [visibleAddedFaces, resolvePosition])
 
+  // The canonical edges currently in view, keeping each one's index into `data.edges` around -
+  // that index is what selection and thickness overrides are keyed by.
+  const visibleEdgeEntries = useMemo(
+    () =>
+      data.edges
+        .map((edge, index) => ({ edge, index }))
+        .filter(({ edge: [a, b] }) => keptSet.has(a) && keptSet.has(b)),
+    [data.edges, keptSet],
+  )
+
   const edgeGeometry = useMemo(() => {
     const positions: number[] = []
-    for (const [a, b] of sliced.keptEdges) {
+    for (const { edge: [a, b] } of visibleEdgeEntries) {
       const va = sliced.vertices[a]
       const vb = sliced.vertices[b]
       positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z)
@@ -118,25 +153,27 @@ export function DomeMesh({
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     return geom
-  }, [sliced])
+  }, [visibleEdgeEntries, sliced.vertices])
 
   // Preview mode instead turns each edge into a solid beam: turn it into a polyline with
   // mitered corners (straight tangent lead-ins at each end, bridged either by a sharp point or
   // by an arc bulging along the sphere family centered on the dome's center point), then
   // symmetrically extrude that polyline toward/away from the sphere's center (width) and along
-  // its own surface normal (thickness) to give it a rectangular cross-section.
+  // its own surface normal (thickness, or that edge's own override if it has one) to give it a
+  // rectangular cross-section.
   const buildBeam = useCallback(
-    (va: THREE.Vector3, vb: THREE.Vector3) => {
+    (va: THREE.Vector3, vb: THREE.Vector3, beamThickness: number) => {
       const points = computeEdgePolyline(va, vb, centerY, edgeSegments, cornerLength)
-      return extrudeArcToBeam(points, centerY, extrudeDistance, thickness)
+      return extrudeArcToBeam(points, centerY, extrudeDistance, beamThickness)
     },
-    [centerY, edgeSegments, extrudeDistance, thickness, cornerLength],
+    [centerY, edgeSegments, extrudeDistance, cornerLength],
   )
 
   const edgeBeamGeometry = useMemo(() => {
     const positions: number[] = []
-    for (const [a, b] of sliced.keptEdges) {
-      for (const v of buildBeam(sliced.vertices[a], sliced.vertices[b])) {
+    for (const { edge: [a, b], index } of visibleEdgeEntries) {
+      const beamThickness = edgeThickness.get(index) ?? thickness
+      for (const v of buildBeam(sliced.vertices[a], sliced.vertices[b], beamThickness)) {
         positions.push(v.x, v.y, v.z)
       }
     }
@@ -144,7 +181,7 @@ export function DomeMesh({
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geom.computeVertexNormals()
     return geom
-  }, [sliced, buildBeam])
+  }, [visibleEdgeEntries, sliced.vertices, buildBeam, edgeThickness, thickness])
 
   const addedEdgeBeamGeometry = useMemo(() => {
     const positions: number[] = []
@@ -157,14 +194,14 @@ export function DomeMesh({
         [v1, v2],
         [v2, v0],
       ] as const) {
-        for (const v of buildBeam(a, b)) positions.push(v.x, v.y, v.z)
+        for (const v of buildBeam(a, b, thickness)) positions.push(v.x, v.y, v.z)
       }
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geom.computeVertexNormals()
     return geom
-  }, [visibleAddedFaces, resolvePosition, buildBeam])
+  }, [visibleAddedFaces, resolvePosition, buildBeam, thickness])
 
   const faceGeometry = useMemo(() => {
     const positions: number[] = []
@@ -192,6 +229,11 @@ export function DomeMesh({
     document.body.style.cursor = 'auto'
   }
 
+  const editingVertices = mode === 'edit' && editTarget === 'vertices'
+  const editingEdges = mode === 'edit' && editTarget === 'edges'
+
+  const up = useMemo(() => new THREE.Vector3(0, 1, 0), [])
+
   return (
     <group>
       {(mode === 'edit' || mode === 'new') && (
@@ -205,7 +247,7 @@ export function DomeMesh({
           />
         </mesh>
       )}
-      {(mode === 'edit' || mode === 'new') && (
+      {(mode === 'new' || editingVertices) && (
         <lineSegments geometry={edgeGeometry}>
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
@@ -236,7 +278,7 @@ export function DomeMesh({
           <meshStandardMaterial color="#d55b9b" side={THREE.DoubleSide} roughness={0.5} />
         </mesh>
       )}
-      {mode === 'edit' &&
+      {editingVertices &&
         sliced.keptVertexIndices.map((idx) => {
           const v = sliced.vertices[idx]
           const isSelected = selectedVertexIndices.has(idx)
@@ -258,7 +300,7 @@ export function DomeMesh({
             </mesh>
           )
         })}
-      {mode === 'edit' &&
+      {editingVertices &&
         Array.from(visibleAddedVertexIds).map((idx) => {
           const v = addedVertices.get(idx)!
           const isSelected = selectedVertexIndices.has(idx)
@@ -277,6 +319,37 @@ export function DomeMesh({
                 args={[isSelected ? SELECTED_VERTEX_MARKER_RADIUS : VERTEX_MARKER_RADIUS, 16, 16]}
               />
               <meshStandardMaterial color={isSelected ? '#f5a623' : '#e0729f'} />
+            </mesh>
+          )
+        })}
+      {editingEdges &&
+        visibleEdgeEntries.map(({ edge: [a, b], index }) => {
+          const va = sliced.vertices[a]
+          const vb = sliced.vertices[b]
+          const mid = va.clone().add(vb).multiplyScalar(0.5)
+          const direction = vb.clone().sub(va)
+          const length = direction.length()
+          const quaternion = new THREE.Quaternion().setFromUnitVectors(
+            up,
+            direction.normalize(),
+          )
+          const isSelected = selectedEdgeIndices.has(index)
+          return (
+            <mesh
+              key={index}
+              position={[mid.x, mid.y, mid.z]}
+              quaternion={quaternion}
+              onClick={(e) => {
+                e.stopPropagation()
+                onEdgeClick(index)
+              }}
+              onPointerOver={handlePointerOver}
+              onPointerOut={handlePointerOut}
+            >
+              <cylinderGeometry args={[EDGE_MARKER_RADIUS, EDGE_MARKER_RADIUS, length, 8]} />
+              <meshStandardMaterial
+                color={edgeMarkerColor(edgeThickness.get(index), isSelected)}
+              />
             </mesh>
           )
         })}

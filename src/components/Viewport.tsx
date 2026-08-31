@@ -1,17 +1,20 @@
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import type * as THREE from 'three'
-import type { ViewMode } from '../App'
+import type { EditTarget, ViewMode } from '../App'
 import type { Face, PolyhedronData } from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
 
 interface ViewportProps {
   mode: ViewMode
+  editTarget: EditTarget
   data: PolyhedronData
   layerCount: number
   transformedVertices: THREE.Vector3[]
   deletedVertexIndices: ReadonlySet<number>
   selectedVertexIndices: ReadonlySet<number>
+  selectedEdgeIndices: ReadonlySet<number>
+  edgeThickness: ReadonlyMap<number, number>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
   addedFaces: Face[]
   centerY: number
@@ -20,16 +23,20 @@ interface ViewportProps {
   thickness: number
   cornerLength: number
   onVertexClick: (index: number) => void
+  onEdgeClick: (index: number) => void
   onDeselectAll: () => void
 }
 
 export function Viewport({
   mode,
+  editTarget,
   data,
   layerCount,
   transformedVertices,
   deletedVertexIndices,
   selectedVertexIndices,
+  selectedEdgeIndices,
+  edgeThickness,
   addedVertices,
   addedFaces,
   centerY,
@@ -38,6 +45,7 @@ export function Viewport({
   thickness,
   cornerLength,
   onVertexClick,
+  onEdgeClick,
   onDeselectAll,
 }: ViewportProps) {
   return (
@@ -66,11 +74,14 @@ export function Viewport({
         />
         <DomeMesh
           mode={mode}
+          editTarget={editTarget}
           data={data}
           layerCount={layerCount}
           transformedVertices={transformedVertices}
           deletedVertexIndices={deletedVertexIndices}
           selectedVertexIndices={selectedVertexIndices}
+          selectedEdgeIndices={selectedEdgeIndices}
+          edgeThickness={edgeThickness}
           addedVertices={addedVertices}
           addedFaces={addedFaces}
           centerY={centerY}
@@ -79,6 +90,7 @@ export function Viewport({
           thickness={thickness}
           cornerLength={cornerLength}
           onVertexClick={onVertexClick}
+          onEdgeClick={onEdgeClick}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>

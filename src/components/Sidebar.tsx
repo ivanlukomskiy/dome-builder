@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { ChangeEvent } from 'react'
-import type { ViewMode } from '../App'
+import type { EditTarget, ViewMode } from '../App'
 import type {
   AxisType,
   PolyhedronData,
@@ -23,6 +23,11 @@ const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
   { value: 'preview', label: 'Preview' },
 ]
 
+const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
+  { value: 'vertices', label: 'Vertices' },
+  { value: 'edges', label: 'Edges' },
+]
+
 interface SidebarProps {
   onExportConfig: () => void
   onImportConfig: (file: File) => void
@@ -39,6 +44,8 @@ interface SidebarProps {
   layerCount: number
   onLayerCountChange: (count: number) => void
   data: PolyhedronData
+  editTarget: EditTarget
+  onEditTargetChange: (target: EditTarget) => void
   selectionMode: SelectionMode
   onSelectionModeChange: (mode: SelectionMode) => void
   selectedCount: number
@@ -49,6 +56,11 @@ interface SidebarProps {
   canAddPoints: boolean
   onAddPoints: () => void
   onAdjustToSphere: () => void
+  selectedEdgeCount: number
+  selectedEdgeIndices: ReadonlySet<number>
+  edgeThickness: ReadonlyMap<number, number>
+  onEdgeThicknessChange: (value: number) => void
+  onResetEdgeThickness: () => void
   centerZ: number
   onCenterZChange: (value: number) => void
   onGroundCenter: () => void
@@ -88,6 +100,26 @@ function sharedTransformValue(
   return value
 }
 
+// null return means the selected edges don't all share the same override (an edge without one
+// counts as 0, i.e. "use the default thickness").
+function sharedEdgeThicknessValue(
+  selected: ReadonlySet<number>,
+  overrides: ReadonlyMap<number, number>,
+): number | null {
+  let value: number | null = null
+  let first = true
+  for (const idx of selected) {
+    const v = overrides.get(idx) ?? 0
+    if (first) {
+      value = v
+      first = false
+    } else if (v !== value) {
+      return null
+    }
+  }
+  return value
+}
+
 export function Sidebar({
   onExportConfig,
   onImportConfig,
@@ -104,6 +136,8 @@ export function Sidebar({
   layerCount,
   onLayerCountChange,
   data,
+  editTarget,
+  onEditTargetChange,
   selectionMode,
   onSelectionModeChange,
   selectedCount,
@@ -114,6 +148,11 @@ export function Sidebar({
   canAddPoints,
   onAddPoints,
   onAdjustToSphere,
+  selectedEdgeCount,
+  selectedEdgeIndices,
+  edgeThickness,
+  onEdgeThicknessChange,
+  onResetEdgeThickness,
   centerZ,
   onCenterZChange,
   onGroundCenter,
@@ -140,11 +179,21 @@ export function Sidebar({
   const thetaValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'theta')
   const hasTransforms = Array.from(selectedVertexIndices).some((idx) => vertexTransforms.has(idx))
 
+  const edgeThicknessValue = sharedEdgeThicknessValue(selectedEdgeIndices, edgeThickness)
+  const hasEdgeOverrides = Array.from(selectedEdgeIndices).some((idx) => edgeThickness.has(idx))
+
   const handleFieldChange = (field: keyof VertexTransform, raw: string, toRadians = false) => {
     if (raw === '' || raw === '-') return
     const num = Number(raw)
     if (Number.isNaN(num)) return
     onTransformChange(field, toRadians ? (num * Math.PI) / 180 : num)
+  }
+
+  const handleEdgeThicknessFieldChange = (raw: string) => {
+    if (raw === '') return
+    const num = Number(raw)
+    if (Number.isNaN(num)) return
+    onEdgeThicknessChange(Math.max(num, 0))
   }
 
   const handleCenterChange = (onChange: (value: number) => void, raw: string) => {
@@ -371,6 +420,23 @@ export function Sidebar({
 
       {mode === 'edit' && (
         <section className="control-group">
+          <h2>Edit</h2>
+          <div className="segmented-control">
+            {EDIT_TARGET_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={editTarget === opt.value ? 'active' : ''}
+                onClick={() => onEditTargetChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'vertices' && (
+        <section className="control-group">
           <h2>Edit vertices</h2>
           <div className="segmented-control">
             {SELECTION_MODE_OPTIONS.map((opt) => (
@@ -423,7 +489,52 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'edit' && selectedCount > 0 && (
+      {mode === 'edit' && editTarget === 'edges' && (
+        <section className="control-group">
+          <h2>Edit edges</h2>
+          <div className="segmented-control">
+            {SELECTION_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={selectionMode === opt.value ? 'active' : ''}
+                onClick={() => onSelectionModeChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            {selectedEdgeCount > 0
+              ? `${selectedEdgeCount} ${selectedEdgeCount !== 1 ? 'edges' : 'edge'} selected`
+              : SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint}
+          </p>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'edges' && selectedEdgeCount > 0 && (
+        <section className="control-group">
+          <h2>Edge Thickness</h2>
+          <div className="transform-field">
+            <label>Thickness override (mm)</label>
+            <input
+              type="number"
+              step={5}
+              min={0}
+              value={edgeThicknessValue ?? ''}
+              placeholder={edgeThicknessValue === null ? 'Mixed' : undefined}
+              onChange={(e) => handleEdgeThicknessFieldChange(e.target.value)}
+            />
+          </div>
+          <p className="hint">0 uses the global default thickness set in Preview.</p>
+          <div className="button-row">
+            <button disabled={!hasEdgeOverrides} onClick={onResetEdgeThickness}>
+              Reset Thickness
+            </button>
+          </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
         <section className="control-group">
           <h2>Transform</h2>
           <div className="transform-field">
