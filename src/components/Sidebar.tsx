@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import type {
@@ -129,6 +129,48 @@ function sharedEdgeThicknessValue(
   return value
 }
 
+interface NumberFieldProps {
+  value: number | null
+  onCommit: (value: number) => void
+  step?: number
+  min?: number
+  placeholder?: string
+  clamp?: (value: number) => number
+}
+
+// A numeric text input that tracks its own typed text separately from the committed value, so
+// clearing the field to type a fresh number doesn't get fought by a controlled value snapping
+// back on each intermediate (empty, "-", ...) keystroke. Any keystroke that leaves a valid
+// number commits it live, so the model updates as you type; an invalid/empty in-progress value
+// is simply left uncommitted, and blurring reverts the field's own display back to whatever was
+// last actually committed (or "Mixed", if the current selection doesn't share one).
+function NumberField({ value, onCommit, step, min, placeholder, clamp }: NumberFieldProps) {
+  const [draft, setDraft] = useState<string | null>(null)
+
+  const handleChange = (raw: string) => {
+    setDraft(raw)
+    const trimmed = raw.trim()
+    if (trimmed === '') return
+    const num = Number(trimmed)
+    if (!Number.isNaN(num)) onCommit(clamp ? clamp(num) : num)
+  }
+
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      value={draft ?? (value === null ? '' : value)}
+      placeholder={placeholder}
+      onChange={(e) => handleChange(e.target.value)}
+      onBlur={() => setDraft(null)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+      }}
+    />
+  )
+}
+
 export function Sidebar({
   onExportConfig,
   onImportConfig,
@@ -200,27 +242,6 @@ export function Sidebar({
   const edgeThicknessValue = sharedEdgeThicknessValue(selectedEdgeIndices, edgeThickness)
   const hasEdgeOverrides = Array.from(selectedEdgeIndices).some((idx) => edgeThickness.has(idx))
 
-  const handleFieldChange = (field: keyof VertexTransform, raw: string, toRadians = false) => {
-    if (raw === '' || raw === '-') return
-    const num = Number(raw)
-    if (Number.isNaN(num)) return
-    onTransformChange(field, toRadians ? (num * Math.PI) / 180 : num)
-  }
-
-  const handleEdgeThicknessFieldChange = (raw: string) => {
-    if (raw === '') return
-    const num = Number(raw)
-    if (Number.isNaN(num)) return
-    onEdgeThicknessChange(Math.max(num, 0))
-  }
-
-  const handleNumericFieldChange = (onChange: (value: number) => void, raw: string) => {
-    if (raw === '' || raw === '-') return
-    const num = Number(raw)
-    if (Number.isNaN(num)) return
-    onChange(num)
-  }
-
   const importInputRef = useRef<HTMLInputElement>(null)
 
   const handleImportFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -284,13 +305,7 @@ export function Sidebar({
           <h2>Diameter</h2>
           <div className="transform-field">
             <label>Diameter (mm)</label>
-            <input
-              type="number"
-              step={100}
-              min={1}
-              value={diameter}
-              onChange={(e) => handleNumericFieldChange(onDiameterChange, e.target.value)}
-            />
+            <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
           </div>
           {mode === 'edit' && (
             <p className="hint">The target size &ldquo;Adjust to a Sphere&rdquo; snaps onto.</p>
@@ -378,12 +393,7 @@ export function Sidebar({
           <h2>Center</h2>
           <div className="transform-field">
             <label>Center (z, mm)</label>
-            <input
-              type="number"
-              step={10}
-              value={centerZ}
-              onChange={(e) => handleNumericFieldChange(onCenterZChange, e.target.value)}
-            />
+            <NumberField value={centerZ} step={10} onCommit={onCenterZChange} />
           </div>
           <div className="button-row">
             <button onClick={onGroundCenter}>Ground the Center</button>
@@ -397,13 +407,7 @@ export function Sidebar({
           <h2>Edge Curvature</h2>
           <div className="transform-field">
             <label>Corner length (D, mm)</label>
-            <input
-              type="number"
-              step={5}
-              min={0}
-              value={cornerLength}
-              onChange={(e) => handleNumericFieldChange(onCornerLengthChange, e.target.value)}
-            />
+            <NumberField value={cornerLength} step={5} min={0} onCommit={onCornerLengthChange} />
           </div>
           <p className="hint">
             Corner length (D): straight lead-in at each end, tangent to the sphere and angled
@@ -412,37 +416,19 @@ export function Sidebar({
           </p>
           <div className="transform-field">
             <label>Edge segments</label>
-            <input
-              type="number"
-              step={1}
-              min={1}
-              value={edgeSegments}
-              onChange={(e) => handleNumericFieldChange(onEdgeSegmentsChange, e.target.value)}
-            />
+            <NumberField value={edgeSegments} step={1} min={1} onCommit={onEdgeSegmentsChange} />
           </div>
           <p className="hint">Each edge is bent through the spheres centered on that point.</p>
           <div className="transform-field">
             <label>Width (mm)</label>
-            <input
-              type="number"
-              step={5}
-              min={0}
-              value={extrudeDistance}
-              onChange={(e) => handleNumericFieldChange(onExtrudeDistanceChange, e.target.value)}
-            />
+            <NumberField value={extrudeDistance} step={5} min={0} onCommit={onExtrudeDistanceChange} />
           </div>
           <p className="hint">
             Width: extrudes each arc symmetrically toward/away from the sphere's center.
           </p>
           <div className="transform-field">
             <label>Thickness (mm)</label>
-            <input
-              type="number"
-              step={5}
-              min={0}
-              value={thickness}
-              onChange={(e) => handleNumericFieldChange(onThicknessChange, e.target.value)}
-            />
+            <NumberField value={thickness} step={5} min={0} onCommit={onThicknessChange} />
           </div>
           <p className="hint">
             Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
@@ -573,13 +559,13 @@ export function Sidebar({
           <h2>Edge Thickness</h2>
           <div className="transform-field">
             <label>Thickness override (mm)</label>
-            <input
-              type="number"
+            <NumberField
+              value={edgeThicknessValue}
               step={5}
               min={0}
-              value={edgeThicknessValue ?? ''}
               placeholder={edgeThicknessValue === null ? 'Mixed' : undefined}
-              onChange={(e) => handleEdgeThicknessFieldChange(e.target.value)}
+              clamp={(n) => Math.max(n, 0)}
+              onCommit={onEdgeThicknessChange}
             />
           </div>
           <p className="hint">0 uses the global default thickness set in Preview.</p>
@@ -623,32 +609,29 @@ export function Sidebar({
           <h2>Transform</h2>
           <div className="transform-field">
             <label>Elevation (z, mm)</label>
-            <input
-              type="number"
+            <NumberField
+              value={zValue}
               step={10}
-              value={zValue ?? ''}
               placeholder={zValue === null ? 'Mixed' : undefined}
-              onChange={(e) => handleFieldChange('z', e.target.value)}
+              onCommit={(v) => onTransformChange('z', v)}
             />
           </div>
           <div className="transform-field">
             <label>Radius (r, mm)</label>
-            <input
-              type="number"
+            <NumberField
+              value={rValue}
               step={10}
-              value={rValue ?? ''}
               placeholder={rValue === null ? 'Mixed' : undefined}
-              onChange={(e) => handleFieldChange('r', e.target.value)}
+              onCommit={(v) => onTransformChange('r', v)}
             />
           </div>
           <div className="transform-field">
             <label>Angle (&theta;&deg;)</label>
-            <input
-              type="number"
+            <NumberField
+              value={thetaValue === null ? null : Math.round(((thetaValue * 180) / Math.PI) * 100) / 100}
               step={1}
-              value={thetaValue === null ? '' : Math.round((thetaValue * 180) / Math.PI * 100) / 100}
               placeholder={thetaValue === null ? 'Mixed' : undefined}
-              onChange={(e) => handleFieldChange('theta', e.target.value, true)}
+              onCommit={(deg) => onTransformChange('theta', (deg * Math.PI) / 180)}
             />
           </div>
           <p className="hint">
