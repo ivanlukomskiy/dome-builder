@@ -23,7 +23,7 @@ interface Params {
 const DEFAULT_PARAMS: Params = {
   offset1: 100,
   offset2: 100,
-  width: 125,
+  width: 500,
   cornerLength: 375,
   radius: 2500,
   angleDeg: 60,
