@@ -149,6 +149,17 @@ function drawPointMarker(p: Point2D, radius: number): Drawing {
   return drawCircle(radius).translate(p);
 }
 
+// A diamond (45-degree square) centered at `p`, reaching `size` in each of the four axis
+// directions - used as a chamfer-cut shape at a corner point.
+function drawDiamond(p: Point2D, size: number): Drawing {
+  return draw()
+    .movePointerTo([p[0] - size, p[1]])
+    .lineTo([p[0], p[1] + size])
+    .lineTo([p[0] + size, p[1]])
+    .lineTo([p[0], p[1] - size])
+    .close();
+}
+
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
@@ -199,7 +210,17 @@ export function computeStrutBoundaryManual(
 }
 
 const MARKER_RADIUS = 15;
-const nullResp: StrutBoundaryManualResult = { main: null, helpers: [] };
+
+interface ShoulderGeometry {
+  main: Drawing | null;
+  helpers: HelperDrawing[];
+  // Chamfer cuts at the sharp corners - kept separate from `main` rather than subtracted right
+  // away, so the caller can apply them after combining shoulder geometry from multiple ends
+  // (once side A exists again) instead of each end fighting over its own copy of `main`.
+  negativeShapes: Drawing[];
+}
+
+const nullShoulderGeometry: ShoulderGeometry = { main: null, helpers: [], negativeShapes: [] };
 
 // Everything currently built around the B end - centerline, offset/shoulder points, and the two
 // mid-groove notches. Side A is out of scope for now (see the user's own note in conversation:
@@ -216,7 +237,8 @@ function createShoulderGeometry(
   endGrooveLength: number,
   midGrooveLength: number,
   grooveDepth: number,
-): StrutBoundaryManualResult {
+  chamferLength: number,
+): ShoulderGeometry {
   // computeStrutBoundaryManual (the 3D wrapper) already rotated everything so center->B comes out
   // exactly vertical - `up` is that guaranteed-exact axis, and `right` is the matching horizontal
   // axis (still computed the general way, as the lead-in direction leaning toward `a`, so this
@@ -231,7 +253,7 @@ function createShoulderGeometry(
   // cornerLength would otherwise take it further.
   const tangentA = tangentDirection2D(a, b, center);
   const intersection = lineIntersection2D(a, tangentA, b, right);
-  if (!intersection) return nullResp;
+  if (!intersection) return nullShoulderGeometry;
   const distanceToIntersection = length2(sub2(intersection, a));
 
   const offsetPointB = add2(b, scale2(right, offsetB));
@@ -256,7 +278,7 @@ function createShoulderGeometry(
   const shoulderRefDir = sub2(shoulderEndPointB, center);
   const shoulderEndPointInnB = lineIntersection2D(center, shoulderRefDir, offsetPointInnB, right);
   const shoulderEndPointExtB = lineIntersection2D(center, shoulderRefDir, offsetPointExtB, right);
-  if (!shoulderEndPointInnB || !shoulderEndPointExtB) return nullResp;
+  if (!shoulderEndPointInnB || !shoulderEndPointExtB) return nullShoulderGeometry;
 
   console.log(
     'angle between offsetPointExtB→shoulderEndPointExtB and offsetPointInnB→shoulderEndPointInnB (deg)',
@@ -285,6 +307,18 @@ function createShoulderGeometry(
   const midGroovePointExtB1 = add2(shoulderEndPointExtEffectiveB, scale2(up, -grooveDepth));
   const midGroovePointExtB2 = add2(midGroovePointExtB1, scale2(right, -midGrooveLength));
   const midGroovePointExtB3 = add2(shoulderEndPointExtEffectiveB, scale2(right, -midGrooveLength));
+
+  // Chamfer cuts at each sharp corner - clamped to grooveDepth so a chamfer can never eat past
+  // the bottom of a groove it sits next to.
+  const clampedChamferLength = Math.min(chamferLength, grooveDepth);
+  const negativeShapes: Drawing[] = [
+    drawDiamond(endGroovePointExt1, clampedChamferLength),
+    drawDiamond(midGroovePointExtB3, clampedChamferLength),
+    drawDiamond(shoulderEndPointExtEffectiveB, clampedChamferLength),
+    drawDiamond(shoulderEndPointInnB, clampedChamferLength),
+    drawDiamond(midGroovePointInnB3, clampedChamferLength),
+    drawDiamond(endGroovePointInn1, clampedChamferLength),
+  ];
 
   const helpers: HelperDrawing[] = [
     { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
@@ -359,6 +393,7 @@ function createShoulderGeometry(
   return {
     main,
     helpers,
+    negativeShapes,
   };
 }
 
@@ -374,9 +409,9 @@ export function computeStrutBoundaryManual2D(
   midGrooveLength: number,
   grooveDepth: number,
   _millingDiameter: number,
-  _chamferLength: number,
+  chamferLength: number,
 ): StrutBoundaryManualResult {
-  return createShoulderGeometry(
+  const { main, helpers, negativeShapes } = createShoulderGeometry(
     a,
     b,
     center,
@@ -386,7 +421,15 @@ export function computeStrutBoundaryManual2D(
     endGrooveLength,
     midGrooveLength,
     grooveDepth,
+    chamferLength,
   );
+
+  let result = main;
+  for (const shape of negativeShapes) {
+    if (result) result = result.cut(shape);
+  }
+
+  return { main: result, helpers };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and
