@@ -1,4 +1,5 @@
 import { Plane, Sketcher, setOC } from 'replicad'
+import type { Drawing } from 'replicad'
 import type { StrutSketch } from './strutGeometry'
 
 // The only module that touches replicad/opencascade.js. Callers reach it via a dynamic
@@ -67,6 +68,34 @@ export function buildStrutMesh(sketch: StrutSketch, thicknessMm: number): StrutM
 
   const mesh = centered.mesh({ tolerance: MESH_TOLERANCE, angularTolerance: MESH_ANGULAR_TOLERANCE })
   centered.delete()
+
+  return {
+    positions: Float32Array.from(mesh.vertices),
+    normals: Float32Array.from(mesh.normals),
+    indices: Uint32Array.from(mesh.triangles),
+  }
+}
+
+// Meshes an arbitrary flat `Drawing` (e.g. from replicad's own `draw()`/boolean-op primitives -
+// see strutGeometryManual.ts and the "Strut Shape Debug" tool) directly, without extruding: puts
+// it on the default XY plane, turns it into a face, and tessellates. Returns null for an empty
+// drawing (e.g. a `.cut()`/`.intersect()` that leaves nothing). `ensureReplicadReady` must have
+// resolved before calling this.
+export function meshDrawing(drawing: Drawing): StrutMesh | null {
+  let sketched
+  try {
+    sketched = drawing.sketchOnPlane()
+  } catch {
+    return null
+  }
+
+  // A single-region drawing yields a Sketch (`.face()`); a drawing with several disjoint
+  // regions yields a Sketches (`.faces()`, a compound) - both are meshable the same way.
+  const shape = 'face' in sketched ? sketched.face() : sketched.faces()
+  ;(sketched as { delete?: () => void }).delete?.()
+
+  const mesh = shape.mesh({ tolerance: MESH_TOLERANCE, angularTolerance: MESH_ANGULAR_TOLERANCE })
+  shape.delete()
 
   return {
     positions: Float32Array.from(mesh.vertices),
