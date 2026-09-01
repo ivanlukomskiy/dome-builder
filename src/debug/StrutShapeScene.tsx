@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
@@ -29,6 +29,7 @@ function extendBoundingBox(mesh: StrutMesh, box: { minX: number; maxX: number; m
 interface HelperMesh {
   mesh: StrutMesh
   color: string
+  name: string
 }
 
 interface StrutShapeSceneProps {
@@ -78,52 +79,127 @@ function MainShape({ mesh }: { mesh: StrutMesh }) {
   )
 }
 
-function HelperShape({ mesh, color }: HelperMesh) {
+function HelperShape({
+  mesh,
+  color,
+  name,
+  onHover,
+  onSelect,
+}: HelperMesh & { onHover: (name: string | null) => void; onSelect: (name: string) => void }) {
   const geometry = useMemo(() => meshToGeometry(mesh), [mesh])
   return (
-    <mesh geometry={geometry} position={[0, 0, 0.5]}>
+    <mesh
+      geometry={geometry}
+      position={[0, 0, 0.5]}
+      onPointerOver={(e) => {
+        e.stopPropagation()
+        onHover(name)
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation()
+        onHover(null)
+      }}
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect(name)
+      }}
+    >
       <meshBasicMaterial color={color} side={THREE.DoubleSide} />
     </mesh>
   )
 }
 
-function SceneContents({ main, helpers }: StrutShapeSceneProps) {
+function SceneContents({
+  main,
+  helpers,
+  onHoverHelper,
+  onSelectHelper,
+}: StrutShapeSceneProps & { onHoverHelper: (name: string | null) => void; onSelectHelper: (name: string) => void }) {
   return (
     <group>
       {main && <MainShape mesh={main} />}
       {helpers.map((helper, i) => (
-        <HelperShape key={i} mesh={helper.mesh} color={helper.color} />
+        <HelperShape
+          key={i}
+          mesh={helper.mesh}
+          color={helper.color}
+          name={helper.name}
+          onHover={onHoverHelper}
+          onSelect={onSelectHelper}
+        />
       ))}
     </group>
   )
 }
 
+// Hovering a helper shape shows its `name` (set in strutGeometryManual.ts) in a small tooltip
+// that follows the cursor - lets you point at a marker in the viewport and immediately see which
+// computed point/line it is, instead of matching colors against the source by eye. Clicking one
+// copies that name to the clipboard, so you can paste it straight into a console.log or the
+// source itself.
 export function StrutShapeScene(props: StrutShapeSceneProps) {
   const { target, distance, fov } = useInitialCameraFit(props)
+  const [hoveredName, setHoveredName] = useState<string | null>(null)
+  const [copiedName, setCopiedName] = useState<string | null>(null)
+  const [pointer, setPointer] = useState({ x: 0, y: 0 })
+  const copyResetRef = useRef<number | null>(null)
+
+  const handleSelect = (name: string) => {
+    void navigator.clipboard.writeText(name).then(() => {
+      setCopiedName(name)
+      if (copyResetRef.current) window.clearTimeout(copyResetRef.current)
+      copyResetRef.current = window.setTimeout(() => setCopiedName(null), 1200)
+    })
+  }
 
   return (
-    <Canvas>
-      <color attach="background" args={['#12141a']} />
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[0, 0, distance]} intensity={1.2} />
-      <PerspectiveCamera
-        makeDefault
-        position={[target[0], target[1], target[2] + distance]}
-        up={[0, 1, 0]}
-        fov={fov}
-        near={1}
-        far={distance * 100}
-      />
-      <OrbitControls
-        makeDefault
-        enableRotate={false}
-        target={target}
-        enableDamping
-        dampingFactor={0.08}
-        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
-        touches={{ ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }}
-      />
-      <SceneContents {...props} />
-    </Canvas>
+    <div
+      style={{ width: '100%', height: '100%', position: 'relative' }}
+      onPointerMove={(e) => setPointer({ x: e.clientX, y: e.clientY })}
+    >
+      <Canvas>
+        <color attach="background" args={['#12141a']} />
+        <ambientLight intensity={0.7} />
+        <directionalLight position={[0, 0, distance]} intensity={1.2} />
+        <PerspectiveCamera
+          makeDefault
+          position={[target[0], target[1], target[2] + distance]}
+          up={[0, 1, 0]}
+          fov={fov}
+          near={1}
+          far={distance * 100}
+        />
+        <OrbitControls
+          makeDefault
+          enableRotate={false}
+          target={target}
+          enableDamping
+          dampingFactor={0.08}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+          touches={{ ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }}
+        />
+        <SceneContents {...props} onHoverHelper={setHoveredName} onSelectHelper={handleSelect} />
+      </Canvas>
+      {hoveredName && (
+        <div
+          style={{
+            position: 'fixed',
+            left: pointer.x + 14,
+            top: pointer.y + 14,
+            pointerEvents: 'none',
+            background: 'rgba(18, 20, 26, 0.9)',
+            color: '#fff',
+            padding: '3px 8px',
+            borderRadius: 4,
+            fontSize: 12,
+            fontFamily: 'monospace',
+            whiteSpace: 'nowrap',
+            zIndex: 10,
+          }}
+        >
+          {copiedName === hoveredName ? `${hoveredName} ✓ copied` : hoveredName}
+        </div>
+      )}
+    </div>
   )
 }

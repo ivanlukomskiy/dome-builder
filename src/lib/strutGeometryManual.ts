@@ -28,6 +28,8 @@ export interface HelperDrawing {
   // different construction lines/reference shapes stay visually distinct from `main` and from
   // each other.
   color: string;
+  // Shown as a tooltip when hovering this helper in the preview - what point/line this is.
+  name: string;
 }
 
 export interface StrutBoundaryManualResult {
@@ -239,25 +241,26 @@ export function computeStrutBoundaryManual2D(
   const offsetPointInnB = radialOffset(offsetPointB, center, -halfWidth);
 
   const helpers: HelperDrawing[] = [
-    { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN },
-    { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN },
-    { drawing: drawPointMarker(offsetPointA, MARKER_RADIUS), color: "#e0729f" },
-    { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea" },
-    { drawing: drawPointMarker(shoulderEndPointA, MARKER_RADIUS), color: "#38bdf8" },
-    { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635" },
-    { drawing: drawPointMarker(offsetPointExtA, MARKER_RADIUS), color: "#f9a8d4" },
-    { drawing: drawPointMarker(offsetPointInnA, MARKER_RADIUS), color: "#9d174d" },
-    { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe" },
-    { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8" },
-    { drawing: drawPointMarker(shoulderEndPointExtA, MARKER_RADIUS), color: "#7dd3fc" },
-    { drawing: drawPointMarker(shoulderEndPointInnA, MARKER_RADIUS), color: "#0369a1" },
-    { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d" },
-    { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f" },
+    { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
+    { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → B" },
+    { drawing: drawPointMarker(offsetPointA, MARKER_RADIUS), color: "#e0729f", name: "offsetPointA" },
+    { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea", name: "offsetPointB" },
+    { drawing: drawPointMarker(shoulderEndPointA, MARKER_RADIUS), color: "#38bdf8", name: "shoulderEndPointA" },
+    { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635", name: "shoulderEndPointB" },
+    { drawing: drawPointMarker(offsetPointExtA, MARKER_RADIUS), color: "#f9a8d4", name: "offsetPointExtA" },
+    { drawing: drawPointMarker(offsetPointInnA, MARKER_RADIUS), color: "#9d174d", name: "offsetPointInnA" },
+    { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe", name: "offsetPointExtB" },
+    { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8", name: "offsetPointInnB" },
+    { drawing: drawPointMarker(shoulderEndPointExtA, MARKER_RADIUS), color: "#7dd3fc", name: "shoulderEndPointExtA" },
+    { drawing: drawPointMarker(shoulderEndPointInnA, MARKER_RADIUS), color: "#0369a1", name: "shoulderEndPointInnA" },
+    { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d", name: "shoulderEndPointExtB" },
+    { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f", name: "shoulderEndPointInnB" },
   ];
   if (intersection)
     helpers.push({
       drawing: drawPointMarker(intersection, MARKER_RADIUS),
       color: "#f5a623",
+      name: "intersection",
     });
 
   return {

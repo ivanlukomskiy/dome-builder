@@ -35,6 +35,7 @@ const DEFAULT_PARAMS: Params = {
 interface HelperMesh {
   mesh: StrutMesh
   color: string
+  name: string
 }
 
 type State =
@@ -87,7 +88,7 @@ export function StrutShapeDebug() {
         const helpers: HelperMesh[] = []
         for (const helper of result.helpers) {
           const mesh = meshDrawing(helper.drawing)
-          if (mesh) helpers.push({ mesh, color: helper.color })
+          if (mesh) helpers.push({ mesh, color: helper.color, name: helper.name })
         }
         if (cancelled) return
 
