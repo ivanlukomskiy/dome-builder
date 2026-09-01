@@ -23,7 +23,7 @@ interface Params {
 const DEFAULT_PARAMS: Params = {
   offset1: 100,
   offset2: 100,
-  width: 500,
+  width: 120,
   cornerLength: 375,
   radius: 2500,
   angleDeg: 60,
@@ -57,6 +57,7 @@ export function StrutShapeDebug() {
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS)
   const setParam = (field: keyof Params) => (value: number) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
+  const [showHelperPoints, setShowHelperPoints] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -137,6 +138,15 @@ export function StrutShapeDebug() {
           reloads automatically.
         </p>
 
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={showHelperPoints}
+            onChange={(e) => setShowHelperPoints(e.target.checked)}
+          />
+          Show helper points
+        </label>
+
         <section className="control-group">
           <h2>Vertex Placement</h2>
           <div className="transform-field">
@@ -198,7 +208,9 @@ export function StrutShapeDebug() {
         </section>
       </aside>
       <div className="viewport">
-        {state.status === 'ready' && <StrutShapeScene main={state.main} helpers={state.helpers} />}
+        {state.status === 'ready' && (
+          <StrutShapeScene main={state.main} helpers={showHelperPoints ? state.helpers : []} />
+        )}
         {state.status === 'loading' && <div className="hud">Loading CAD engine…</div>}
         {state.status === 'empty' && <div className="hud">computeStrutBoundaryManual returned nothing to show.</div>}
         {state.status === 'error' && (

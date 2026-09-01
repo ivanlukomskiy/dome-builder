@@ -1,5 +1,5 @@
 import { draw, drawCircle } from "replicad";
-import type { Drawing, Point2D } from "replicad";
+import { Drawing, type Point2D } from "replicad";
 import type * as THREE from "three";
 import { computeStrutPlane } from "./strutGeometry";
 
@@ -127,27 +127,51 @@ function drawPointMarker(p: Point2D, radius: number): Drawing {
   return drawCircle(radius).translate(p);
 }
 
-// A diamond (45-degree square) centered at `p`, reaching `size` in each of the four axis
-// directions - used as a chamfer-cut shape at a corner point.
-function drawDiamond(p: Point2D, size: number): Drawing {
+// A diamond (45-degree square, oriented to the given right/up axes rather than the global X/Y
+// ones) centered at `p`, reaching `size` in each of the four right/up directions - used as a
+// chamfer-cut shape at a corner point.
+function drawDiamond(p: Point2D, size: number, right: Point2D, up: Point2D): Drawing {
   return draw()
-    .movePointerTo([p[0] - size, p[1]])
-    .lineTo([p[0], p[1] + size])
-    .lineTo([p[0] + size, p[1]])
-    .lineTo([p[0], p[1] - size])
+    .movePointerTo(add2(p, scale2(right, -size)))
+    .lineTo(add2(p, scale2(up, size)))
+    .lineTo(add2(p, scale2(right, size)))
+    .lineTo(add2(p, scale2(up, -size)))
     .close();
 }
 
 type MillingDirection = "top-right" | "top-left" | "bottom-left" | "bottom-right";
 
 // A mill-relief circle of the given diameter, tucked into the corner at `p` - offset diagonally
-// (by millingDiameter/2/sqrt(2) along each axis, toward `direction`) so the circle's own edge
-// passes exactly through `p`, clearing the inside corner of a square notch for a round end mill.
-function drawMillingCircle(p: Point2D, direction: MillingDirection, millingDiameter: number): Drawing {
+// (by millingDiameter/2/sqrt(2) along each of `right`/`up`, toward `direction`, rather than the
+// global X/Y axes) so the circle's own edge passes exactly through `p`, clearing the inside
+// corner of a square notch for a round end mill.
+function drawMillingCircle(
+  p: Point2D,
+  direction: MillingDirection,
+  millingDiameter: number,
+  right: Point2D,
+  up: Point2D,
+): Drawing {
   const offset = millingDiameter / 2 / Math.sqrt(2);
-  const dx = direction === "top-right" || direction === "bottom-right" ? offset : -offset;
-  const dy = direction === "top-right" || direction === "top-left" ? offset : -offset;
-  return drawCircle(millingDiameter / 2).translate([p[0] + dx, p[1] + dy]);
+  const rightSign = direction === "top-right" || direction === "bottom-right" ? 1 : -1;
+  const upSign = direction === "top-right" || direction === "top-left" ? 1 : -1;
+  const circleCenter = add2(add2(p, scale2(right, rightSign * offset)), scale2(up, upSign * offset));
+  return drawCircle(millingDiameter / 2).translate(circleCenter);
+}
+
+// A point on the circle centered at `center` (radius = the average of p1's and p2's own
+// distances from `center`, in case they're not perfectly equal) halfway - by angle, the short
+// way around - between p1 and p2. Used as the "via" point for threePointsArcTo when the arc's
+// actual center is known but there's no third point to hand.
+function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
+  const radius = (length2(sub2(p1, center)) + length2(sub2(p2, center))) / 2;
+  const angle1 = Math.atan2(p1[1] - center[1], p1[0] - center[0]);
+  const angle2 = Math.atan2(p2[1] - center[1], p2[0] - center[0]);
+  let delta = angle2 - angle1;
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta < -Math.PI) delta += 2 * Math.PI;
+  const mid = angle1 + delta / 2;
+  return [center[0] + radius * Math.cos(mid), center[1] + radius * Math.sin(mid)];
 }
 
 // Whether a Drawing still has real, meshable area - a boolean op that goes wrong (see the
@@ -214,18 +238,36 @@ export function computeStrutBoundaryManual(
   );
 }
 
-const MARKER_RADIUS = 15;
+const MARKER_RADIUS = 3;
 
 interface ShoulderGeometry {
-  main: Drawing | null;
+  main: Drawing;
   helpers: HelperDrawing[];
-  // Chamfer cuts at the sharp corners - kept separate from `main` rather than subtracted right
-  // away, so the caller can apply them after combining shoulder geometry from multiple ends
-  // (once side A exists again) instead of each end fighting over its own copy of `main`.
+  // Cuts (grooves, chamfers, mill-relief) - kept separate from `main` rather than subtracted
+  // right away, so the caller can combine shoulder geometry from both ends first (fusing their
+  // `main`s and pooling their negativeShapes) and cut once, instead of each end fighting over
+  // its own copy of `main`.
   negativeShapes: Drawing[];
+  // How far the tangent lines from A and B would cross, from this end's own vertex - the caller
+  // uses this (both ends' values are the same point, so either one works) to decide whether the
+  // two shoulders actually reach each other or need a connecting piece bridging the gap.
+  distanceToIntersection: number;
+  // The three boundary points a connecting piece needs to tie into - null if this shoulder
+  // itself failed to build (see the two early nullShoulderGeometry returns below).
+  shoulderEndPointExt: Point2D | null;
+  shoulderEndPointInn: Point2D | null;
+  shoulderEndPointExtEffective: Point2D | null;
 }
 
-const nullShoulderGeometry: ShoulderGeometry = { main: null, helpers: [], negativeShapes: [] };
+const nullShoulderGeometry: ShoulderGeometry = {
+  main: draw().close(),
+  helpers: [],
+  negativeShapes: [],
+  distanceToIntersection: 0,
+  shoulderEndPointExt: null,
+  shoulderEndPointInn: null,
+  shoulderEndPointExtEffective: null,
+};
 
 // Everything built around one end of the strut - centerline, offset/shoulder points, end/mid
 // groove notches, chamfers, mill-relief circles. Generic over which vertex it's building around:
@@ -322,12 +364,12 @@ function createShoulderGeometry(
   const negativeShapes: Drawing[] =
     clampedChamferLength > 0
       ? [
-          drawDiamond(endGroovePointExt1, clampedChamferLength),
-          drawDiamond(midGroovePointExt3, clampedChamferLength),
-          drawDiamond(shoulderEndPointExtEffective, clampedChamferLength),
-          drawDiamond(shoulderEndPointInn, clampedChamferLength),
-          drawDiamond(midGroovePointInn3, clampedChamferLength),
-          drawDiamond(endGroovePointInn1, clampedChamferLength),
+          drawDiamond(endGroovePointExt1, clampedChamferLength, right, up),
+          drawDiamond(midGroovePointExt3, clampedChamferLength, right, up),
+          drawDiamond(shoulderEndPointExtEffective, clampedChamferLength, right, up),
+          drawDiamond(shoulderEndPointInn, clampedChamferLength, right, up),
+          drawDiamond(midGroovePointInn3, clampedChamferLength, right, up),
+          drawDiamond(endGroovePointInn1, clampedChamferLength, right, up),
         ]
       : [];
 
@@ -412,6 +454,11 @@ function createShoulderGeometry(
       color: "#1e3a8a",
       name: `endGroovePointInn${label}3`,
     },
+    {
+      drawing: drawMillingCircle(midGroovePointExt1, "top-left", millingDiameter, right, up),
+      color: "#1e3a8a",
+      name: `endGroovePointInn${label}3`,
+    },
   ];
 
   const main = draw()
@@ -462,12 +509,12 @@ function createShoulderGeometry(
   // reach all the way into the square notch instead of leaving material a real mill can't cut.
   if (millingDiameter > 0) {
     negativeShapes.push(
-      // drawMillingCircle(midGroovePointExt2, "top-right", millingDiameter),
-      // drawMillingCircle(endGroovePointExt2, "top-left", millingDiameter),
-      // drawMillingCircle(midGroovePointExt1, "top-left", millingDiameter),
-      // drawMillingCircle(midGroovePointInn1, "bottom-left", millingDiameter),
-      // drawMillingCircle(midGroovePointInn2, "bottom-right", millingDiameter),
-      // drawMillingCircle(endGroovePointInn2, "bottom-left", millingDiameter),
+      drawMillingCircle(midGroovePointExt2, "top-right", millingDiameter, right, up),
+      drawMillingCircle(endGroovePointExt2, "top-left", millingDiameter, right, up),
+      drawMillingCircle(midGroovePointExt1, "top-left", millingDiameter, right, up),
+      drawMillingCircle(midGroovePointInn1, "bottom-left", millingDiameter, right, up),
+      drawMillingCircle(midGroovePointInn2, "bottom-right", millingDiameter, right, up),
+      drawMillingCircle(endGroovePointInn2, "bottom-left", millingDiameter, right, up),
     );
   }
 
@@ -475,6 +522,10 @@ function createShoulderGeometry(
     main,
     helpers,
     negativeShapes,
+    distanceToIntersection,
+    shoulderEndPointExt,
+    shoulderEndPointInn,
+    shoulderEndPointExtEffective,
   };
 }
 
@@ -521,9 +572,37 @@ export function computeStrutBoundaryManual2D(
     "A",
   );
 
-  const main = geometryB.main && geometryA.main ? geometryB.main.fuse(geometryA.main) : geometryB.main || geometryA.main;
   const helpers = [...geometryB.helpers, ...geometryA.helpers];
   const negativeShapes = [...geometryB.negativeShapes, ...geometryA.negativeShapes];
+
+  // The two shoulders only reach as far as cornerLength (each one's own shoulderEndPoint is
+  // already capped there); if the tangent lines' own intersection is further out than that,
+  // there's a gap left between them - bridge it with two arcs (centered at `center`, same as the
+  // radial construction everywhere else here) and two straight sides.
+  let main = geometryB.main;
+  if (
+    main &&
+    geometryB.distanceToIntersection > cornerLength &&
+    geometryB.shoulderEndPointInn &&
+    geometryB.shoulderEndPointExt &&
+    geometryA.shoulderEndPointInn &&
+    geometryA.shoulderEndPointExt
+  ) {
+    const connection = draw()
+      .movePointerTo(geometryB.shoulderEndPointInn)
+      .threePointsArcTo(
+        geometryA.shoulderEndPointInn,
+        arcMidpoint(geometryB.shoulderEndPointInn, geometryA.shoulderEndPointInn, center),
+      )
+      .lineTo(geometryA.shoulderEndPointExt)
+      .threePointsArcTo(
+        geometryB.shoulderEndPointExt,
+        arcMidpoint(geometryA.shoulderEndPointExt, geometryB.shoulderEndPointExt, center),
+      )
+      .close();
+    main = main.fuse(connection);
+  }
+  main = main.fuse(geometryA.main)
 
   // Cut the negative shapes one at a time, verifying each cut actually produced a real
   // (non-empty, meshable) shape before keeping it - a mill-relief circle landing exactly on an

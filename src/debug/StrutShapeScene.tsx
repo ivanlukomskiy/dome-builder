@@ -67,14 +67,20 @@ function useInitialCameraFit(props: StrutShapeSceneProps) {
 
 function MainShape({ mesh }: { mesh: StrutMesh }) {
   const geometry = useMemo(() => meshToGeometry(mesh), [mesh])
+  // Plain `wireframe` draws every triangle edge, including the internal diagonals the mesher
+  // adds to triangulate an otherwise-flat face - which is what read as stray "lighter lines"
+  // across the shape. EdgesGeometry keeps only edges where adjacent faces meet at an angle (the
+  // real boundary/cut outlines), dropping the coplanar triangulation edges, so this draws a
+  // clean thin border instead.
+  const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry])
   return (
     <group>
       <mesh geometry={geometry}>
         <meshStandardMaterial color={FILL_COLOR} side={THREE.DoubleSide} roughness={0.6} />
       </mesh>
-      <mesh geometry={geometry}>
-        <meshBasicMaterial color={WIREFRAME_COLOR} wireframe side={THREE.DoubleSide} />
-      </mesh>
+      <lineSegments geometry={edges}>
+        <lineBasicMaterial color={WIREFRAME_COLOR} />
+      </lineSegments>
     </group>
   )
 }
