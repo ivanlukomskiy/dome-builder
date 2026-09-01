@@ -309,16 +309,20 @@ function createShoulderGeometry(
   const midGroovePointExtB3 = add2(shoulderEndPointExtEffectiveB, scale2(right, -midGrooveLength));
 
   // Chamfer cuts at each sharp corner - clamped to grooveDepth so a chamfer can never eat past
-  // the bottom of a groove it sits next to.
+  // the bottom of a groove it sits next to. A zero-or-negative clamp (chamferLength <= 0) means
+  // no chamfer at all, not a degenerate zero-size cut.
   const clampedChamferLength = Math.min(chamferLength, grooveDepth);
-  const negativeShapes: Drawing[] = [
-    drawDiamond(endGroovePointExt1, clampedChamferLength),
-    drawDiamond(midGroovePointExtB3, clampedChamferLength),
-    drawDiamond(shoulderEndPointExtEffectiveB, clampedChamferLength),
-    drawDiamond(shoulderEndPointInnB, clampedChamferLength),
-    drawDiamond(midGroovePointInnB3, clampedChamferLength),
-    drawDiamond(endGroovePointInn1, clampedChamferLength),
-  ];
+  const negativeShapes: Drawing[] =
+    clampedChamferLength > 0
+      ? [
+          drawDiamond(endGroovePointExt1, clampedChamferLength),
+          drawDiamond(midGroovePointExtB3, clampedChamferLength),
+          drawDiamond(shoulderEndPointExtEffectiveB, clampedChamferLength),
+          drawDiamond(shoulderEndPointInnB, clampedChamferLength),
+          drawDiamond(midGroovePointInnB3, clampedChamferLength),
+          drawDiamond(endGroovePointInn1, clampedChamferLength),
+        ]
+      : [];
 
   const helpers: HelperDrawing[] = [
     { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
@@ -349,46 +353,49 @@ function createShoulderGeometry(
     { drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS), color: "#1e3a8a", name: "endGroovePointInn3" },
   ];
 
-  let main = draw()
+  const main = draw()
     .movePointerTo(offsetPointExtB)
     .lineTo(shoulderEndPointExtB)
     .lineTo(shoulderEndPointInnB)
     .lineTo(offsetPointInnB)
     .close();
 
-  // Cut the two mid-groove notches (Ext/Inn) out of the strut body at the B end.
-  const midGrooveExtCutB = draw()
-    .movePointerTo(shoulderEndPointExtEffectiveB)
-    .lineTo(midGroovePointExtB1)
-    .lineTo(midGroovePointExtB2)
-    .lineTo(midGroovePointExtB3)
-    .close();
-  main = main.cut(midGrooveExtCutB);
+  // The two mid-groove notches (Ext/Inn) - only if there's actually a groove to cut, both a
+  // length along the strut and a depth into it.
+  if (midGrooveLength > 0 && grooveDepth > 0) {
+    negativeShapes.push(
+      draw()
+        .movePointerTo(shoulderEndPointExtEffectiveB)
+        .lineTo(midGroovePointExtB1)
+        .lineTo(midGroovePointExtB2)
+        .lineTo(midGroovePointExtB3)
+        .close(),
+      draw()
+        .movePointerTo(shoulderEndPointInnB)
+        .lineTo(midGroovePointInnB1)
+        .lineTo(midGroovePointInnB2)
+        .lineTo(midGroovePointInnB3)
+        .close(),
+    );
+  }
 
-  const midGrooveInnCutB = draw()
-    .movePointerTo(shoulderEndPointInnB)
-    .lineTo(midGroovePointInnB1)
-    .lineTo(midGroovePointInnB2)
-    .lineTo(midGroovePointInnB3)
-    .close();
-  main = main.cut(midGrooveInnCutB);
-
-  // Cut the two end-groove notches (Ext/Inn) out of the strut body right at the B end.
-  const endGrooveExtCutB = draw()
-    .movePointerTo(endGroovePointExt1)
-    .lineTo(endGroovePointExt2)
-    .lineTo(endGroovePointExt3)
-    .lineTo(offsetPointExtB)
-    .close();
-  main = main.cut(endGrooveExtCutB);
-
-  const endGrooveInnCutB = draw()
-    .movePointerTo(endGroovePointInn1)
-    .lineTo(endGroovePointInn2)
-    .lineTo(endGroovePointInn3)
-    .lineTo(offsetPointInnB)
-    .close();
-  main = main.cut(endGrooveInnCutB);
+  // The two end-groove notches (Ext/Inn), right at the B end - same existence check.
+  if (endGrooveLength > 0 && grooveDepth > 0) {
+    negativeShapes.push(
+      draw()
+        .movePointerTo(endGroovePointExt1)
+        .lineTo(endGroovePointExt2)
+        .lineTo(endGroovePointExt3)
+        .lineTo(offsetPointExtB)
+        .close(),
+      draw()
+        .movePointerTo(endGroovePointInn1)
+        .lineTo(endGroovePointInn2)
+        .lineTo(endGroovePointInn3)
+        .lineTo(offsetPointInnB)
+        .close(),
+    );
+  }
 
   return {
     main,
