@@ -135,6 +135,13 @@ function drawPointMarker(p: Point2D, radius: number): Drawing {
   return drawCircle(radius).translate(p);
 }
 
+// Moves `p` by `dist` along the radial direction center->p (negative `dist` moves toward
+// `center` instead).
+function radialOffset(p: Point2D, center: Point2D, dist: number): Point2D {
+  const dir = normalize2(sub2(p, center));
+  return add2(p, scale2(dir, dist));
+}
+
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
@@ -185,8 +192,8 @@ export function computeStrutBoundaryManual2D(
   center: Point2D,
   offsetA: number,
   offsetB: number,
-  _cornerLength: number,
-  _halfWidth: number,
+  cornerLength: number,
+  halfWidth: number,
   _tooth: ToothParams,
 ): StrutBoundaryManualResult {
   const rectA = draw()
@@ -212,11 +219,40 @@ export function computeStrutBoundaryManual2D(
   const offsetPointA = add2(a, scale2(tangentA, offsetA));
   const offsetPointB = add2(b, scale2(tangentB, offsetB));
 
+  // Where the lead-in from each vertex would actually end: as far as the tangent lines' own
+  // intersection (the sharp corner), but never further than cornerLength - same "the offset
+  // spends the cornerLength budget" idea as strutGeometry.ts's trimmedA/trimmedB.
+  const shoulderLength = Math.min(intersectionDistance, cornerLength);
+  const shoulderEndPointA = add2(a, scale2(tangentA, shoulderLength));
+  const shoulderEndPointB = add2(b, scale2(tangentB, shoulderLength));
+
+  // Push each of those points out (Ext, away from center) and in (Inn, toward center) by
+  // halfWidth, radially - this is how the centerline construction above turns into the strut's
+  // actual left/right edges.
+  const shoulderEndPointExtA = radialOffset(shoulderEndPointA, center, halfWidth);
+  const shoulderEndPointInnA = radialOffset(shoulderEndPointA, center, -halfWidth);
+  const shoulderEndPointExtB = radialOffset(shoulderEndPointB, center, halfWidth);
+  const shoulderEndPointInnB = radialOffset(shoulderEndPointB, center, -halfWidth);
+  const offsetPointExtA = radialOffset(offsetPointA, center, halfWidth);
+  const offsetPointInnA = radialOffset(offsetPointA, center, -halfWidth);
+  const offsetPointExtB = radialOffset(offsetPointB, center, halfWidth);
+  const offsetPointInnB = radialOffset(offsetPointB, center, -halfWidth);
+
   const helpers: HelperDrawing[] = [
     { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN },
     { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN },
     { drawing: drawPointMarker(offsetPointA, MARKER_RADIUS), color: "#e0729f" },
     { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea" },
+    { drawing: drawPointMarker(shoulderEndPointA, MARKER_RADIUS), color: "#38bdf8" },
+    { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635" },
+    { drawing: drawPointMarker(offsetPointExtA, MARKER_RADIUS), color: "#f9a8d4" },
+    { drawing: drawPointMarker(offsetPointInnA, MARKER_RADIUS), color: "#9d174d" },
+    { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe" },
+    { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8" },
+    { drawing: drawPointMarker(shoulderEndPointExtA, MARKER_RADIUS), color: "#7dd3fc" },
+    { drawing: drawPointMarker(shoulderEndPointInnA, MARKER_RADIUS), color: "#0369a1" },
+    { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d" },
+    { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f" },
   ];
   if (intersection)
     helpers.push({
