@@ -13,10 +13,11 @@ interface Params {
   cornerLength: number
   radius: number
   angleDeg: number
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  endGrooveLength: number
+  midGrooveLength: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
 }
 
 const DEFAULT_PARAMS: Params = {
@@ -26,10 +27,11 @@ const DEFAULT_PARAMS: Params = {
   cornerLength: 375,
   radius: 2500,
   angleDeg: 60,
-  toothHeight: 30,
-  toothLength: 60,
-  toothChamfer: 8,
-  millRadius: 6,
+  endGrooveLength: 75,
+  midGrooveLength: 90,
+  grooveDepth: 20,
+  millingDiameter: 8,
+  chamferLength: 6,
 }
 
 interface HelperMesh {
@@ -69,19 +71,38 @@ export function StrutShapeDebug() {
         await ensureReplicadReady()
         if (cancelled) return
 
-        const { radius, angleDeg, offset1, offset2, cornerLength, width, toothHeight, toothLength, toothChamfer, millRadius } =
-          params
+        const {
+          radius,
+          angleDeg,
+          offset1,
+          offset2,
+          cornerLength,
+          width,
+          endGrooveLength,
+          midGrooveLength,
+          grooveDepth,
+          millingDiameter,
+          chamferLength,
+        } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
         const a = new THREE.Vector3(radius, 0, 0)
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
-        const result = computeStrutBoundaryManual(a, b, center, offset1, offset2, cornerLength, width / 2, {
-          height: toothHeight,
-          length: toothLength,
-          chamfer: toothChamfer,
-          millRadius,
-        })
+        const result = computeStrutBoundaryManual(
+          a,
+          b,
+          center,
+          offset1,
+          offset2,
+          cornerLength,
+          width / 2,
+          endGrooveLength,
+          midGrooveLength,
+          grooveDepth,
+          millingDiameter,
+          chamferLength,
+        )
         if (cancelled) return
 
         const main = result.main ? meshDrawing(result.main) : null
@@ -153,22 +174,26 @@ export function StrutShapeDebug() {
         </section>
 
         <section className="control-group">
-          <h2>Corner Teeth</h2>
+          <h2>Grooves</h2>
           <div className="transform-field">
-            <label>Tooth height (mm)</label>
-            <NumberField value={params.toothHeight} step={5} min={0} onCommit={setParam('toothHeight')} />
+            <label>End groove length (mm)</label>
+            <NumberField value={params.endGrooveLength} step={5} min={0} onCommit={setParam('endGrooveLength')} />
           </div>
           <div className="transform-field">
-            <label>Tooth length (mm)</label>
-            <NumberField value={params.toothLength} step={5} min={0} onCommit={setParam('toothLength')} />
+            <label>Mid groove length (mm)</label>
+            <NumberField value={params.midGrooveLength} step={5} min={0} onCommit={setParam('midGrooveLength')} />
+          </div>
+          <div className="transform-field">
+            <label>Groove depth (mm)</label>
+            <NumberField value={params.grooveDepth} step={1} min={0} onCommit={setParam('grooveDepth')} />
+          </div>
+          <div className="transform-field">
+            <label>Milling diameter (mm)</label>
+            <NumberField value={params.millingDiameter} step={1} min={0} onCommit={setParam('millingDiameter')} />
           </div>
           <div className="transform-field">
             <label>Chamfer length (mm)</label>
-            <NumberField value={params.toothChamfer} step={1} min={0} onCommit={setParam('toothChamfer')} />
-          </div>
-          <div className="transform-field">
-            <label>Mill radius (mm)</label>
-            <NumberField value={params.millRadius} step={1} min={0} onCommit={setParam('millRadius')} />
+            <NumberField value={params.chamferLength} step={1} min={0} onCommit={setParam('chamferLength')} />
           </div>
         </section>
       </aside>

@@ -1,7 +1,6 @@
 import { draw, drawCircle } from "replicad";
 import type { Drawing, Point2D } from "replicad";
 import type * as THREE from "three";
-import type { ToothParams } from "./strutGeometry";
 import { computeStrutPlane } from "./strutGeometry";
 
 // A sandbox for hand-building computeStrutBoundary's replacement directly with replicad's own
@@ -18,9 +17,11 @@ import { computeStrutPlane } from "./strutGeometry";
 //    a/b/center (reusing computeStrutPlane, the same plane the real pipeline builds the strut
 //    on), and hands off 2D coordinates. You shouldn't need to touch this.
 //  - `computeStrutBoundaryManual2D` (further down) is where you actually work: pure replicad 2D,
-//    no THREE.js, no 3D at all. Same scalar params as computeStrutBoundary (offsetA/offsetB/
-//    cornerLength/halfWidth/tooth), plus the two vertices and the gravity center as flat 2D
-//    points already in the strut's own plane.
+//    no THREE.js, no 3D at all. Same offsetA/offsetB/cornerLength/halfWidth params as
+//    computeStrutBoundary, plus the groove/milling params below (this sandbox's own vocabulary,
+//    not computeStrutBoundary's tooth/chamfer/millRadius - the two aren't meant to line up 1:1),
+//    plus the two vertices and the gravity center as flat 2D points already in the strut's own
+//    plane.
 
 export interface HelperDrawing {
   drawing: Drawing;
@@ -160,7 +161,11 @@ export function computeStrutBoundaryManual(
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
-  tooth: ToothParams,
+  endGrooveLength: number,
+  midGrooveLength: number,
+  grooveDepth: number,
+  millingDiameter: number,
+  chamferLength: number,
 ): StrutBoundaryManualResult {
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
@@ -177,7 +182,11 @@ export function computeStrutBoundaryManual(
     offsetB,
     cornerLength,
     halfWidth,
-    tooth,
+    endGrooveLength,
+    midGrooveLength,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
   );
 }
 
@@ -196,7 +205,11 @@ export function computeStrutBoundaryManual2D(
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
-  _tooth: ToothParams,
+  _endGrooveLength: number,
+  _midGrooveLength: number,
+  _grooveDepth: number,
+  _millingDiameter: number,
+  _chamferLength: number,
 ): StrutBoundaryManualResult {
   const rectA = draw()
     .movePointerTo([0, 0])
