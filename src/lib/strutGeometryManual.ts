@@ -145,6 +145,21 @@ function radialOffset(p: Point2D, center: Point2D, dist: number): Point2D {
   return add2(p, scale2(dir, dist));
 }
 
+// A point on the circle centered at `center` (radius = the average of p1's and p2's own
+// distances from `center`, in case they're not perfectly equal) halfway - by angle, the short
+// way around - between p1 and p2. Used as the "via" point for threePointsArcTo when the arc's
+// actual center is known but there's no third point to hand.
+function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
+  const radius = (length2(sub2(p1, center)) + length2(sub2(p2, center))) / 2;
+  const angle1 = Math.atan2(p1[1] - center[1], p1[0] - center[0]);
+  const angle2 = Math.atan2(p2[1] - center[1], p2[0] - center[0]);
+  let delta = angle2 - angle1;
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta < -Math.PI) delta += 2 * Math.PI;
+  const mid = angle1 + delta / 2;
+  return [center[0] + radius * Math.cos(mid), center[1] + radius * Math.sin(mid)];
+}
+
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
@@ -190,10 +205,6 @@ export function computeStrutBoundaryManual(
   );
 }
 
-// Below is starter geometry (two overlapping rectangles, intersected, plus reference lines from
-// the gravity center to each vertex) just to prove the loop works end to end: edit this function,
-// save, and the debug page reloads and shows the result. Replace `main` with real strut
-// construction whenever you're ready.
 const MARKER_RADIUS = 15;
 const nullResp = { main: null, helpers: [] };
 
@@ -211,13 +222,6 @@ export function computeStrutBoundaryManual2D(
   _millingDiameter: number,
   _chamferLength: number,
 ): StrutBoundaryManualResult {
-  const rectA = draw()
-    .movePointerTo([0, 0])
-    .hLine(100)
-    .vLine(50)
-    .hLine(-100)
-    .close();
-
   // Tangent to the center-A / center-B circle at each vertex, leaning toward the other vertex -
   // this is the same lead-in direction strutGeometry.ts's tangentDirection2D produces.
   const tangentA = tangentDirection2D(a, b, center);
@@ -276,8 +280,37 @@ export function computeStrutBoundaryManual2D(
       name: "intersection",
     });
 
+  let main = draw()
+    .movePointerTo(offsetPointExtB)
+    .lineTo(shoulderEndPointExtB)
+    .lineTo(shoulderEndPointInnB)
+    .lineTo(offsetPointInnB)
+    .close();
+
+  // The two lead-ins only reach as far as cornerLength (shoulderLength above is capped there);
+  // if the tangents' own intersection is further out than that, there's a gap left between the
+  // two shoulders - bridge it with a literal arc centered at `center`, same idea as
+  // strutGeometry.ts's own arc-bridge fallback for a corner too wide for cornerLength to close.
+  if (intersectionDistance > cornerLength) {
+    const bridge = draw()
+      .movePointerTo(shoulderEndPointExtB)
+      .threePointsArcTo(shoulderEndPointExtA, arcMidpoint(shoulderEndPointExtB, shoulderEndPointExtA, center))
+      .lineTo(shoulderEndPointInnA)
+      .threePointsArcTo(shoulderEndPointInnB, arcMidpoint(shoulderEndPointInnA, shoulderEndPointInnB, center))
+      .close();
+    main = main.fuse(bridge);
+  }
+
+  const capA = draw()
+    .movePointerTo(shoulderEndPointExtA)
+    .lineTo(offsetPointExtA)
+    .lineTo(offsetPointInnA)
+    .lineTo(shoulderEndPointInnA)
+    .close();
+  main = main.fuse(capA);
+
   return {
-    main: rectA,
+    main,
     helpers,
   };
 }
