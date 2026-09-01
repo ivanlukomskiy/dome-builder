@@ -213,6 +213,7 @@ function createShoulderGeometry(
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
+  endGrooveLength: number,
   midGrooveLength: number,
   grooveDepth: number,
 ): StrutBoundaryManualResult {
@@ -238,6 +239,17 @@ function createShoulderGeometry(
 
   const offsetPointExtB = add2(offsetPointB, scale2(up, halfWidth));
   const offsetPointInnB = add2(offsetPointB, scale2(up, -halfWidth));
+
+  // The end groove at the B end: a plain endGrooveLength x grooveDepth rectangle notched into the
+  // Ext/Inn edge right at offsetPointExtB/InnB, cutting inward (Ext down, Inn up - both toward
+  // the offsetPointB centerline) by grooveDepth.
+  const endGroovePointExt1 = add2(offsetPointExtB, scale2(right, endGrooveLength));
+  const endGroovePointExt3 = add2(offsetPointExtB, scale2(up, -grooveDepth));
+  const endGroovePointExt2 = add2(endGroovePointExt1, scale2(up, -grooveDepth));
+
+  const endGroovePointInn1 = add2(offsetPointInnB, scale2(right, endGrooveLength));
+  const endGroovePointInn3 = add2(offsetPointInnB, scale2(up, grooveDepth));
+  const endGroovePointInn2 = add2(endGroovePointInn1, scale2(up, grooveDepth));
 
   // Both shoulder points are where the horizontal line at that offset point's own height crosses
   // the line from center through the raw shoulderEndPointB.
@@ -295,6 +307,12 @@ function createShoulderGeometry(
     { drawing: drawPointMarker(midGroovePointExtB3, MARKER_RADIUS), color: "#5eead4", name: "midGroovePointExtB3" },
     { drawing: drawPointMarker(midGroovePointInnB3, MARKER_RADIUS), color: "#0f766e", name: "midGroovePointInnB3" },
     { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: "intersection" },
+    { drawing: drawPointMarker(endGroovePointExt1, MARKER_RADIUS), color: "#fca5a5", name: "endGroovePointExt1" },
+    { drawing: drawPointMarker(endGroovePointExt2, MARKER_RADIUS), color: "#b91c1c", name: "endGroovePointExt2" },
+    { drawing: drawPointMarker(endGroovePointExt3, MARKER_RADIUS), color: "#7f1d1d", name: "endGroovePointExt3" },
+    { drawing: drawPointMarker(endGroovePointInn1, MARKER_RADIUS), color: "#93c5fd", name: "endGroovePointInn1" },
+    { drawing: drawPointMarker(endGroovePointInn2, MARKER_RADIUS), color: "#1d4ed8", name: "endGroovePointInn2" },
+    { drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS), color: "#1e3a8a", name: "endGroovePointInn3" },
   ];
 
   let main = draw()
@@ -321,6 +339,23 @@ function createShoulderGeometry(
     .close();
   main = main.cut(midGrooveInnCutB);
 
+  // Cut the two end-groove notches (Ext/Inn) out of the strut body right at the B end.
+  const endGrooveExtCutB = draw()
+    .movePointerTo(endGroovePointExt1)
+    .lineTo(endGroovePointExt2)
+    .lineTo(endGroovePointExt3)
+    .lineTo(offsetPointExtB)
+    .close();
+  main = main.cut(endGrooveExtCutB);
+
+  const endGrooveInnCutB = draw()
+    .movePointerTo(endGroovePointInn1)
+    .lineTo(endGroovePointInn2)
+    .lineTo(endGroovePointInn3)
+    .lineTo(offsetPointInnB)
+    .close();
+  main = main.cut(endGrooveInnCutB);
+
   return {
     main,
     helpers,
@@ -335,13 +370,23 @@ export function computeStrutBoundaryManual2D(
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
-  _endGrooveLength: number,
+  endGrooveLength: number,
   midGrooveLength: number,
   grooveDepth: number,
   _millingDiameter: number,
   _chamferLength: number,
 ): StrutBoundaryManualResult {
-  return createShoulderGeometry(a, b, center, offsetB, cornerLength, halfWidth, midGrooveLength, grooveDepth);
+  return createShoulderGeometry(
+    a,
+    b,
+    center,
+    offsetB,
+    cornerLength,
+    halfWidth,
+    endGrooveLength,
+    midGrooveLength,
+    grooveDepth,
+  );
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and
