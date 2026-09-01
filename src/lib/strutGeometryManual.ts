@@ -160,6 +160,33 @@ function drawDiamond(p: Point2D, size: number): Drawing {
     .close();
 }
 
+type MillingDirection = "top-right" | "top-left" | "bottom-left" | "bottom-right";
+
+// A mill-relief circle of the given diameter, tucked into the corner at `p` - offset diagonally
+// (by millingDiameter/2/sqrt(2) along each axis, toward `direction`) so the circle's own edge
+// passes exactly through `p`, clearing the inside corner of a square notch for a round end mill.
+function drawMillingCircle(p: Point2D, direction: MillingDirection, millingDiameter: number): Drawing {
+  const offset = millingDiameter / 2 / Math.sqrt(2);
+  const dx = direction === "top-right" || direction === "bottom-right" ? offset : -offset;
+  const dy = direction === "top-right" || direction === "top-left" ? offset : -offset;
+  return drawCircle(millingDiameter / 2).translate([p[0] + dx, p[1] + dy]);
+}
+
+// Whether a Drawing still has real, meshable area - a boolean op that goes wrong (see the
+// comment where this is used) can produce a Drawing that no longer throws but also no longer
+// represents any actual shape.
+function isNonEmptyDrawing(drawing: Drawing): boolean {
+  try {
+    const sketched = drawing.sketchOnPlane();
+    const face = "face" in sketched ? sketched.face() : sketched.faces();
+    const mesh = face.mesh({ tolerance: 0.5, angularTolerance: 0.5 });
+    face.delete();
+    return mesh.vertices.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
@@ -238,6 +265,7 @@ function createShoulderGeometry(
   midGrooveLength: number,
   grooveDepth: number,
   chamferLength: number,
+  millingDiameter: number,
 ): ShoulderGeometry {
   // computeStrutBoundaryManual (the 3D wrapper) already rotated everything so center->B comes out
   // exactly vertical - `up` is that guaranteed-exact axis, and `right` is the matching horizontal
@@ -325,32 +353,32 @@ function createShoulderGeometry(
       : [];
 
   const helpers: HelperDrawing[] = [
-    { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
-    { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → B" },
-    { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea", name: "offsetPointB" },
-    { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635", name: "shoulderEndPointB" },
-    { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe", name: "offsetPointExtB" },
-    { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8", name: "offsetPointInnB" },
-    { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d", name: "shoulderEndPointExtB" },
-    { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f", name: "shoulderEndPointInnB" },
-    {
-      drawing: drawPointMarker(shoulderEndPointExtEffectiveB, MARKER_RADIUS),
-      color: "#fb7185",
-      name: "shoulderEndPointExtEffectiveB",
-    },
-    { drawing: drawPointMarker(midGroovePointExtB1, MARKER_RADIUS), color: "#fdba74", name: "midGroovePointExtB1" },
-    { drawing: drawPointMarker(midGroovePointInnB1, MARKER_RADIUS), color: "#c2410c", name: "midGroovePointInnB1" },
-    { drawing: drawPointMarker(midGroovePointExtB2, MARKER_RADIUS), color: "#fde047", name: "midGroovePointExtB2" },
-    { drawing: drawPointMarker(midGroovePointInnB2, MARKER_RADIUS), color: "#a16207", name: "midGroovePointInnB2" },
-    { drawing: drawPointMarker(midGroovePointExtB3, MARKER_RADIUS), color: "#5eead4", name: "midGroovePointExtB3" },
-    { drawing: drawPointMarker(midGroovePointInnB3, MARKER_RADIUS), color: "#0f766e", name: "midGroovePointInnB3" },
-    { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: "intersection" },
-    { drawing: drawPointMarker(endGroovePointExt1, MARKER_RADIUS), color: "#fca5a5", name: "endGroovePointExt1" },
-    { drawing: drawPointMarker(endGroovePointExt2, MARKER_RADIUS), color: "#b91c1c", name: "endGroovePointExt2" },
-    { drawing: drawPointMarker(endGroovePointExt3, MARKER_RADIUS), color: "#7f1d1d", name: "endGroovePointExt3" },
-    { drawing: drawPointMarker(endGroovePointInn1, MARKER_RADIUS), color: "#93c5fd", name: "endGroovePointInn1" },
-    { drawing: drawPointMarker(endGroovePointInn2, MARKER_RADIUS), color: "#1d4ed8", name: "endGroovePointInn2" },
-    { drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS), color: "#1e3a8a", name: "endGroovePointInn3" },
+    // { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
+    // { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → B" },
+    // { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea", name: "offsetPointB" },
+    // { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635", name: "shoulderEndPointB" },
+    // { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe", name: "offsetPointExtB" },
+    // { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8", name: "offsetPointInnB" },
+    // { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d", name: "shoulderEndPointExtB" },
+    // { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f", name: "shoulderEndPointInnB" },
+    // {
+    //   drawing: drawPointMarker(shoulderEndPointExtEffectiveB, MARKER_RADIUS),
+    //   color: "#fb7185",
+    //   name: "shoulderEndPointExtEffectiveB",
+    // },
+    // { drawing: drawPointMarker(midGroovePointExtB1, MARKER_RADIUS), color: "#fdba74", name: "midGroovePointExtB1" },
+    // { drawing: drawPointMarker(midGroovePointInnB1, MARKER_RADIUS), color: "#c2410c", name: "midGroovePointInnB1" },
+    // { drawing: drawPointMarker(midGroovePointExtB2, MARKER_RADIUS), color: "#fde047", name: "midGroovePointExtB2" },
+    // { drawing: drawPointMarker(midGroovePointInnB2, MARKER_RADIUS), color: "#a16207", name: "midGroovePointInnB2" },
+    // { drawing: drawPointMarker(midGroovePointExtB3, MARKER_RADIUS), color: "#5eead4", name: "midGroovePointExtB3" },
+    // { drawing: drawPointMarker(midGroovePointInnB3, MARKER_RADIUS), color: "#0f766e", name: "midGroovePointInnB3" },
+    // { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: "intersection" },
+    // { drawing: drawPointMarker(endGroovePointExt1, MARKER_RADIUS), color: "#fca5a5", name: "endGroovePointExt1" },
+    // { drawing: drawPointMarker(endGroovePointExt2, MARKER_RADIUS), color: "#b91c1c", name: "endGroovePointExt2" },
+    // { drawing: drawPointMarker(endGroovePointExt3, MARKER_RADIUS), color: "#7f1d1d", name: "endGroovePointExt3" },
+    // { drawing: drawPointMarker(endGroovePointInn1, MARKER_RADIUS), color: "#93c5fd", name: "endGroovePointInn1" },
+    // { drawing: drawPointMarker(endGroovePointInn2, MARKER_RADIUS), color: "#1d4ed8", name: "endGroovePointInn2" },
+    // { drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS), color: "#1e3a8a", name: "endGroovePointInn3" },
   ];
 
   const main = draw()
@@ -397,6 +425,19 @@ function createShoulderGeometry(
     );
   }
 
+  // Mill-relief circles at each groove's inside corner, clearing room for a round end mill to
+  // reach all the way into the square notch instead of leaving material a real mill can't cut.
+  if (millingDiameter > 0) {
+    negativeShapes.push(
+      // drawMillingCircle(midGroovePointExtB2, "top-right", millingDiameter),
+      // drawMillingCircle(endGroovePointExt2, "top-left", millingDiameter),
+      // drawMillingCircle(midGroovePointExtB1, "top-left", millingDiameter),
+      // drawMillingCircle(midGroovePointInnB1, "bottom-left", millingDiameter),
+      // drawMillingCircle(midGroovePointInnB2, "bottom-right", millingDiameter),
+      // drawMillingCircle(endGroovePointInn2, "bottom-left", millingDiameter),
+    );
+  }
+
   return {
     main,
     helpers,
@@ -415,7 +456,7 @@ export function computeStrutBoundaryManual2D(
   endGrooveLength: number,
   midGrooveLength: number,
   grooveDepth: number,
-  _millingDiameter: number,
+  millingDiameter: number,
   chamferLength: number,
 ): StrutBoundaryManualResult {
   const { main, helpers, negativeShapes } = createShoulderGeometry(
@@ -429,11 +470,22 @@ export function computeStrutBoundaryManual2D(
     midGrooveLength,
     grooveDepth,
     chamferLength,
+    millingDiameter,
   );
 
+  // Cut the negative shapes one at a time, verifying each cut actually produced a real
+  // (non-empty, meshable) shape before keeping it - a mill-relief circle landing exactly on an
+  // already-cut groove notch's own corner is a coincident-curve case OpenCascade's boolean ops
+  // can silently botch, collapsing the whole shape to nothing without throwing. Skipping just
+  // that one cut (falling back to the last known-good shape) is far better than losing
+  // everything downstream of it.
   let result = main;
   for (const shape of negativeShapes) {
-    if (result) result = result.cut(shape);
+    if (!result) break;
+    const candidate = result.cut(shape);
+    if (isNonEmptyDrawing(candidate)) {
+      result = candidate;
+    }
   }
 
   return { main: result, helpers };
