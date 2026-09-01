@@ -74,14 +74,12 @@ function toLocal2D(
   return [rel.dot(xDir), rel.dot(yDir)];
 }
 
-// Rotates a 2D point 90 degrees CCW around the origin.
-function rotate90(p: Point2D): Point2D {
-  return [-p[1], p[0]];
-}
-
-// Rotates a 2D point 90 degrees CW around the origin.
-function rotateNeg90(p: Point2D): Point2D {
-  return [p[1], -p[0]];
+// Rotates 2D points (around the origin) so that `alignWith` itself ends up pointing straight up
+// along +Y - used to make center->B vertical, see computeStrutBoundaryManual below.
+function alignVertical(p: Point2D, alignWith: Point2D): Point2D {
+  const up = normalize2(alignWith);
+  const right: Point2D = [up[1], -up[0]];
+  return [dot2(p, right), dot2(p, up)];
 }
 
 // Small 2D vector helpers - kept local so this file stays self-contained (pure replicad 2D, no
@@ -151,36 +149,14 @@ function drawPointMarker(p: Point2D, radius: number): Drawing {
   return drawCircle(radius).translate(p);
 }
 
-// Moves `p` by `dist` along the radial direction center->p (negative `dist` moves toward
-// `center` instead).
-function radialOffset(p: Point2D, center: Point2D, dist: number): Point2D {
-  const dir = normalize2(sub2(p, center));
-  return add2(p, scale2(dir, dist));
-}
-
-// A point on the circle centered at `center` (radius = the average of p1's and p2's own
-// distances from `center`, in case they're not perfectly equal) halfway - by angle, the short
-// way around - between p1 and p2. Used as the "via" point for threePointsArcTo when the arc's
-// actual center is known but there's no third point to hand.
-function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
-  const radius = (length2(sub2(p1, center)) + length2(sub2(p2, center))) / 2;
-  const angle1 = Math.atan2(p1[1] - center[1], p1[0] - center[0]);
-  const angle2 = Math.atan2(p2[1] - center[1], p2[0] - center[0]);
-  let delta = angle2 - angle1;
-  while (delta > Math.PI) delta -= 2 * Math.PI;
-  while (delta < -Math.PI) delta += 2 * Math.PI;
-  const mid = angle1 + delta / 2;
-  return [center[0] + radius * Math.cos(mid), center[1] + radius * Math.sin(mid)];
-}
-
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
-// flat 2D coordinates for computeStrutBoundaryManual2D. `computeStrutPlane`'s own xDir points
-// straight at `a`, i.e. center->A comes out of that projection lying flat along +X - an extra 90
-// degree rotation (still around the gravity center, so it doesn't change anything's shape or
-// relative position) turns that into center->A pointing straight up (+Y) instead, which reads a
-// lot more naturally while sketching.
+// flat 2D coordinates for computeStrutBoundaryManual2D. Side A is out of scope for now (see
+// conversation), so rather than keep computeStrutPlane's own A-aligned xDir, `alignVertical`
+// re-rotates everything (still around the gravity center, so it doesn't change anything's shape
+// or relative position) so that center->B comes out pointing straight up (+Y) instead - simpler
+// to reason about while all the construction work is happening at the B end.
 export function computeStrutBoundaryManual(
   a: THREE.Vector3,
   b: THREE.Vector3,
@@ -198,9 +174,13 @@ export function computeStrutBoundaryManual(
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
 
-  const a2 = rotate90(toLocal2D(a, plane.origin, plane.xDir, yDir));
-  const b2 = rotate90(toLocal2D(b, plane.origin, plane.xDir, yDir));
-  const center2 = rotate90(toLocal2D(center, plane.origin, plane.xDir, yDir));
+  const aRaw = toLocal2D(a, plane.origin, plane.xDir, yDir);
+  const bRaw = toLocal2D(b, plane.origin, plane.xDir, yDir);
+  const centerRaw = toLocal2D(center, plane.origin, plane.xDir, yDir);
+
+  const a2 = alignVertical(aRaw, bRaw);
+  const b2 = alignVertical(bRaw, bRaw);
+  const center2 = alignVertical(centerRaw, bRaw);
 
   return computeStrutBoundaryManual2D(
     a2,
@@ -219,160 +199,90 @@ export function computeStrutBoundaryManual(
 }
 
 const MARKER_RADIUS = 15;
-const nullResp = { main: null, helpers: [] };
+const nullResp: StrutBoundaryManualResult = { main: null, helpers: [] };
 
-export function computeStrutBoundaryManual2D(
+// Everything currently built around the B end - centerline, offset/shoulder points, and the two
+// mid-groove notches. Side A is out of scope for now (see the user's own note in conversation:
+// "we'll deal with it later"), so this is the only construction happening today; pulled into its
+// own function so computeStrutBoundaryManual2D can eventually call the equivalent for A too
+// without the two getting tangled together.
+function createShoulderGeometry(
   a: Point2D,
   b: Point2D,
   center: Point2D,
-  offsetA: number,
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
-  _endGrooveLength: number,
   midGrooveLength: number,
   grooveDepth: number,
-  _millingDiameter: number,
-  _chamferLength: number,
 ): StrutBoundaryManualResult {
-  // Tangent to the center-A / center-B circle at each vertex, leaning toward the other vertex -
-  // this is the same lead-in direction strutGeometry.ts's tangentDirection2D produces.
+  // computeStrutBoundaryManual (the 3D wrapper) already rotated everything so center->B comes out
+  // exactly vertical - `up` is that guaranteed-exact axis, and `right` is the matching horizontal
+  // axis (still computed the general way, as the lead-in direction leaning toward `a`, so this
+  // keeps working if that vertical-alignment guarantee ever changes). Every point below is just a
+  // plain horizontal/vertical step from another, instead of the general tangent/radial vector
+  // math the older version of this function used.
+  const right = tangentDirection2D(b, a, center);
+  const up: Point2D = [0, 1];
+
+  // Where the tangent lines from A and B would cross - the sharp corner the two lead-ins would
+  // meet at. Caps how far the B shoulder can travel below: never past that intersection, even if
+  // cornerLength would otherwise take it further.
   const tangentA = tangentDirection2D(a, b, center);
-  const tangentB = tangentDirection2D(b, a, center);
-
-  // Where the two tangent lines cross - the sharp "corner" the two lead-ins would meet at.
-  const intersection = lineIntersection2D(a, tangentA, b, tangentB);
+  const intersection = lineIntersection2D(a, tangentA, b, right);
   if (!intersection) return nullResp;
+  const distanceToIntersection = length2(sub2(intersection, a));
 
-  const intersectionDistance = length2(sub2(intersection, a));
+  const offsetPointB = add2(b, scale2(right, offsetB));
+  const shoulderEndPointB = add2(b, scale2(right, Math.min(cornerLength, distanceToIntersection)));
 
-  // Walk offsetA/offsetB back along each tangent from the vertex, same as trimmedA/trimmedB in
-  // the real algorithm.
-  const offsetPointA = add2(a, scale2(tangentA, offsetA));
-  const offsetPointB = add2(b, scale2(tangentB, offsetB));
+  const offsetPointExtB = add2(offsetPointB, scale2(up, halfWidth));
+  const offsetPointInnB = add2(offsetPointB, scale2(up, -halfWidth));
 
-  // Where the lead-in from each vertex would actually end: as far as the tangent lines' own
-  // intersection (the sharp corner), but never further than cornerLength - same "the offset
-  // spends the cornerLength budget" idea as strutGeometry.ts's trimmedA/trimmedB.
-  const shoulderLength = Math.min(intersectionDistance, cornerLength);
-  const shoulderEndPointA = add2(a, scale2(tangentA, shoulderLength));
-  const shoulderEndPointB = add2(b, scale2(tangentB, shoulderLength));
-
-  // Push the offset points out (Ext, away from center) and in (Inn, toward center) by
-  // halfWidth, radially - this is how the centerline construction above turns into the strut's
-  // actual left/right edges.
-  const offsetPointExtA = radialOffset(offsetPointA, center, halfWidth);
-  const offsetPointInnA = radialOffset(offsetPointA, center, -halfWidth);
-  const offsetPointExtB = radialOffset(offsetPointB, center, halfWidth);
-  const offsetPointInnB = radialOffset(offsetPointB, center, -halfWidth);
-
-  // Carry the Inn shoulder points over by the same offsetPoint->shoulderEndPoint vector the Inn
-  // offset points already sit on, rather than radially offsetting shoulderEndPoint itself - that
-  // would push Ext and Inn by slightly different amounts (shoulderEndPoint isn't the same
-  // distance from `center` as offsetPoint). A plain translation keeps the Inn cap edge parallel
-  // to the offsetPoint->shoulderEndPoint centerline.
-  const shoulderEndPointInnA = add2(offsetPointInnA, sub2(shoulderEndPointA, offsetPointA));
-  const shoulderEndPointInnB = add2(offsetPointInnB, sub2(shoulderEndPointB, offsetPointB));
-
-  // The Ext shoulder point, though, is where the radial line center->shoulderEndPointInn crosses
-  // the tangent line running through offsetPointExt (continuing in the same lead-in direction as
-  // tangentA/tangentB, just from the Ext-offset point instead of the vertex itself) - not a plain
-  // translation. This keeps the Ext edge meeting the Inn edge's own radial line exactly at the
-  // shoulder, instead of just running parallel to it.
-  const shoulderEndPointExtA = lineIntersection2D(
-    center,
-    sub2(shoulderEndPointInnA, center),
-    offsetPointExtA,
-    tangentDirection2D(offsetPointExtA, b, center),
-  );
-  const shoulderEndPointExtB = lineIntersection2D(
-    center,
-    sub2(shoulderEndPointInnB, center),
-    offsetPointExtB,
-    tangentDirection2D(offsetPointExtB, a, center),
-  );
-  if (!shoulderEndPointExtA || !shoulderEndPointExtB) return nullResp;
+  // Both shoulder points are where the horizontal line at that offset point's own height crosses
+  // the line from center through the raw shoulderEndPointB.
+  const shoulderRefDir = sub2(shoulderEndPointB, center);
+  const shoulderEndPointInnB = lineIntersection2D(center, shoulderRefDir, offsetPointInnB, right);
+  const shoulderEndPointExtB = lineIntersection2D(center, shoulderRefDir, offsetPointExtB, right);
+  if (!shoulderEndPointInnB || !shoulderEndPointExtB) return nullResp;
 
   console.log(
     'angle between offsetPointExtB→shoulderEndPointExtB and offsetPointInnB→shoulderEndPointInnB (deg)',
     angleBetweenDeg(sub2(shoulderEndPointExtB, offsetPointExtB), sub2(shoulderEndPointInnB, offsetPointInnB)),
   );
 
-  // How much the Ext cap edge (shoulderEndPointInn->shoulderEndPointExt) has tilted away from the
-  // offset cap edge (offsetPointInn->offsetPointExt) at each end - a nonzero angle here means the
-  // Ext edge and offset edge converge (or diverge) along the cap, so sliding back down that edge -
-  // toward offsetPointExt - by grooveDepth*tan(angle) keeps the groove floor flat.
+  // How much the Ext cap edge (shoulderEndPointInnB->shoulderEndPointExtB, which runs exactly
+  // along shoulderRefDir) has tilted away from vertical (the offset cap edge, offsetPointInnB->
+  // offsetPointExtB, which is exactly vertical by construction) - sliding back down that edge by
+  // grooveDepth*tan(angle) keeps the groove floor flat.
   const cornerJunctionAngleB = angleBetweenRad(
     sub2(shoulderEndPointExtB, shoulderEndPointInnB),
     sub2(offsetPointExtB, offsetPointInnB),
   );
   const minExtGrooveOffsetB = grooveDepth * Math.tan(cornerJunctionAngleB);
-  const shoulderEndPointExtEffectiveB = add2(
-    shoulderEndPointExtB,
-    scale2(normalize2(sub2(offsetPointExtB, shoulderEndPointExtB)), minExtGrooveOffsetB),
-  );
+  const shoulderEndPointExtEffectiveB = add2(shoulderEndPointExtB, scale2(right, -minExtGrooveOffsetB));
 
-  const cornerJunctionAngleA = angleBetweenRad(
-    sub2(shoulderEndPointExtA, shoulderEndPointInnA),
-    sub2(offsetPointExtA, offsetPointInnA),
-  );
-  const minExtGrooveOffsetA = grooveDepth * Math.tan(cornerJunctionAngleA);
-  const shoulderEndPointExtEffectiveA = add2(
-    shoulderEndPointExtA,
-    scale2(normalize2(sub2(offsetPointExtA, shoulderEndPointExtA)), minExtGrooveOffsetA),
-  );
+  // The mid-strut groove at the B end: from each shoulder point (the Effective one on the Ext
+  // side), step inward (toward each other) by grooveDepth to reach the groove floor, then walk
+  // back by midGrooveLength - the third corner needs no extra step since it's a plain
+  // horizontal/vertical rectangle now, not a diagonal-then-perpendicular path.
+  const midGroovePointInnB1 = add2(shoulderEndPointInnB, scale2(up, grooveDepth));
+  const midGroovePointInnB2 = add2(midGroovePointInnB1, scale2(right, -midGrooveLength));
+  const midGroovePointInnB3 = add2(shoulderEndPointInnB, scale2(right, -midGrooveLength));
 
-  // The mid-strut groove at each end: start from the Ext/Inn shoulder points (the Effective one
-  // on the Ext side), step inward (toward each other) by grooveDepth to reach the groove floor,
-  // walk back along the tangent by midGrooveLength, then step back out (perpendicular to the
-  // tangent, not radially - the groove walls are straight relative to the strut's own local
-  // direction here) by grooveDepth to land back on the Ext/Inn edge.
-  const midGroovePointExtB1 = add2(
-    shoulderEndPointExtEffectiveB,
-    scale2(normalize2(sub2(shoulderEndPointInnB, shoulderEndPointExtEffectiveB)), grooveDepth),
-  );
-  const midGroovePointInnB1 = add2(
-    shoulderEndPointInnB,
-    scale2(normalize2(sub2(shoulderEndPointExtEffectiveB, shoulderEndPointInnB)), grooveDepth),
-  );
-  const midGroovePointExtB2 = add2(midGroovePointExtB1, scale2(tangentB, -midGrooveLength));
-  const midGroovePointInnB2 = add2(midGroovePointInnB1, scale2(tangentB, -midGrooveLength));
-  const midGroovePointExtB3 = add2(midGroovePointExtB2, scale2(rotate90(tangentB), grooveDepth));
-  const midGroovePointInnB3 = add2(midGroovePointInnB2, scale2(rotateNeg90(tangentB), grooveDepth));
-
-  const midGroovePointExtA1 = add2(
-    shoulderEndPointExtEffectiveA,
-    scale2(normalize2(sub2(shoulderEndPointInnA, shoulderEndPointExtEffectiveA)), grooveDepth),
-  );
-  const midGroovePointInnA1 = add2(
-    shoulderEndPointInnA,
-    scale2(normalize2(sub2(shoulderEndPointExtEffectiveA, shoulderEndPointInnA)), grooveDepth),
-  );
-  const midGroovePointExtA2 = add2(midGroovePointExtA1, scale2(tangentA, -midGrooveLength));
-  const midGroovePointInnA2 = add2(midGroovePointInnA1, scale2(tangentA, -midGrooveLength));
-  const midGroovePointExtA3 = add2(midGroovePointExtA2, scale2(rotateNeg90(tangentA), grooveDepth));
-  const midGroovePointInnA3 = add2(midGroovePointInnA2, scale2(rotate90(tangentA), grooveDepth));
+  const midGroovePointExtB1 = add2(shoulderEndPointExtEffectiveB, scale2(up, -grooveDepth));
+  const midGroovePointExtB2 = add2(midGroovePointExtB1, scale2(right, -midGrooveLength));
+  const midGroovePointExtB3 = add2(shoulderEndPointExtEffectiveB, scale2(right, -midGrooveLength));
 
   const helpers: HelperDrawing[] = [
     { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
     { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → B" },
-    { drawing: drawPointMarker(offsetPointA, MARKER_RADIUS), color: "#e0729f", name: "offsetPointA" },
     { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea", name: "offsetPointB" },
-    { drawing: drawPointMarker(shoulderEndPointA, MARKER_RADIUS), color: "#38bdf8", name: "shoulderEndPointA" },
     { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635", name: "shoulderEndPointB" },
-    { drawing: drawPointMarker(offsetPointExtA, MARKER_RADIUS), color: "#f9a8d4", name: "offsetPointExtA" },
-    { drawing: drawPointMarker(offsetPointInnA, MARKER_RADIUS), color: "#9d174d", name: "offsetPointInnA" },
     { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe", name: "offsetPointExtB" },
     { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8", name: "offsetPointInnB" },
-    { drawing: drawPointMarker(shoulderEndPointExtA, MARKER_RADIUS), color: "#7dd3fc", name: "shoulderEndPointExtA" },
-    { drawing: drawPointMarker(shoulderEndPointInnA, MARKER_RADIUS), color: "#0369a1", name: "shoulderEndPointInnA" },
     { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d", name: "shoulderEndPointExtB" },
     { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f", name: "shoulderEndPointInnB" },
-    {
-      drawing: drawPointMarker(shoulderEndPointExtEffectiveA, MARKER_RADIUS),
-      color: "#22d3ee",
-      name: "shoulderEndPointExtEffectiveA",
-    },
     {
       drawing: drawPointMarker(shoulderEndPointExtEffectiveB, MARKER_RADIUS),
       color: "#fb7185",
@@ -384,19 +294,8 @@ export function computeStrutBoundaryManual2D(
     { drawing: drawPointMarker(midGroovePointInnB2, MARKER_RADIUS), color: "#a16207", name: "midGroovePointInnB2" },
     { drawing: drawPointMarker(midGroovePointExtB3, MARKER_RADIUS), color: "#5eead4", name: "midGroovePointExtB3" },
     { drawing: drawPointMarker(midGroovePointInnB3, MARKER_RADIUS), color: "#0f766e", name: "midGroovePointInnB3" },
-    { drawing: drawPointMarker(midGroovePointExtA1, MARKER_RADIUS), color: "#fb923c", name: "midGroovePointExtA1" },
-    { drawing: drawPointMarker(midGroovePointInnA1, MARKER_RADIUS), color: "#7c2d12", name: "midGroovePointInnA1" },
-    { drawing: drawPointMarker(midGroovePointExtA2, MARKER_RADIUS), color: "#fef08a", name: "midGroovePointExtA2" },
-    { drawing: drawPointMarker(midGroovePointInnA2, MARKER_RADIUS), color: "#854d0e", name: "midGroovePointInnA2" },
-    { drawing: drawPointMarker(midGroovePointExtA3, MARKER_RADIUS), color: "#99f6e4", name: "midGroovePointExtA3" },
-    { drawing: drawPointMarker(midGroovePointInnA3, MARKER_RADIUS), color: "#134e4a", name: "midGroovePointInnA3" },
+    { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: "intersection" },
   ];
-  if (intersection)
-    helpers.push({
-      drawing: drawPointMarker(intersection, MARKER_RADIUS),
-      color: "#f5a623",
-      name: "intersection",
-    });
 
   let main = draw()
     .movePointerTo(offsetPointExtB)
@@ -405,29 +304,7 @@ export function computeStrutBoundaryManual2D(
     .lineTo(offsetPointInnB)
     .close();
 
-  // The two lead-ins only reach as far as cornerLength (shoulderLength above is capped there);
-  // if the tangents' own intersection is further out than that, there's a gap left between the
-  // two shoulders - bridge it with a literal arc centered at `center`, same idea as
-  // strutGeometry.ts's own arc-bridge fallback for a corner too wide for cornerLength to close.
-  if (intersectionDistance > cornerLength) {
-    const bridge = draw()
-      .movePointerTo(shoulderEndPointExtB)
-      .threePointsArcTo(shoulderEndPointExtA, arcMidpoint(shoulderEndPointExtB, shoulderEndPointExtA, center))
-      .lineTo(shoulderEndPointInnA)
-      .threePointsArcTo(shoulderEndPointInnB, arcMidpoint(shoulderEndPointInnA, shoulderEndPointInnB, center))
-      .close();
-    main = main.fuse(bridge);
-  }
-
-  const capA = draw()
-    .movePointerTo(shoulderEndPointExtA)
-    .lineTo(offsetPointExtA)
-    .lineTo(offsetPointInnA)
-    .lineTo(shoulderEndPointInnA)
-    .close();
-  main = main.fuse(capA);
-
-  // Cut the four mid-groove notches (Ext/Inn, at each end) out of the strut body.
+  // Cut the two mid-groove notches (Ext/Inn) out of the strut body at the B end.
   const midGrooveExtCutB = draw()
     .movePointerTo(shoulderEndPointExtEffectiveB)
     .lineTo(midGroovePointExtB1)
@@ -444,26 +321,27 @@ export function computeStrutBoundaryManual2D(
     .close();
   main = main.cut(midGrooveInnCutB);
 
-  const midGrooveExtCutA = draw()
-    .movePointerTo(shoulderEndPointExtEffectiveA)
-    .lineTo(midGroovePointExtA1)
-    .lineTo(midGroovePointExtA2)
-    .lineTo(midGroovePointExtA3)
-    .close();
-  main = main.cut(midGrooveExtCutA);
-
-  const midGrooveInnCutA = draw()
-    .movePointerTo(shoulderEndPointInnA)
-    .lineTo(midGroovePointInnA1)
-    .lineTo(midGroovePointInnA2)
-    .lineTo(midGroovePointInnA3)
-    .close();
-  main = main.cut(midGrooveInnCutA);
-
   return {
     main,
     helpers,
   };
+}
+
+export function computeStrutBoundaryManual2D(
+  a: Point2D,
+  b: Point2D,
+  center: Point2D,
+  _offsetA: number,
+  offsetB: number,
+  cornerLength: number,
+  halfWidth: number,
+  _endGrooveLength: number,
+  midGrooveLength: number,
+  grooveDepth: number,
+  _millingDiameter: number,
+  _chamferLength: number,
+): StrutBoundaryManualResult {
+  return createShoulderGeometry(a, b, center, offsetB, cornerLength, halfWidth, midGrooveLength, grooveDepth);
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and
