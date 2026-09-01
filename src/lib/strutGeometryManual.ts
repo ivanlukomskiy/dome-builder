@@ -298,36 +298,35 @@ export function computeStrutBoundaryManual2D(
     angleBetweenDeg(sub2(shoulderEndPointExtB, offsetPointExtB), sub2(shoulderEndPointInnB, offsetPointInnB)),
   );
 
-  // The Inn edge's own offset->shoulder length - not quite the same as shoulderLength -
-  // offsetB, since the radial (Ext/Inn) push direction differs slightly at each point. Reused
-  // on the Ext side of both ends so all four "cap" edges (Ext and Inn, A and B) stay the same
-  // length.
-  const cornerEffectiveLength = length2(sub2(shoulderEndPointInnB, offsetPointInnB));
-
-  // How much the Ext cap edge (shoulderEndPointInnB->shoulderEndPointExtB) has tilted away from
-  // the offset cap edge (offsetPointInnB->offsetPointExtB) - a nonzero angle here means the Ext
-  // edge and offset edge converge (or diverge) along the cap, so sliding back down that edge -
-  // toward offsetPointExtB - by grooveDepth*tan(angle) keeps the groove floor flat.
-  const cornerJunctionAngle = angleBetweenRad(
+  // How much the Ext cap edge (shoulderEndPointInn->shoulderEndPointExt) has tilted away from the
+  // offset cap edge (offsetPointInn->offsetPointExt) at each end - a nonzero angle here means the
+  // Ext edge and offset edge converge (or diverge) along the cap, so sliding back down that edge -
+  // toward offsetPointExt - by grooveDepth*tan(angle) keeps the groove floor flat.
+  const cornerJunctionAngleB = angleBetweenRad(
     sub2(shoulderEndPointExtB, shoulderEndPointInnB),
     sub2(offsetPointExtB, offsetPointInnB),
   );
-  const minExtGrooveOffset = grooveDepth * Math.tan(cornerJunctionAngle);
+  const minExtGrooveOffsetB = grooveDepth * Math.tan(cornerJunctionAngleB);
   const shoulderEndPointExtEffectiveB = add2(
     shoulderEndPointExtB,
-    scale2(normalize2(sub2(offsetPointExtB, shoulderEndPointExtB)), minExtGrooveOffset),
+    scale2(normalize2(sub2(offsetPointExtB, shoulderEndPointExtB)), minExtGrooveOffsetB),
   );
 
+  const cornerJunctionAngleA = angleBetweenRad(
+    sub2(shoulderEndPointExtA, shoulderEndPointInnA),
+    sub2(offsetPointExtA, offsetPointInnA),
+  );
+  const minExtGrooveOffsetA = grooveDepth * Math.tan(cornerJunctionAngleA);
   const shoulderEndPointExtEffectiveA = add2(
-    offsetPointExtA,
-    scale2(normalize2(sub2(shoulderEndPointExtA, offsetPointExtA)), cornerEffectiveLength),
+    shoulderEndPointExtA,
+    scale2(normalize2(sub2(offsetPointExtA, shoulderEndPointExtA)), minExtGrooveOffsetA),
   );
 
-  // The mid-strut groove at the B end: start from the Ext/Inn shoulder points, step inward
-  // (toward each other) by grooveDepth to reach the groove floor, walk back along the tangent by
-  // midGrooveLength, then step back out (perpendicular to the tangent, not radially - the groove
-  // walls are straight relative to the strut's own local direction here) by grooveDepth to land
-  // back on the Ext/Inn edge.
+  // The mid-strut groove at each end: start from the Ext/Inn shoulder points (the Effective one
+  // on the Ext side), step inward (toward each other) by grooveDepth to reach the groove floor,
+  // walk back along the tangent by midGrooveLength, then step back out (perpendicular to the
+  // tangent, not radially - the groove walls are straight relative to the strut's own local
+  // direction here) by grooveDepth to land back on the Ext/Inn edge.
   const midGroovePointExtB1 = add2(
     shoulderEndPointExtEffectiveB,
     scale2(normalize2(sub2(shoulderEndPointInnB, shoulderEndPointExtEffectiveB)), grooveDepth),
@@ -340,6 +339,19 @@ export function computeStrutBoundaryManual2D(
   const midGroovePointInnB2 = add2(midGroovePointInnB1, scale2(tangentB, -midGrooveLength));
   const midGroovePointExtB3 = add2(midGroovePointExtB2, scale2(rotate90(tangentB), grooveDepth));
   const midGroovePointInnB3 = add2(midGroovePointInnB2, scale2(rotateNeg90(tangentB), grooveDepth));
+
+  const midGroovePointExtA1 = add2(
+    shoulderEndPointExtEffectiveA,
+    scale2(normalize2(sub2(shoulderEndPointInnA, shoulderEndPointExtEffectiveA)), grooveDepth),
+  );
+  const midGroovePointInnA1 = add2(
+    shoulderEndPointInnA,
+    scale2(normalize2(sub2(shoulderEndPointExtEffectiveA, shoulderEndPointInnA)), grooveDepth),
+  );
+  const midGroovePointExtA2 = add2(midGroovePointExtA1, scale2(tangentA, -midGrooveLength));
+  const midGroovePointInnA2 = add2(midGroovePointInnA1, scale2(tangentA, -midGrooveLength));
+  const midGroovePointExtA3 = add2(midGroovePointExtA2, scale2(rotateNeg90(tangentA), grooveDepth));
+  const midGroovePointInnA3 = add2(midGroovePointInnA2, scale2(rotate90(tangentA), grooveDepth));
 
   const helpers: HelperDrawing[] = [
     { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
@@ -372,6 +384,12 @@ export function computeStrutBoundaryManual2D(
     { drawing: drawPointMarker(midGroovePointInnB2, MARKER_RADIUS), color: "#a16207", name: "midGroovePointInnB2" },
     { drawing: drawPointMarker(midGroovePointExtB3, MARKER_RADIUS), color: "#5eead4", name: "midGroovePointExtB3" },
     { drawing: drawPointMarker(midGroovePointInnB3, MARKER_RADIUS), color: "#0f766e", name: "midGroovePointInnB3" },
+    { drawing: drawPointMarker(midGroovePointExtA1, MARKER_RADIUS), color: "#fb923c", name: "midGroovePointExtA1" },
+    { drawing: drawPointMarker(midGroovePointInnA1, MARKER_RADIUS), color: "#7c2d12", name: "midGroovePointInnA1" },
+    { drawing: drawPointMarker(midGroovePointExtA2, MARKER_RADIUS), color: "#fef08a", name: "midGroovePointExtA2" },
+    { drawing: drawPointMarker(midGroovePointInnA2, MARKER_RADIUS), color: "#854d0e", name: "midGroovePointInnA2" },
+    { drawing: drawPointMarker(midGroovePointExtA3, MARKER_RADIUS), color: "#99f6e4", name: "midGroovePointExtA3" },
+    { drawing: drawPointMarker(midGroovePointInnA3, MARKER_RADIUS), color: "#134e4a", name: "midGroovePointInnA3" },
   ];
   if (intersection)
     helpers.push({
@@ -408,6 +426,39 @@ export function computeStrutBoundaryManual2D(
     .lineTo(shoulderEndPointInnA)
     .close();
   main = main.fuse(capA);
+
+  // Cut the four mid-groove notches (Ext/Inn, at each end) out of the strut body.
+  const midGrooveExtCutB = draw()
+    .movePointerTo(shoulderEndPointExtEffectiveB)
+    .lineTo(midGroovePointExtB1)
+    .lineTo(midGroovePointExtB2)
+    .lineTo(midGroovePointExtB3)
+    .close();
+  main = main.cut(midGrooveExtCutB);
+
+  const midGrooveInnCutB = draw()
+    .movePointerTo(shoulderEndPointInnB)
+    .lineTo(midGroovePointInnB1)
+    .lineTo(midGroovePointInnB2)
+    .lineTo(midGroovePointInnB3)
+    .close();
+  main = main.cut(midGrooveInnCutB);
+
+  const midGrooveExtCutA = draw()
+    .movePointerTo(shoulderEndPointExtEffectiveA)
+    .lineTo(midGroovePointExtA1)
+    .lineTo(midGroovePointExtA2)
+    .lineTo(midGroovePointExtA3)
+    .close();
+  main = main.cut(midGrooveExtCutA);
+
+  const midGrooveInnCutA = draw()
+    .movePointerTo(shoulderEndPointInnA)
+    .lineTo(midGroovePointInnA1)
+    .lineTo(midGroovePointInnA2)
+    .lineTo(midGroovePointInnA3)
+    .close();
+  main = main.cut(midGrooveInnCutA);
 
   return {
     main,
