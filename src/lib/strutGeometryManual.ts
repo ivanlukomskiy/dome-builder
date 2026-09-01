@@ -42,28 +42,6 @@ export interface StrutBoundaryManualResult {
   helpers: HelperDrawing[];
 }
 
-const LIGHT_GREEN = "#90ee90";
-// A "line" is rendered the same way as everything else here (a thin filled rectangle), since the
-// whole pipeline (meshDrawing) expects a closed, meshable Drawing.
-const LINE_THICKNESS = 3;
-
-function drawThinLine(from: Point2D, to: Point2D, thickness: number): Drawing {
-  const dx = to[0] - from[0];
-  const dy = to[1] - from[1];
-  const length = Math.hypot(dx, dy);
-  const ux = length < 1e-9 ? 1 : dx / length;
-  const uy = length < 1e-9 ? 0 : dy / length;
-  const px = (-uy * thickness) / 2;
-  const py = (ux * thickness) / 2;
-
-  return draw()
-    .movePointerTo([from[0] + px, from[1] + py])
-    .lineTo([to[0] + px, to[1] + py])
-    .lineTo([to[0] - px, to[1] - py])
-    .lineTo([from[0] - px, from[1] - py])
-    .close();
-}
-
 function toLocal2D(
   p: THREE.Vector3,
   origin: THREE.Vector3,
@@ -190,11 +168,11 @@ function isNonEmptyDrawing(drawing: Drawing): boolean {
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
-// flat 2D coordinates for computeStrutBoundaryManual2D. Side A is out of scope for now (see
-// conversation), so rather than keep computeStrutPlane's own A-aligned xDir, `alignVertical`
-// re-rotates everything (still around the gravity center, so it doesn't change anything's shape
-// or relative position) so that center->B comes out pointing straight up (+Y) instead - simpler
-// to reason about while all the construction work is happening at the B end.
+// flat 2D coordinates for computeStrutBoundaryManual2D. Rather than keep computeStrutPlane's own
+// A-aligned xDir, `alignVertical` re-rotates everything (still around the gravity center, so it
+// doesn't change anything's shape or relative position) so that center->B comes out pointing
+// straight up (+Y) instead - simpler to reason about, and createShoulderGeometry's own right/up
+// basis (see below) still works out correctly for A even though A isn't vertically aligned.
 export function computeStrutBoundaryManual(
   a: THREE.Vector3,
   b: THREE.Vector3,
@@ -249,16 +227,16 @@ interface ShoulderGeometry {
 
 const nullShoulderGeometry: ShoulderGeometry = { main: null, helpers: [], negativeShapes: [] };
 
-// Everything currently built around the B end - centerline, offset/shoulder points, and the two
-// mid-groove notches. Side A is out of scope for now (see the user's own note in conversation:
-// "we'll deal with it later"), so this is the only construction happening today; pulled into its
-// own function so computeStrutBoundaryManual2D can eventually call the equivalent for A too
-// without the two getting tangled together.
+// Everything built around one end of the strut - centerline, offset/shoulder points, end/mid
+// groove notches, chamfers, mill-relief circles. Generic over which vertex it's building around:
+// called once for B (vertex=b, other=a) and once for A (vertex=a, other=b) from
+// computeStrutBoundaryManual2D below, which fuses the two `main`s and combines their
+// negativeShapes before cutting once. `label` ("A" or "B") only affects helper names/logging.
 function createShoulderGeometry(
-  a: Point2D,
-  b: Point2D,
+  vertex: Point2D,
+  otherVertex: Point2D,
   center: Point2D,
-  offsetB: number,
+  offset: number,
   cornerLength: number,
   halfWidth: number,
   endGrooveLength: number,
@@ -266,75 +244,76 @@ function createShoulderGeometry(
   grooveDepth: number,
   chamferLength: number,
   millingDiameter: number,
+  label: string,
 ): ShoulderGeometry {
-  // computeStrutBoundaryManual (the 3D wrapper) already rotated everything so center->B comes out
-  // exactly vertical - `up` is that guaranteed-exact axis, and `right` is the matching horizontal
-  // axis (still computed the general way, as the lead-in direction leaning toward `a`, so this
-  // keeps working if that vertical-alignment guarantee ever changes). Every point below is just a
-  // plain horizontal/vertical step from another, instead of the general tangent/radial vector
-  // math the older version of this function used.
-  const right = tangentDirection2D(b, a, center);
-  const up: Point2D = [0, 1];
+  // `right` is the lead-in direction at `vertex`, leaning toward `otherVertex`. `up` is the
+  // radial direction straight away from `center` at `vertex` - computeStrutBoundaryManual (the
+  // 3D wrapper) rotates everything so this is exactly [0, 1] for B specifically, but the general
+  // formula here also gives the correct answer for A (which isn't vertically aligned). Every
+  // point below is just a plain right/up step from another, instead of a per-point
+  // tangent/radial recompute.
+  const right = tangentDirection2D(vertex, otherVertex, center);
+  const up = normalize2(sub2(vertex, center));
 
   // Where the tangent lines from A and B would cross - the sharp corner the two lead-ins would
-  // meet at. Caps how far the B shoulder can travel below: never past that intersection, even if
+  // meet at. Caps how far this end's shoulder can travel: never past that intersection, even if
   // cornerLength would otherwise take it further.
-  const tangentA = tangentDirection2D(a, b, center);
-  const intersection = lineIntersection2D(a, tangentA, b, right);
+  const tangentOther = tangentDirection2D(otherVertex, vertex, center);
+  const intersection = lineIntersection2D(vertex, right, otherVertex, tangentOther);
   if (!intersection) return nullShoulderGeometry;
-  const distanceToIntersection = length2(sub2(intersection, a));
+  const distanceToIntersection = length2(sub2(intersection, vertex));
 
-  const offsetPointB = add2(b, scale2(right, offsetB));
-  const shoulderEndPointB = add2(b, scale2(right, Math.min(cornerLength, distanceToIntersection)));
+  const offsetPoint = add2(vertex, scale2(right, offset));
+  const shoulderEndPoint = add2(vertex, scale2(right, Math.min(cornerLength, distanceToIntersection)));
 
-  const offsetPointExtB = add2(offsetPointB, scale2(up, halfWidth));
-  const offsetPointInnB = add2(offsetPointB, scale2(up, -halfWidth));
+  const offsetPointExt = add2(offsetPoint, scale2(up, halfWidth));
+  const offsetPointInn = add2(offsetPoint, scale2(up, -halfWidth));
 
-  // The end groove at the B end: a plain endGrooveLength x grooveDepth rectangle notched into the
-  // Ext/Inn edge right at offsetPointExtB/InnB, cutting inward (Ext down, Inn up - both toward
-  // the offsetPointB centerline) by grooveDepth.
-  const endGroovePointExt1 = add2(offsetPointExtB, scale2(right, endGrooveLength));
-  const endGroovePointExt3 = add2(offsetPointExtB, scale2(up, -grooveDepth));
+  // The end groove: a plain endGrooveLength x grooveDepth rectangle notched into the Ext/Inn edge
+  // right at offsetPointExt/Inn, cutting inward (Ext down, Inn up - both toward the offsetPoint
+  // centerline) by grooveDepth.
+  const endGroovePointExt1 = add2(offsetPointExt, scale2(right, endGrooveLength));
+  const endGroovePointExt3 = add2(offsetPointExt, scale2(up, -grooveDepth));
   const endGroovePointExt2 = add2(endGroovePointExt1, scale2(up, -grooveDepth));
 
-  const endGroovePointInn1 = add2(offsetPointInnB, scale2(right, endGrooveLength));
-  const endGroovePointInn3 = add2(offsetPointInnB, scale2(up, grooveDepth));
+  const endGroovePointInn1 = add2(offsetPointInn, scale2(right, endGrooveLength));
+  const endGroovePointInn3 = add2(offsetPointInn, scale2(up, grooveDepth));
   const endGroovePointInn2 = add2(endGroovePointInn1, scale2(up, grooveDepth));
 
   // Both shoulder points are where the horizontal line at that offset point's own height crosses
-  // the line from center through the raw shoulderEndPointB.
-  const shoulderRefDir = sub2(shoulderEndPointB, center);
-  const shoulderEndPointInnB = lineIntersection2D(center, shoulderRefDir, offsetPointInnB, right);
-  const shoulderEndPointExtB = lineIntersection2D(center, shoulderRefDir, offsetPointExtB, right);
-  if (!shoulderEndPointInnB || !shoulderEndPointExtB) return nullShoulderGeometry;
+  // the line from center through the raw shoulderEndPoint.
+  const shoulderRefDir = sub2(shoulderEndPoint, center);
+  const shoulderEndPointInn = lineIntersection2D(center, shoulderRefDir, offsetPointInn, right);
+  const shoulderEndPointExt = lineIntersection2D(center, shoulderRefDir, offsetPointExt, right);
+  if (!shoulderEndPointInn || !shoulderEndPointExt) return nullShoulderGeometry;
 
   console.log(
-    'angle between offsetPointExtB→shoulderEndPointExtB and offsetPointInnB→shoulderEndPointInnB (deg)',
-    angleBetweenDeg(sub2(shoulderEndPointExtB, offsetPointExtB), sub2(shoulderEndPointInnB, offsetPointInnB)),
+    `angle between offsetPointExt${label}→shoulderEndPointExt${label} and offsetPointInn${label}→shoulderEndPointInn${label} (deg)`,
+    angleBetweenDeg(sub2(shoulderEndPointExt, offsetPointExt), sub2(shoulderEndPointInn, offsetPointInn)),
   );
 
-  // How much the Ext cap edge (shoulderEndPointInnB->shoulderEndPointExtB, which runs exactly
-  // along shoulderRefDir) has tilted away from vertical (the offset cap edge, offsetPointInnB->
-  // offsetPointExtB, which is exactly vertical by construction) - sliding back down that edge by
+  // How much the Ext cap edge (shoulderEndPointInn->shoulderEndPointExt, which runs exactly along
+  // shoulderRefDir) has tilted away from vertical (the offset cap edge, offsetPointInn->
+  // offsetPointExt, which is exactly vertical by construction) - sliding back down that edge by
   // grooveDepth*tan(angle) keeps the groove floor flat.
-  const cornerJunctionAngleB = angleBetweenRad(
-    sub2(shoulderEndPointExtB, shoulderEndPointInnB),
-    sub2(offsetPointExtB, offsetPointInnB),
+  const cornerJunctionAngle = angleBetweenRad(
+    sub2(shoulderEndPointExt, shoulderEndPointInn),
+    sub2(offsetPointExt, offsetPointInn),
   );
-  const minExtGrooveOffsetB = grooveDepth * Math.tan(cornerJunctionAngleB);
-  const shoulderEndPointExtEffectiveB = add2(shoulderEndPointExtB, scale2(right, -minExtGrooveOffsetB));
+  const minExtGrooveOffset = grooveDepth * Math.tan(cornerJunctionAngle);
+  const shoulderEndPointExtEffective = add2(shoulderEndPointExt, scale2(right, -minExtGrooveOffset));
 
-  // The mid-strut groove at the B end: from each shoulder point (the Effective one on the Ext
-  // side), step inward (toward each other) by grooveDepth to reach the groove floor, then walk
-  // back by midGrooveLength - the third corner needs no extra step since it's a plain
-  // horizontal/vertical rectangle now, not a diagonal-then-perpendicular path.
-  const midGroovePointInnB1 = add2(shoulderEndPointInnB, scale2(up, grooveDepth));
-  const midGroovePointInnB2 = add2(midGroovePointInnB1, scale2(right, -midGrooveLength));
-  const midGroovePointInnB3 = add2(shoulderEndPointInnB, scale2(right, -midGrooveLength));
+  // The mid-strut groove: from each shoulder point (the Effective one on the Ext side), step
+  // inward (toward each other) by grooveDepth to reach the groove floor, then walk back by
+  // midGrooveLength - the third corner needs no extra step since it's a plain horizontal/vertical
+  // rectangle now, not a diagonal-then-perpendicular path.
+  const midGroovePointInn1 = add2(shoulderEndPointInn, scale2(up, grooveDepth));
+  const midGroovePointInn2 = add2(midGroovePointInn1, scale2(right, -midGrooveLength));
+  const midGroovePointInn3 = add2(shoulderEndPointInn, scale2(right, -midGrooveLength));
 
-  const midGroovePointExtB1 = add2(shoulderEndPointExtEffectiveB, scale2(up, -grooveDepth));
-  const midGroovePointExtB2 = add2(midGroovePointExtB1, scale2(right, -midGrooveLength));
-  const midGroovePointExtB3 = add2(shoulderEndPointExtEffectiveB, scale2(right, -midGrooveLength));
+  const midGroovePointExt1 = add2(shoulderEndPointExtEffective, scale2(up, -grooveDepth));
+  const midGroovePointExt2 = add2(midGroovePointExt1, scale2(right, -midGrooveLength));
+  const midGroovePointExt3 = add2(shoulderEndPointExtEffective, scale2(right, -midGrooveLength));
 
   // Chamfer cuts at each sharp corner - clamped to grooveDepth so a chamfer can never eat past
   // the bottom of a groove it sits next to. A zero-or-negative clamp (chamferLength <= 0) means
@@ -344,48 +323,102 @@ function createShoulderGeometry(
     clampedChamferLength > 0
       ? [
           drawDiamond(endGroovePointExt1, clampedChamferLength),
-          drawDiamond(midGroovePointExtB3, clampedChamferLength),
-          drawDiamond(shoulderEndPointExtEffectiveB, clampedChamferLength),
-          drawDiamond(shoulderEndPointInnB, clampedChamferLength),
-          drawDiamond(midGroovePointInnB3, clampedChamferLength),
+          drawDiamond(midGroovePointExt3, clampedChamferLength),
+          drawDiamond(shoulderEndPointExtEffective, clampedChamferLength),
+          drawDiamond(shoulderEndPointInn, clampedChamferLength),
+          drawDiamond(midGroovePointInn3, clampedChamferLength),
           drawDiamond(endGroovePointInn1, clampedChamferLength),
         ]
       : [];
 
   const helpers: HelperDrawing[] = [
-    // { drawing: drawThinLine(center, a, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → A" },
-    // { drawing: drawThinLine(center, b, LINE_THICKNESS), color: LIGHT_GREEN, name: "center → B" },
-    // { drawing: drawPointMarker(offsetPointB, MARKER_RADIUS), color: "#b47eea", name: "offsetPointB" },
-    // { drawing: drawPointMarker(shoulderEndPointB, MARKER_RADIUS), color: "#a3e635", name: "shoulderEndPointB" },
-    // { drawing: drawPointMarker(offsetPointExtB, MARKER_RADIUS), color: "#ddd6fe", name: "offsetPointExtB" },
-    // { drawing: drawPointMarker(offsetPointInnB, MARKER_RADIUS), color: "#6b21a8", name: "offsetPointInnB" },
-    // { drawing: drawPointMarker(shoulderEndPointExtB, MARKER_RADIUS), color: "#d9f99d", name: "shoulderEndPointExtB" },
-    // { drawing: drawPointMarker(shoulderEndPointInnB, MARKER_RADIUS), color: "#4d7c0f", name: "shoulderEndPointInnB" },
-    // {
-    //   drawing: drawPointMarker(shoulderEndPointExtEffectiveB, MARKER_RADIUS),
-    //   color: "#fb7185",
-    //   name: "shoulderEndPointExtEffectiveB",
-    // },
-    // { drawing: drawPointMarker(midGroovePointExtB1, MARKER_RADIUS), color: "#fdba74", name: "midGroovePointExtB1" },
-    // { drawing: drawPointMarker(midGroovePointInnB1, MARKER_RADIUS), color: "#c2410c", name: "midGroovePointInnB1" },
-    // { drawing: drawPointMarker(midGroovePointExtB2, MARKER_RADIUS), color: "#fde047", name: "midGroovePointExtB2" },
-    // { drawing: drawPointMarker(midGroovePointInnB2, MARKER_RADIUS), color: "#a16207", name: "midGroovePointInnB2" },
-    // { drawing: drawPointMarker(midGroovePointExtB3, MARKER_RADIUS), color: "#5eead4", name: "midGroovePointExtB3" },
-    // { drawing: drawPointMarker(midGroovePointInnB3, MARKER_RADIUS), color: "#0f766e", name: "midGroovePointInnB3" },
-    // { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: "intersection" },
-    // { drawing: drawPointMarker(endGroovePointExt1, MARKER_RADIUS), color: "#fca5a5", name: "endGroovePointExt1" },
-    // { drawing: drawPointMarker(endGroovePointExt2, MARKER_RADIUS), color: "#b91c1c", name: "endGroovePointExt2" },
-    // { drawing: drawPointMarker(endGroovePointExt3, MARKER_RADIUS), color: "#7f1d1d", name: "endGroovePointExt3" },
-    // { drawing: drawPointMarker(endGroovePointInn1, MARKER_RADIUS), color: "#93c5fd", name: "endGroovePointInn1" },
-    // { drawing: drawPointMarker(endGroovePointInn2, MARKER_RADIUS), color: "#1d4ed8", name: "endGroovePointInn2" },
-    // { drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS), color: "#1e3a8a", name: "endGroovePointInn3" },
+    { drawing: drawPointMarker(offsetPoint, MARKER_RADIUS), color: "#b47eea", name: `offsetPoint${label}` },
+    { drawing: drawPointMarker(shoulderEndPoint, MARKER_RADIUS), color: "#a3e635", name: `shoulderEndPoint${label}` },
+    { drawing: drawPointMarker(offsetPointExt, MARKER_RADIUS), color: "#ddd6fe", name: `offsetPointExt${label}` },
+    { drawing: drawPointMarker(offsetPointInn, MARKER_RADIUS), color: "#6b21a8", name: `offsetPointInn${label}` },
+    {
+      drawing: drawPointMarker(shoulderEndPointExt, MARKER_RADIUS),
+      color: "#d9f99d",
+      name: `shoulderEndPointExt${label}`,
+    },
+    {
+      drawing: drawPointMarker(shoulderEndPointInn, MARKER_RADIUS),
+      color: "#4d7c0f",
+      name: `shoulderEndPointInn${label}`,
+    },
+    {
+      drawing: drawPointMarker(shoulderEndPointExtEffective, MARKER_RADIUS),
+      color: "#fb7185",
+      name: `shoulderEndPointExtEffective${label}`,
+    },
+    {
+      drawing: drawPointMarker(midGroovePointExt1, MARKER_RADIUS),
+      color: "#fdba74",
+      name: `midGroovePointExt${label}1`,
+    },
+    {
+      drawing: drawPointMarker(midGroovePointInn1, MARKER_RADIUS),
+      color: "#c2410c",
+      name: `midGroovePointInn${label}1`,
+    },
+    {
+      drawing: drawPointMarker(midGroovePointExt2, MARKER_RADIUS),
+      color: "#fde047",
+      name: `midGroovePointExt${label}2`,
+    },
+    {
+      drawing: drawPointMarker(midGroovePointInn2, MARKER_RADIUS),
+      color: "#a16207",
+      name: `midGroovePointInn${label}2`,
+    },
+    {
+      drawing: drawPointMarker(midGroovePointExt3, MARKER_RADIUS),
+      color: "#5eead4",
+      name: `midGroovePointExt${label}3`,
+    },
+    {
+      drawing: drawPointMarker(midGroovePointInn3, MARKER_RADIUS),
+      color: "#0f766e",
+      name: `midGroovePointInn${label}3`,
+    },
+    { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: `intersection${label}` },
+    {
+      drawing: drawPointMarker(endGroovePointExt1, MARKER_RADIUS),
+      color: "#fca5a5",
+      name: `endGroovePointExt${label}1`,
+    },
+    {
+      drawing: drawPointMarker(endGroovePointExt2, MARKER_RADIUS),
+      color: "#b91c1c",
+      name: `endGroovePointExt${label}2`,
+    },
+    {
+      drawing: drawPointMarker(endGroovePointExt3, MARKER_RADIUS),
+      color: "#7f1d1d",
+      name: `endGroovePointExt${label}3`,
+    },
+    {
+      drawing: drawPointMarker(endGroovePointInn1, MARKER_RADIUS),
+      color: "#93c5fd",
+      name: `endGroovePointInn${label}1`,
+    },
+    {
+      drawing: drawPointMarker(endGroovePointInn2, MARKER_RADIUS),
+      color: "#1d4ed8",
+      name: `endGroovePointInn${label}2`,
+    },
+    {
+      drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS),
+      color: "#1e3a8a",
+      name: `endGroovePointInn${label}3`,
+    },
   ];
 
   const main = draw()
-    .movePointerTo(offsetPointExtB)
-    .lineTo(shoulderEndPointExtB)
-    .lineTo(shoulderEndPointInnB)
-    .lineTo(offsetPointInnB)
+    .movePointerTo(offsetPointExt)
+    .lineTo(shoulderEndPointExt)
+    .lineTo(shoulderEndPointInn)
+    .lineTo(offsetPointInn)
     .close();
 
   // The two mid-groove notches (Ext/Inn) - only if there's actually a groove to cut, both a
@@ -393,34 +426,34 @@ function createShoulderGeometry(
   if (midGrooveLength > 0 && grooveDepth > 0) {
     negativeShapes.push(
       draw()
-        .movePointerTo(shoulderEndPointExtEffectiveB)
-        .lineTo(midGroovePointExtB1)
-        .lineTo(midGroovePointExtB2)
-        .lineTo(midGroovePointExtB3)
+        .movePointerTo(shoulderEndPointExtEffective)
+        .lineTo(midGroovePointExt1)
+        .lineTo(midGroovePointExt2)
+        .lineTo(midGroovePointExt3)
         .close(),
       draw()
-        .movePointerTo(shoulderEndPointInnB)
-        .lineTo(midGroovePointInnB1)
-        .lineTo(midGroovePointInnB2)
-        .lineTo(midGroovePointInnB3)
+        .movePointerTo(shoulderEndPointInn)
+        .lineTo(midGroovePointInn1)
+        .lineTo(midGroovePointInn2)
+        .lineTo(midGroovePointInn3)
         .close(),
     );
   }
 
-  // The two end-groove notches (Ext/Inn), right at the B end - same existence check.
+  // The two end-groove notches (Ext/Inn), right at this end - same existence check.
   if (endGrooveLength > 0 && grooveDepth > 0) {
     negativeShapes.push(
       draw()
         .movePointerTo(endGroovePointExt1)
         .lineTo(endGroovePointExt2)
         .lineTo(endGroovePointExt3)
-        .lineTo(offsetPointExtB)
+        .lineTo(offsetPointExt)
         .close(),
       draw()
         .movePointerTo(endGroovePointInn1)
         .lineTo(endGroovePointInn2)
         .lineTo(endGroovePointInn3)
-        .lineTo(offsetPointInnB)
+        .lineTo(offsetPointInn)
         .close(),
     );
   }
@@ -429,11 +462,11 @@ function createShoulderGeometry(
   // reach all the way into the square notch instead of leaving material a real mill can't cut.
   if (millingDiameter > 0) {
     negativeShapes.push(
-      // drawMillingCircle(midGroovePointExtB2, "top-right", millingDiameter),
+      // drawMillingCircle(midGroovePointExt2, "top-right", millingDiameter),
       // drawMillingCircle(endGroovePointExt2, "top-left", millingDiameter),
-      // drawMillingCircle(midGroovePointExtB1, "top-left", millingDiameter),
-      // drawMillingCircle(midGroovePointInnB1, "bottom-left", millingDiameter),
-      // drawMillingCircle(midGroovePointInnB2, "bottom-right", millingDiameter),
+      // drawMillingCircle(midGroovePointExt1, "top-left", millingDiameter),
+      // drawMillingCircle(midGroovePointInn1, "bottom-left", millingDiameter),
+      // drawMillingCircle(midGroovePointInn2, "bottom-right", millingDiameter),
       // drawMillingCircle(endGroovePointInn2, "bottom-left", millingDiameter),
     );
   }
@@ -449,7 +482,7 @@ export function computeStrutBoundaryManual2D(
   a: Point2D,
   b: Point2D,
   center: Point2D,
-  _offsetA: number,
+  offsetA: number,
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
@@ -459,9 +492,9 @@ export function computeStrutBoundaryManual2D(
   millingDiameter: number,
   chamferLength: number,
 ): StrutBoundaryManualResult {
-  const { main, helpers, negativeShapes } = createShoulderGeometry(
-    a,
+  const geometryB = createShoulderGeometry(
     b,
+    a,
     center,
     offsetB,
     cornerLength,
@@ -471,7 +504,26 @@ export function computeStrutBoundaryManual2D(
     grooveDepth,
     chamferLength,
     millingDiameter,
+    "B",
   );
+  const geometryA = createShoulderGeometry(
+    a,
+    b,
+    center,
+    offsetA,
+    cornerLength,
+    halfWidth,
+    endGrooveLength,
+    midGrooveLength,
+    grooveDepth,
+    chamferLength,
+    millingDiameter,
+    "A",
+  );
+
+  const main = geometryB.main && geometryA.main ? geometryB.main.fuse(geometryA.main) : geometryB.main || geometryA.main;
+  const helpers = [...geometryB.helpers, ...geometryA.helpers];
+  const negativeShapes = [...geometryB.negativeShapes, ...geometryA.negativeShapes];
 
   // Cut the negative shapes one at a time, verifying each cut actually produced a real
   // (non-empty, meshable) shape before keeping it - a mill-relief circle landing exactly on an
