@@ -1,10 +1,15 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
-import type * as THREE from 'three'
+import * as THREE from 'three'
 import type { EditTarget, ViewMode } from '../App'
-import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
-import { computeModelStats, resolveVertexPosition } from '../lib/polyhedra'
+import type { Edge, Face, HubEdgeMetric, PolyhedronData } from '../lib/polyhedra'
+import {
+  computeModelStats,
+  computeVertexHubMetrics,
+  computeVisibleVertexEdges,
+  resolveVertexPosition,
+} from '../lib/polyhedra'
 import { DomeMesh } from './DomeMesh'
 import { Hud } from './Hud'
 
@@ -25,10 +30,14 @@ interface ViewportProps {
   addedFaces: Face[]
   addedEdges: Edge[]
   centerY: number
-  edgeSegments: number
   extrudeDistance: number
   thickness: number
   cornerLength: number
+  offsetModifier: number
+  toothHeight: number
+  toothLength: number
+  toothChamfer: number
+  millRadius: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -52,10 +61,14 @@ export function Viewport({
   addedFaces,
   addedEdges,
   centerY,
-  edgeSegments,
   extrudeDistance,
   thickness,
   cornerLength,
+  offsetModifier,
+  toothHeight,
+  toothLength,
+  toothChamfer,
+  millRadius,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -96,6 +109,54 @@ export function Viewport({
     return pos.y - stats.bounds.minY
   }, [mode, editTarget, selectedVertexIndices, transformedVertices, addedVertices, stats.bounds])
 
+  const selectedVertexHubMetrics = useMemo<HubEdgeMetric[]>(() => {
+    if (mode !== 'edit' || editTarget !== 'vertices' || selectedVertexIndices.size !== 1) return []
+    const [id] = selectedVertexIndices
+    const positionOf = (vid: number) => resolveVertexPosition(vid, transformedVertices, addedVertices)
+    const edges = computeVisibleVertexEdges(
+      data,
+      transformedVertices,
+      layerCount,
+      deletedVertexIndices,
+      deletedEdgeIndices,
+      addedEdges,
+      id,
+    )
+    const center = new THREE.Vector3(0, centerY, 0)
+    return computeVertexHubMetrics(positionOf(id), center, edges, positionOf, (edgeId) => edgeThickness.get(edgeId) ?? thickness)
+  }, [
+    mode,
+    editTarget,
+    selectedVertexIndices,
+    transformedVertices,
+    addedVertices,
+    data,
+    layerCount,
+    deletedVertexIndices,
+    deletedEdgeIndices,
+    addedEdges,
+    centerY,
+    edgeThickness,
+    thickness,
+  ])
+
+  // Preview mode builds real solids via replicad/opencascade.js, whose ~20+ MB WASM module is
+  // only fetched the first time it's needed - surface that wait in the HUD rather than leaving
+  // the viewport looking stuck.
+  const [cadReady, setCadReady] = useState(false)
+  useEffect(() => {
+    if (mode !== 'preview' || cadReady) return
+    let cancelled = false
+    import('../lib/replicadCad').then(({ ensureReplicadReady }) =>
+      ensureReplicadReady().then(() => {
+        if (!cancelled) setCadReady(true)
+      }),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [mode, cadReady])
+
   return (
     <div className="viewport">
       <Hud
@@ -106,6 +167,8 @@ export function Viewport({
         selectedEdgeCount={selectedEdgeIndices.size}
         selectedFaceCount={selectedFaceIndices.size}
         selectedVertexElevation={selectedVertexElevation}
+        selectedVertexHubMetrics={selectedVertexHubMetrics}
+        previewLoading={mode === 'preview' && !cadReady}
       />
       <Canvas
         camera={{ position: [8750, 7000, 10000], fov: 45, near: 10, far: 200000 }}
@@ -146,10 +209,14 @@ export function Viewport({
           addedFaces={addedFaces}
           addedEdges={addedEdges}
           centerY={centerY}
-          edgeSegments={edgeSegments}
           extrudeDistance={extrudeDistance}
           thickness={thickness}
           cornerLength={cornerLength}
+          offsetModifier={offsetModifier}
+          toothHeight={toothHeight}
+          toothLength={toothLength}
+          toothChamfer={toothChamfer}
+          millRadius={millRadius}
           onVertexClick={onVertexClick}
           onEdgeClick={onEdgeClick}
           onFaceClick={onFaceClick}

@@ -154,7 +154,8 @@ body,
   margin-top: 8px;
 }
 
-.button-row button {
+.button-row button,
+.button-row a {
   flex: 1 1 calc(50% - 4px);
   padding: 6px 10px;
   font-size: 12px;
@@ -163,9 +164,12 @@ body,
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
+  text-align: center;
+  text-decoration: none;
 }
 
-.button-row button:hover:not(:disabled) {
+.button-row button:hover:not(:disabled),
+.button-row a:hover {
   border-color: var(--accent);
 }
 
@@ -229,4 +233,10 @@ body,
   pointer-events: none;
   user-select: none;
   z-index: 1;
+}
+
+.hud-hub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
 }

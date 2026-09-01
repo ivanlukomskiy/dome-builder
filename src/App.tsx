@@ -83,10 +83,16 @@ const DEFAULT_BASE_DATA = computePolyhedron(
 )
 
 const DEFAULT_CENTER_Z = 0
-const DEFAULT_EDGE_SEGMENTS = 8
 const DEFAULT_EXTRUDE_DISTANCE = 125
 const DEFAULT_THICKNESS = 75
 const DEFAULT_CORNER_LENGTH = 375
+const DEFAULT_OFFSET_MODIFIER = 0
+// Off by default (0 height) so existing domes don't suddenly grow teeth - see the "Corner Teeth"
+// section in Sidebar and computeStrutBoundary's `tooth` param.
+const DEFAULT_TOOTH_HEIGHT = 0
+const DEFAULT_TOOTH_LENGTH = 60
+const DEFAULT_TOOTH_CHAMFER = 8
+const DEFAULT_MILL_RADIUS = 6
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
@@ -184,12 +190,18 @@ function App() {
 
   // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at this height in mm.
   const [centerZ, setCenterZ] = useState(initial?.centerZ ?? DEFAULT_CENTER_Z)
-  const [edgeSegments, setEdgeSegments] = useState(initial?.edgeSegments ?? DEFAULT_EDGE_SEGMENTS)
   const [extrudeDistance, setExtrudeDistance] = useState(
     initial?.extrudeDistance ?? DEFAULT_EXTRUDE_DISTANCE,
   )
   const [thickness, setThickness] = useState(initial?.thickness ?? DEFAULT_THICKNESS)
   const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? DEFAULT_CORNER_LENGTH)
+  const [offsetModifier, setOffsetModifier] = useState(
+    initial?.offsetModifier ?? DEFAULT_OFFSET_MODIFIER,
+  )
+  const [toothHeight, setToothHeight] = useState(initial?.toothHeight ?? DEFAULT_TOOTH_HEIGHT)
+  const [toothLength, setToothLength] = useState(initial?.toothLength ?? DEFAULT_TOOTH_LENGTH)
+  const [toothChamfer, setToothChamfer] = useState(initial?.toothChamfer ?? DEFAULT_TOOTH_CHAMFER)
+  const [millRadius, setMillRadius] = useState(initial?.millRadius ?? DEFAULT_MILL_RADIUS)
 
   const data = baseData
 
@@ -598,10 +610,14 @@ function App() {
     setDeletedEdgeIndices(new Set())
     setEditTarget('vertices')
     setCenterZ(DEFAULT_CENTER_Z)
-    setEdgeSegments(DEFAULT_EDGE_SEGMENTS)
     setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
     setThickness(DEFAULT_THICKNESS)
     setCornerLength(DEFAULT_CORNER_LENGTH)
+    setOffsetModifier(DEFAULT_OFFSET_MODIFIER)
+    setToothHeight(DEFAULT_TOOTH_HEIGHT)
+    setToothLength(DEFAULT_TOOTH_LENGTH)
+    setToothChamfer(DEFAULT_TOOTH_CHAMFER)
+    setMillRadius(DEFAULT_MILL_RADIUS)
     setMode(preNewMode)
   }
 
@@ -615,10 +631,14 @@ function App() {
     setLayerCount(state.layerCount)
     setSelectionMode(state.selectionMode)
     setCenterZ(state.centerZ)
-    setEdgeSegments(state.edgeSegments)
     setExtrudeDistance(state.extrudeDistance)
     setThickness(state.thickness)
     setCornerLength(state.cornerLength)
+    setOffsetModifier(state.offsetModifier)
+    setToothHeight(state.toothHeight)
+    setToothLength(state.toothLength)
+    setToothChamfer(state.toothChamfer)
+    setMillRadius(state.millRadius)
     setDeletedGroups(state.deletedGroups)
     setRedoStack([])
     setVertexTransforms(new Map(state.vertexTransforms))
@@ -642,10 +662,14 @@ function App() {
       layerCount,
       selectionMode,
       centerZ,
-      edgeSegments,
       extrudeDistance,
       thickness,
       cornerLength,
+      offsetModifier,
+      toothHeight,
+      toothLength,
+      toothChamfer,
+      millRadius,
       deletedGroups,
       vertexTransforms,
       addedVertices,
@@ -665,10 +689,14 @@ function App() {
     layerCount,
     selectionMode,
     centerZ,
-    edgeSegments,
     extrudeDistance,
     thickness,
     cornerLength,
+    offsetModifier,
+    toothHeight,
+    toothLength,
+    toothChamfer,
+    millRadius,
     deletedGroups,
     vertexTransforms,
     addedVertices,
@@ -738,14 +766,22 @@ function App() {
         centerZ={centerZ}
         onCenterZChange={setCenterZ}
         onGroundCenter={handleGroundCenter}
-        edgeSegments={edgeSegments}
-        onEdgeSegmentsChange={setEdgeSegments}
         extrudeDistance={extrudeDistance}
         onExtrudeDistanceChange={setExtrudeDistance}
         thickness={thickness}
         onThicknessChange={setThickness}
         cornerLength={cornerLength}
         onCornerLengthChange={setCornerLength}
+        offsetModifier={offsetModifier}
+        onOffsetModifierChange={setOffsetModifier}
+        toothHeight={toothHeight}
+        onToothHeightChange={setToothHeight}
+        toothLength={toothLength}
+        onToothLengthChange={setToothLength}
+        toothChamfer={toothChamfer}
+        onToothChamferChange={setToothChamfer}
+        millRadius={millRadius}
+        onMillRadiusChange={setMillRadius}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -770,10 +806,14 @@ function App() {
         addedFaces={isNew ? EMPTY_FACES : addedFaces}
         addedEdges={isNew ? EMPTY_EDGES : addedEdges}
         centerY={centerY}
-        edgeSegments={edgeSegments}
         extrudeDistance={extrudeDistance}
         thickness={thickness}
         cornerLength={cornerLength}
+        offsetModifier={offsetModifier}
+        toothHeight={toothHeight}
+        toothLength={toothLength}
+        toothChamfer={toothChamfer}
+        millRadius={millRadius}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}

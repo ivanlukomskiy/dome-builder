@@ -1,15 +1,12 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
-import {
-  computeEdgePolyline,
-  extrudeArcToBeam,
-  removeVertices,
-  resolveVertexPosition,
-  sliceLayers,
-} from '../lib/polyhedra'
+import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
+import type { ToothParams } from '../lib/strutGeometry'
+import { computeEdgeEndOffsets, computeStrutBoundary } from '../lib/strutGeometry'
 
 // Vertex/center marker sizes, in mm - purely visual, sized to stay visible without dwarfing a
 // typical (few-meter) dome.
@@ -73,10 +70,14 @@ interface DomeMeshProps {
   addedFaces: Face[]
   addedEdges: Edge[]
   centerY: number
-  edgeSegments: number
   extrudeDistance: number
   thickness: number
   cornerLength: number
+  offsetModifier: number
+  toothHeight: number
+  toothLength: number
+  toothChamfer: number
+  millRadius: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -99,10 +100,14 @@ export function DomeMesh({
   addedFaces,
   addedEdges,
   centerY,
-  edgeSegments,
   extrudeDistance,
   thickness,
   cornerLength,
+  offsetModifier,
+  toothHeight,
+  toothLength,
+  toothChamfer,
+  millRadius,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -243,61 +248,133 @@ export function DomeMesh({
     return geom
   }, [visibleAddedEdgeEntries, resolvePosition])
 
-  // Preview mode instead turns each edge into a solid beam: turn it into a polyline with
-  // mitered corners (straight tangent lead-ins at each end, bridged either by a sharp point or
-  // by an arc bulging along the sphere family centered on the dome's center point), then
-  // symmetrically extrude that polyline toward/away from the sphere's center (width) and along
-  // its own surface normal (thickness, or that edge's own override if it has one) to give it a
-  // rectangular cross-section.
-  const buildBeam = useCallback(
-    (va: THREE.Vector3, vb: THREE.Vector3, beamThickness: number) => {
-      const points = computeEdgePolyline(va, vb, centerY, edgeSegments, cornerLength)
-      return extrudeArcToBeam(points, centerY, extrudeDistance, beamThickness)
-    },
-    [centerY, edgeSegments, extrudeDistance, cornerLength],
-  )
+  // Preview mode instead turns each edge into a real solid strut, built with replicad/
+  // opencascade.js: a flat sketch on the meridian plane through the edge and the gravity center
+  // (mitered lead-ins at each end, trimmed back by that hub's minOffset, bridged by a sharp
+  // corner or a true circular arc centered on the gravity center - see strutGeometry.ts),
+  // extruded by the sheet thickness (or that edge's own override, same as before). Building a
+  // solid is async (opencascade.js's WASM module has to load first, and .mesh() calls happen
+  // off this effect's synchronous path), so the merged result lives in state rather than a
+  // useMemo.
+  const [previewGeometry, setPreviewGeometry] = useState<THREE.BufferGeometry | null>(null)
 
-  // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
-  // the same thing (thickness override, and by how much) in both places.
-  const edgeBeamGeometry = useMemo(() => {
-    const positions: number[] = []
-    const colors: number[] = []
-    for (const { edge: [a, b], index } of visibleEdgeEntries) {
-      const override = edgeThickness.get(index)
-      const beamThickness = override ?? thickness
-      const color = edgeThicknessColor(override)
-      for (const v of buildBeam(sliced.vertices[a], sliced.vertices[b], beamThickness)) {
-        positions.push(v.x, v.y, v.z)
-        colors.push(color.r, color.g, color.b)
-      }
-    }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-    geom.computeVertexNormals()
-    return geom
-  }, [visibleEdgeEntries, sliced.vertices, buildBeam, edgeThickness, thickness])
+  useEffect(() => {
+    if (mode !== 'preview') return
+    let cancelled = false
 
-  const addedEdgeBeamGeometry = useMemo(() => {
-    const positions: number[] = []
-    const colors: number[] = []
-    for (const { edge: [a, b], index } of visibleAddedEdgeEntries) {
-      const override = edgeThickness.get(index)
-      const beamThickness = override ?? thickness
-      const color = edgeThicknessColor(override)
-      const va = resolvePosition(a)
-      const vb = resolvePosition(b)
-      for (const v of buildBeam(va, vb, beamThickness)) {
-        positions.push(v.x, v.y, v.z)
-        colors.push(color.r, color.g, color.b)
+    const entries = [
+      ...visibleEdgeEntries.map(({ edge: [a, b], index }) => ({
+        a,
+        b,
+        index,
+        posA: sliced.vertices[a],
+        posB: sliced.vertices[b],
+      })),
+      ...visibleAddedEdgeEntries.map(({ edge: [a, b], index }) => ({
+        a,
+        b,
+        index,
+        posA: resolvePosition(a),
+        posB: resolvePosition(b),
+      })),
+    ]
+
+    ;(async () => {
+      const { ensureReplicadReady, buildStrutMesh } = await import('../lib/replicadCad')
+      await ensureReplicadReady()
+      if (cancelled) return
+
+      const offsets = computeEdgeEndOffsets(
+        data,
+        transformedVertices,
+        addedVertices,
+        layerCount,
+        deletedVertexIndices,
+        deletedEdgeIndices,
+        addedFaces,
+        addedEdges,
+        centerY,
+        (edgeId) => edgeThickness.get(edgeId) ?? thickness,
+      )
+      const center = new THREE.Vector3(0, centerY, 0)
+      const halfWidth = extrudeDistance / 2
+      const tooth: ToothParams = { height: toothHeight, length: toothLength, chamfer: toothChamfer, millRadius }
+
+      // Colored the same way the clickable edge markers are in Edit mode, so a strut's color
+      // means the same thing (thickness override, and by how much) in both places.
+      const geometries: THREE.BufferGeometry[] = []
+      for (const { a, b, index, posA, posB } of entries) {
+        const override = edgeThickness.get(index)
+        const beamThickness = override ?? thickness
+        const offsetA = (offsets.get(index)?.get(a) ?? 0) + offsetModifier
+        const offsetB = (offsets.get(index)?.get(b) ?? 0) + offsetModifier
+        const boundary = computeStrutBoundary(posA, posB, center, offsetA, offsetB, cornerLength, halfWidth, tooth)
+        if (!boundary) continue
+
+        try {
+          const strut = buildStrutMesh(boundary, beamThickness)
+          const geom = new THREE.BufferGeometry()
+          geom.setAttribute('position', new THREE.Float32BufferAttribute(strut.positions, 3))
+          geom.setAttribute('normal', new THREE.Float32BufferAttribute(strut.normals, 3))
+          geom.setIndex(new THREE.Uint32BufferAttribute(strut.indices, 1))
+
+          const color = edgeThicknessColor(override)
+          const vertexCount = strut.positions.length / 3
+          const colors = new Float32Array(vertexCount * 3)
+          for (let i = 0; i < vertexCount; i++) {
+            colors[i * 3] = color.r
+            colors[i * 3 + 1] = color.g
+            colors[i * 3 + 2] = color.b
+          }
+          geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+          geometries.push(geom)
+        } catch (err) {
+          console.error(`Failed to build strut solid for edge ${index}`, err)
+        }
       }
+
+      if (cancelled) {
+        geometries.forEach((g) => g.dispose())
+        return
+      }
+
+      const merged = geometries.length > 0 ? mergeGeometries(geometries, false) : null
+      geometries.forEach((g) => g.dispose())
+
+      setPreviewGeometry((prev) => {
+        prev?.dispose()
+        return merged
+      })
+    })()
+
+    return () => {
+      cancelled = true
     }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-    geom.computeVertexNormals()
-    return geom
-  }, [visibleAddedEdgeEntries, resolvePosition, buildBeam, edgeThickness, thickness])
+  }, [
+    mode,
+    data,
+    transformedVertices,
+    addedVertices,
+    layerCount,
+    deletedVertexIndices,
+    deletedEdgeIndices,
+    addedFaces,
+    addedEdges,
+    centerY,
+    edgeThickness,
+    thickness,
+    extrudeDistance,
+    cornerLength,
+    offsetModifier,
+    toothHeight,
+    toothLength,
+    toothChamfer,
+    millRadius,
+    visibleEdgeEntries,
+    visibleAddedEdgeEntries,
+    sliced.vertices,
+    resolvePosition,
+  ])
 
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
@@ -362,13 +439,8 @@ export function DomeMesh({
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
       )}
-      {mode === 'preview' && (
-        <mesh geometry={edgeBeamGeometry}>
-          <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.5} />
-        </mesh>
-      )}
-      {mode === 'preview' && (
-        <mesh geometry={addedEdgeBeamGeometry}>
+      {mode === 'preview' && previewGeometry && (
+        <mesh geometry={previewGeometry}>
           <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.5} />
         </mesh>
       )}

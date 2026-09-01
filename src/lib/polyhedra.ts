@@ -612,6 +612,120 @@ export function pairByNearestNeighbor(
   return pairs
 }
 
+export interface VertexEdgeRef {
+  edgeId: number
+  neighborId: number
+}
+
+// Every edge - canonical or added - currently connecting to the given vertex: kept by the
+// layer slice, not deleted, with its other endpoint likewise kept/not deleted. Mirrors the
+// same visibility rules DomeMesh renders edges by, so this matches what's actually on screen.
+export function computeVisibleVertexEdges(
+  data: PolyhedronData,
+  transformedVertices: THREE.Vector3[],
+  layerCount: number,
+  deletedVertexIndices: ReadonlySet<number>,
+  deletedEdgeIndices: ReadonlySet<number>,
+  addedEdges: Edge[],
+  vertexId: number,
+): VertexEdgeRef[] {
+  const sliced = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
+  const kept = removeVertices(sliced, deletedVertexIndices)
+  const keptSet = new Set(kept.keptVertexIndices)
+
+  const refs: VertexEdgeRef[] = []
+  data.edges.forEach(([a, b], i) => {
+    if (deletedEdgeIndices.has(i) || !keptSet.has(a) || !keptSet.has(b)) return
+    if (a === vertexId) refs.push({ edgeId: i, neighborId: b })
+    else if (b === vertexId) refs.push({ edgeId: i, neighborId: a })
+  })
+  addedEdges.forEach(([a, b], i) => {
+    const id = -(i + 1)
+    if (deletedEdgeIndices.has(id)) return
+    const aOk = a < 0 ? !deletedVertexIndices.has(a) : keptSet.has(a)
+    const bOk = b < 0 ? !deletedVertexIndices.has(b) : keptSet.has(b)
+    if (!aOk || !bOk) return
+    if (a === vertexId) refs.push({ edgeId: id, neighborId: b })
+    else if (b === vertexId) refs.push({ edgeId: id, neighborId: a })
+  })
+  return refs
+}
+
+export interface HubEdgeMetric {
+  edgeId: number
+  neighborId: number
+  thicknessMm: number
+  angleToNextDeg: number
+  offsetMm: number
+}
+
+// The hub-connector geometry at a vertex: the tangent plane there (normal = the direction from
+// the gravity center to the vertex, i.e. perpendicular to the radius), with every connected
+// edge's direction projected onto it. Reports, going around that plane, the angle from each
+// edge to the next (wrapping back to the first) and each edge's own thickness (its override, or
+// the model's default strut thickness) - what you'd need to lay out a flat connector plate for
+// that vertex.
+export function computeVertexHubMetrics(
+  vertexPos: THREE.Vector3,
+  center: THREE.Vector3,
+  edges: VertexEdgeRef[],
+  positionOf: (id: number) => THREE.Vector3,
+  edgeThicknessOf: (edgeId: number) => number,
+): HubEdgeMetric[] {
+  if (edges.length === 0) return []
+
+  const normal = vertexPos.clone().sub(center)
+  if (normal.lengthSq() < RADIAL_EPS) normal.set(0, 1, 0)
+  else normal.normalize()
+
+  // An arbitrary right-handed basis (e1, e2) for the tangent plane.
+  const arbitrary = Math.abs(normal.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
+  const e1 = arbitrary.clone().addScaledVector(normal, -arbitrary.dot(normal)).normalize()
+  const e2 = normal.clone().cross(e1)
+
+  const withAngles = edges.map((ref) => {
+    const direction = positionOf(ref.neighborId).clone().sub(vertexPos)
+    const projected = direction.addScaledVector(normal, -direction.dot(normal))
+    let angle = Math.atan2(projected.dot(e2), projected.dot(e1))
+    if (angle < 0) angle += 2 * Math.PI
+    return { ref, angle }
+  })
+  withAngles.sort((a, b) => a.angle - b.angle)
+
+  const n = withAngles.length
+  // Angle (radians), going around the plane, from edge i to edge (i + 1) mod n.
+  const deltas = withAngles.map(({ angle }, i) => {
+    const next = withAngles[(i + 1) % n]
+    return i === n - 1 ? next.angle - angle + 2 * Math.PI : next.angle - angle
+  })
+  const thicknesses = withAngles.map(({ ref }) => edgeThicknessOf(ref.edgeId))
+
+  // Where a strut can be safely cut back from the vertex: far enough that its own beam width
+  // no longer overlaps the neighboring struts' beams on either side, given each beam's
+  // thickness and the (in-plane) angle between them. Each side alone must clear that neighbor,
+  // so the offset that clears both sides is the larger of the two.
+  return withAngles.map(({ ref }, i) => {
+    const prevIdx = (i - 1 + n) % n
+    const nextIdx = (i + 1) % n
+    const aPrev = deltas[prevIdx]
+    const aNext = deltas[i]
+    const thickness = thicknesses[i]
+    const thicknessPrev = thicknesses[prevIdx]
+    const thicknessNext = thicknesses[nextIdx]
+
+    const minOffsetPrev = thicknessPrev / (2 * Math.sin(aPrev)) + thickness / (2 * Math.tan(aPrev))
+    const minOffsetNext = thickness / (2 * Math.tan(aNext)) + thicknessNext / (2 * Math.sin(aNext))
+
+    return {
+      edgeId: ref.edgeId,
+      neighborId: ref.neighborId,
+      thicknessMm: thickness,
+      angleToNextDeg: (aNext * 180) / Math.PI,
+      offsetMm: Math.max(minOffsetPrev, minOffsetNext),
+    }
+  })
+}
+
 export interface ModelBounds {
   minX: number
   maxX: number
@@ -719,12 +833,6 @@ export function buildAddedGeometry(
   return { vertices, faces, nextId }
 }
 
-// A point's distance from the dome's center point (on the main vertical axis, at height
-// `centerY`) - the radius of the sphere, centered there, that the point sits on.
-export function sphereRadius(point: THREE.Vector3, centerY: number): number {
-  return Math.hypot(point.x, point.y - centerY, point.z)
-}
-
 const RADIAL_EPS = 1e-9
 
 // Rescales (guideX, guideY, guideZ) away from the center, along its own direction from that
@@ -764,159 +872,3 @@ export function computeTransformToPosition(
   }
 }
 
-// Turns a straight edge into `segments` sub-segments that bulge into a smooth arc: each
-// intermediate point starts as a plain straight-line interpolation (fixing its direction from
-// the center), then is rescaled from that center along that same direction until its distance
-// from the center matches the value linearly interpolated between the edge's two endpoints -
-// so the edge follows the sphere family from one endpoint's sphere to the other's.
-export function computeArcEdgePoints(
-  p1: THREE.Vector3,
-  p2: THREE.Vector3,
-  centerY: number,
-  segments: number,
-): THREE.Vector3[] {
-  const count = Math.max(1, Math.round(segments))
-  if (count === 1) return [p1, p2]
-
-  const r1 = sphereRadius(p1, centerY)
-  const r2 = sphereRadius(p2, centerY)
-
-  const points: THREE.Vector3[] = []
-  for (let k = 0; k <= count; k++) {
-    const t = k / count
-    const guideX = p1.x + (p2.x - p1.x) * t
-    const guideZ = p1.z + (p2.z - p1.z) * t
-    const guideY = p1.y + (p2.y - p1.y) * t
-    const targetRadius = r1 + (r2 - r1) * t
-    points.push(scaleToRadius(guideX, guideY, guideZ, centerY, targetRadius))
-  }
-  return points
-}
-
-// The unit direction at `from`, tangent to the sphere centered at (0, centerY, 0) (i.e.
-// perpendicular to the radius from that center to `from`), leaning as much as possible toward
-// `toward` - the component of (toward - from) that lies in that tangent plane, normalized.
-function tangentDirection(from: THREE.Vector3, toward: THREE.Vector3, centerY: number): THREE.Vector3 {
-  const radial = new THREE.Vector3(from.x, from.y - centerY, from.z)
-  const alongEdge = toward.clone().sub(from)
-  if (radial.lengthSq() < RADIAL_EPS) {
-    return alongEdge.lengthSq() < RADIAL_EPS ? new THREE.Vector3(1, 0, 0) : alongEdge.normalize()
-  }
-  radial.normalize()
-
-  const tangent = alongEdge.addScaledVector(radial, -alongEdge.dot(radial))
-  if (tangent.lengthSq() < RADIAL_EPS) {
-    // alongEdge runs (anti)parallel to the radius: fall back to an arbitrary tangent direction.
-    const arbitrary = Math.abs(radial.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
-    tangent.copy(arbitrary).addScaledVector(radial, -arbitrary.dot(radial))
-  }
-  return tangent.normalize()
-}
-
-// Turns a straight edge into a polyline with mitered corners: at each end, a straight
-// `cornerLength`-long lead-in (edgeLine1/edgeLine2) departs tangent to the sphere at that
-// endpoint, angled toward the other end. Since both lead-ins and the original edge all sit in
-// the plane spanned by the two endpoints and the sphere center, the two lead-ins (extended as
-// lines) always meet at a single point in that plane.
-//
-// If that crossing point falls within both lead-ins' actual length (a sharp enough corner),
-// the polyline is just the two lead-ins cut off at that point: p1 -> intersection -> p2.
-// Otherwise the lead-ins stay straight and full-length, and the gap between their far ends is
-// bridged by the same arc-smoothing used for a whole edge (computeArcEdgePoints): p1 -> end of
-// edgeLine1 -> ...smoothed middle... -> end of edgeLine2 -> p2.
-export function computeEdgePolyline(
-  p1: THREE.Vector3,
-  p2: THREE.Vector3,
-  centerY: number,
-  segments: number,
-  cornerLength: number,
-): THREE.Vector3[] {
-  if (cornerLength < RADIAL_EPS) return computeArcEdgePoints(p1, p2, centerY, segments)
-
-  const d1 = tangentDirection(p1, p2, centerY).multiplyScalar(cornerLength)
-  const d2 = tangentDirection(p2, p1, centerY).multiplyScalar(cornerLength)
-
-  const n = d1.clone().cross(d2)
-  const denom = n.lengthSq()
-  if (denom > RADIAL_EPS) {
-    const r = p2.clone().sub(p1)
-    const t = r.clone().cross(d2).dot(n) / denom
-    const s = r.clone().cross(d1).dot(n) / denom
-    const EDGE_EPS = 1e-6
-    if (t >= -EDGE_EPS && t <= 1 + EDGE_EPS && s >= -EDGE_EPS && s <= 1 + EDGE_EPS) {
-      const intersection = p1.clone().addScaledVector(d1, Math.min(Math.max(t, 0), 1))
-      return [p1, intersection, p2]
-    }
-  }
-
-  const end1 = p1.clone().add(d1)
-  const end2 = p2.clone().add(d2)
-  return [p1, ...computeArcEdgePoints(end1, end2, centerY, segments), p2]
-}
-
-function pushQuad(
-  triangles: THREE.Vector3[],
-  a: THREE.Vector3,
-  b: THREE.Vector3,
-  c: THREE.Vector3,
-  d: THREE.Vector3,
-): void {
-  triangles.push(a, b, c)
-  triangles.push(a, c, d)
-}
-
-// Symmetrically extrudes an arc (as produced by computeEdgePolyline) into a solid beam: each
-// point is offset by half `width` toward the sphere center and half away from it (giving
-// the strut its width, in the same plane as the arc and the sphere's center), and then that
-// whole ribbon is offset by half `thickness` each way along its own surface normal (giving it
-// depth, perpendicular to that plane). The original arc stays exactly centered inside the
-// resulting box-shaped tube. Returns a flat, non-indexed list of triangle vertices (three per
-// triangle, ready to feed straight into a BufferGeometry) covering all four side faces.
-export function extrudeArcToBeam(
-  arcPoints: THREE.Vector3[],
-  centerY: number,
-  width: number,
-  thickness: number,
-): THREE.Vector3[] {
-  const halfWidth = width / 2
-  const halfThickness = thickness / 2
-  const center = new THREE.Vector3(0, centerY, 0)
-  const last = arcPoints.length - 1
-
-  const cross = arcPoints.map((p, i) => {
-    const towardCenter = center.clone().sub(p)
-    if (towardCenter.lengthSq() < RADIAL_EPS) towardCenter.set(0, 1, 0)
-    else towardCenter.normalize()
-
-    const prev = arcPoints[Math.max(i - 1, 0)]
-    const next = arcPoints[Math.min(i + 1, last)]
-    const tangent = next.clone().sub(prev)
-    if (tangent.lengthSq() < RADIAL_EPS) tangent.set(1, 0, 0)
-    else tangent.normalize()
-
-    const binormal = new THREE.Vector3().crossVectors(tangent, towardCenter)
-    if (binormal.lengthSq() < RADIAL_EPS) binormal.crossVectors(tangent, new THREE.Vector3(0, 1, 0))
-    if (binormal.lengthSq() < RADIAL_EPS) binormal.set(0, 0, 1)
-    else binormal.normalize()
-
-    const outer = p.clone().addScaledVector(towardCenter, -halfWidth)
-    const inner = p.clone().addScaledVector(towardCenter, halfWidth)
-    return {
-      outerTop: outer.clone().addScaledVector(binormal, halfThickness),
-      outerBottom: outer.clone().addScaledVector(binormal, -halfThickness),
-      innerTop: inner.clone().addScaledVector(binormal, halfThickness),
-      innerBottom: inner.clone().addScaledVector(binormal, -halfThickness),
-    }
-  })
-
-  const triangles: THREE.Vector3[] = []
-  for (let i = 0; i < cross.length - 1; i++) {
-    const a = cross[i]
-    const b = cross[i + 1]
-    pushQuad(triangles, a.outerTop, b.outerTop, b.outerBottom, a.outerBottom) // outer face
-    pushQuad(triangles, a.innerBottom, b.innerBottom, b.innerTop, a.innerTop) // inner face
-    pushQuad(triangles, a.outerTop, a.innerTop, b.innerTop, b.outerTop) // top face
-    pushQuad(triangles, a.outerBottom, b.outerBottom, b.innerBottom, a.innerBottom) // bottom face
-  }
-  return triangles
-}

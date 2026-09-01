@@ -73,14 +73,22 @@ interface SidebarProps {
   centerZ: number
   onCenterZChange: (value: number) => void
   onGroundCenter: () => void
-  edgeSegments: number
-  onEdgeSegmentsChange: (value: number) => void
   extrudeDistance: number
   onExtrudeDistanceChange: (value: number) => void
   thickness: number
   onThicknessChange: (value: number) => void
   cornerLength: number
   onCornerLengthChange: (value: number) => void
+  offsetModifier: number
+  onOffsetModifierChange: (value: number) => void
+  toothHeight: number
+  onToothHeightChange: (value: number) => void
+  toothLength: number
+  onToothLengthChange: (value: number) => void
+  toothChamfer: number
+  onToothChamferChange: (value: number) => void
+  millRadius: number
+  onMillRadiusChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -129,7 +137,7 @@ function sharedEdgeThicknessValue(
   return value
 }
 
-interface NumberFieldProps {
+export interface NumberFieldProps {
   value: number | null
   onCommit: (value: number) => void
   step?: number
@@ -144,7 +152,7 @@ interface NumberFieldProps {
 // number commits it live, so the model updates as you type; an invalid/empty in-progress value
 // is simply left uncommitted, and blurring reverts the field's own display back to whatever was
 // last actually committed (or "Mixed", if the current selection doesn't share one).
-function NumberField({ value, onCommit, step, min, placeholder, clamp }: NumberFieldProps) {
+export function NumberField({ value, onCommit, step, min, placeholder, clamp }: NumberFieldProps) {
   const [draft, setDraft] = useState<string | null>(null)
 
   const handleChange = (raw: string) => {
@@ -216,14 +224,22 @@ export function Sidebar({
   centerZ,
   onCenterZChange,
   onGroundCenter,
-  edgeSegments,
-  onEdgeSegmentsChange,
   extrudeDistance,
   onExtrudeDistanceChange,
   thickness,
   onThicknessChange,
   cornerLength,
   onCornerLengthChange,
+  offsetModifier,
+  onOffsetModifierChange,
+  toothHeight,
+  onToothHeightChange,
+  toothLength,
+  onToothLengthChange,
+  toothChamfer,
+  onToothChamferChange,
+  millRadius,
+  onMillRadiusChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -253,6 +269,12 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <h1>Dome Builder</h1>
+
+      <section className="control-group">
+        <div className="button-row">
+          <a href={`${import.meta.env.BASE_URL}edge-sketch`}>Edge Sketch Debug</a>
+        </div>
+      </section>
 
       {mode !== 'new' && (
         <section className="control-group">
@@ -411,14 +433,20 @@ export function Sidebar({
           </div>
           <p className="hint">
             Corner length (D): straight lead-in at each end, tangent to the sphere and angled
-            toward the other end. Meeting lead-ins form a sharp point; otherwise the gap between
-            them is smoothed.
+            toward the other end - trimmed back from the vertex by that hub's own minimum offset
+            (shown when a single vertex is selected in Edit mode), up to this budget. Meeting
+            lead-ins form a sharp point; otherwise the gap between them is bridged by an arc
+            centered on the gravity center.
           </p>
           <div className="transform-field">
-            <label>Edge segments</label>
-            <NumberField value={edgeSegments} step={1} min={1} onCommit={onEdgeSegmentsChange} />
+            <label>Offset modifier (mm)</label>
+            <NumberField value={offsetModifier} step={5} onCommit={onOffsetModifierChange} />
           </div>
-          <p className="hint">Each edge is bent through the spheres centered on that point.</p>
+          <p className="hint">
+            Offset modifier: added to every edge end's own minimum offset before it's trimmed
+            back from the vertex (still capped by the corner length budget). Positive pulls every
+            strut end further in; negative pushes it back out, toward the vertex.
+          </p>
           <div className="transform-field">
             <label>Width (mm)</label>
             <NumberField value={extrudeDistance} step={5} min={0} onCommit={onExtrudeDistanceChange} />
@@ -433,6 +461,36 @@ export function Sidebar({
           <p className="hint">
             Thickness: extrudes that ribbon symmetrically along its own surface normal, turning
             it into a solid beam.
+          </p>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Corner Teeth</h2>
+          <div className="transform-field">
+            <label>Tooth height (mm)</label>
+            <NumberField value={toothHeight} step={5} min={0} onCommit={onToothHeightChange} />
+          </div>
+          <div className="transform-field">
+            <label>Tooth length (mm)</label>
+            <NumberField value={toothLength} step={5} min={0} onCommit={onToothLengthChange} />
+          </div>
+          <div className="transform-field">
+            <label>Chamfer length (mm)</label>
+            <NumberField value={toothChamfer} step={1} min={0} onCommit={onToothChamferChange} />
+          </div>
+          <div className="transform-field">
+            <label>Mill radius (mm)</label>
+            <NumberField value={millRadius} step={1} min={0} onCommit={onMillRadiusChange} />
+          </div>
+          <p className="hint">
+            An interlocking tooth cut into each strut end's lead-in, mirrored on both the outer
+            and inner boundary. 0 height turns it off. Mill radius sets a dogbone relief cut into
+            the main line at each of the tooth's two concave base corners - the corner itself
+            stays sharp, but a real round cutting bit can't reach all the way into it, so a
+            semicircle is cut in just before, leaving room for a square mating part to seat
+            flush.
           </p>
         </section>
       )}
