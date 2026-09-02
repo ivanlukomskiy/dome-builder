@@ -177,6 +177,18 @@ function isNonEmptyDrawing(drawing: Drawing): boolean {
   }
 }
 
+// A diamond (45-degree square, oriented to the given right/up axes rather than the global X/Y
+// ones) centered at `p`, reaching `size` in each of the four right/up directions - used as a
+// chamfer-cut shape at a corner point.
+function drawDiamond(p: Point2D, size: number, right: Point2D, up: Point2D): Drawing {
+  return draw()
+    .movePointerTo(add2(p, scale2(right, -size)))
+    .lineTo(add2(p, scale2(up, size)))
+    .lineTo(add2(p, scale2(right, size)))
+    .lineTo(add2(p, scale2(up, -size)))
+    .close();
+}
+
 // Prints every vertex coordinate of `drawing` (meshed just for this - a Drawing itself doesn't
 // expose its polygon points directly) as [x, y, z] triples, tagged with `label`.
 function logDrawingPoints(label: string, drawing: Drawing): void {
@@ -552,6 +564,13 @@ function createShoulderGeometry(
       drawMillingCircle(midGroovePointInn2, "bottom-right", millingDiameter, right, up),
       drawMillingCircle(endGroovePointInn2, "bottom-left", millingDiameter, right, up),
     );
+  }
+  if (chamferLength > 0) {
+    negativeShapes.push(
+      // this chamfer can't be drawn using built-in chamfer tool because it's a short piece of line plus an arc
+      // which both need to be cut
+      drawDiamond(shoulderEndPointExtEffective, chamferLength, right, up)
+    )
   }
 
   return {
