@@ -205,8 +205,8 @@ export function computeStrutBoundaryManual(
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
-  endGrooveLength: number,
-  midGrooveLength: number,
+  endGrooveLengthPercent: number,
+  midGrooveLengthPercent: number,
   grooveDepth: number,
   millingDiameter: number,
   chamferLength: number,
@@ -230,8 +230,8 @@ export function computeStrutBoundaryManual(
     offsetB,
     cornerLength,
     halfWidth,
-    endGrooveLength,
-    midGrooveLength,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
     grooveDepth,
     millingDiameter,
     chamferLength,
@@ -281,8 +281,8 @@ function createShoulderGeometry(
   offset: number,
   cornerLength: number,
   halfWidth: number,
-  endGrooveLength: number,
-  midGrooveLength: number,
+  endGrooveLengthPercent: number,
+  midGrooveLengthPercent: number,
   grooveDepth: number,
   chamferLength: number,
   millingDiameter: number,
@@ -311,17 +311,6 @@ function createShoulderGeometry(
   const offsetPointExt = add2(offsetPoint, scale2(up, halfWidth));
   const offsetPointInn = add2(offsetPoint, scale2(up, -halfWidth));
 
-  // The end groove: a plain endGrooveLength x grooveDepth rectangle notched into the Ext/Inn edge
-  // right at offsetPointExt/Inn, cutting inward (Ext down, Inn up - both toward the offsetPoint
-  // centerline) by grooveDepth.
-  const endGroovePointExt1 = add2(offsetPointExt, scale2(right, endGrooveLength));
-  const endGroovePointExt3 = add2(offsetPointExt, scale2(up, -grooveDepth));
-  const endGroovePointExt2 = add2(endGroovePointExt1, scale2(up, -grooveDepth));
-
-  const endGroovePointInn1 = add2(offsetPointInn, scale2(right, endGrooveLength));
-  const endGroovePointInn3 = add2(offsetPointInn, scale2(up, grooveDepth));
-  const endGroovePointInn2 = add2(endGroovePointInn1, scale2(up, grooveDepth));
-
   // Both shoulder points are where the horizontal line at that offset point's own height crosses
   // the line from center through the raw shoulderEndPoint.
   const shoulderRefDir = sub2(shoulderEndPoint, center);
@@ -345,17 +334,40 @@ function createShoulderGeometry(
   const minExtGrooveOffset = grooveDepth * Math.tan(cornerJunctionAngle);
   const shoulderEndPointExtEffective = add2(shoulderEndPointExt, scale2(right, -minExtGrooveOffset));
 
+  // endGrooveLengthPercent/midGrooveLengthPercent are fractions of how far the offset point is
+  // from the shoulder it caps out at - 100% on the Inn side reaches shoulderEndPointInn exactly,
+  // 100% on the Ext side reaches shoulderEndPointExtEffective exactly (Ext and Inn get scaled
+  // separately since that "available" span isn't the same length on both sides - see the
+  // cornerJunctionAngle comment above).
+  const availableLengthInn = length2(sub2(shoulderEndPointInn, offsetPointInn));
+  const availableLengthExt = length2(sub2(shoulderEndPointExtEffective, offsetPointExt));
+  const endGrooveLengthExt = (endGrooveLengthPercent / 100) * availableLengthExt;
+  const endGrooveLengthInn = (endGrooveLengthPercent / 100) * availableLengthInn;
+  const midGrooveLengthExt = (midGrooveLengthPercent / 100) * availableLengthExt;
+  const midGrooveLengthInn = (midGrooveLengthPercent / 100) * availableLengthInn;
+
+  // The end groove: a plain endGrooveLength x grooveDepth rectangle notched into the Ext/Inn edge
+  // right at offsetPointExt/Inn, cutting inward (Ext down, Inn up - both toward the offsetPoint
+  // centerline) by grooveDepth.
+  const endGroovePointExt1 = add2(offsetPointExt, scale2(right, endGrooveLengthExt));
+  const endGroovePointExt3 = add2(offsetPointExt, scale2(up, -grooveDepth));
+  const endGroovePointExt2 = add2(endGroovePointExt1, scale2(up, -grooveDepth));
+
+  const endGroovePointInn1 = add2(offsetPointInn, scale2(right, endGrooveLengthInn));
+  const endGroovePointInn3 = add2(offsetPointInn, scale2(up, grooveDepth));
+  const endGroovePointInn2 = add2(endGroovePointInn1, scale2(up, grooveDepth));
+
   // The mid-strut groove: from each shoulder point (the Effective one on the Ext side), step
   // inward (toward each other) by grooveDepth to reach the groove floor, then walk back by
   // midGrooveLength - the third corner needs no extra step since it's a plain horizontal/vertical
   // rectangle now, not a diagonal-then-perpendicular path.
   const midGroovePointInn1 = add2(shoulderEndPointInn, scale2(up, grooveDepth));
-  const midGroovePointInn2 = add2(midGroovePointInn1, scale2(right, -midGrooveLength));
-  const midGroovePointInn3 = add2(shoulderEndPointInn, scale2(right, -midGrooveLength));
+  const midGroovePointInn2 = add2(midGroovePointInn1, scale2(right, -midGrooveLengthInn));
+  const midGroovePointInn3 = add2(shoulderEndPointInn, scale2(right, -midGrooveLengthInn));
 
   const midGroovePointExt1 = add2(shoulderEndPointExtEffective, scale2(up, -grooveDepth));
-  const midGroovePointExt2 = add2(midGroovePointExt1, scale2(right, -midGrooveLength));
-  const midGroovePointExt3 = add2(shoulderEndPointExtEffective, scale2(right, -midGrooveLength));
+  const midGroovePointExt2 = add2(midGroovePointExt1, scale2(right, -midGrooveLengthExt));
+  const midGroovePointExt3 = add2(shoulderEndPointExtEffective, scale2(right, -midGrooveLengthExt));
 
   // Chamfer cuts at each sharp corner - clamped to grooveDepth so a chamfer can never eat past
   // the bottom of a groove it sits next to. A zero-or-negative clamp (chamferLength <= 0) means
@@ -470,7 +482,7 @@ function createShoulderGeometry(
 
   // The two mid-groove notches (Ext/Inn) - only if there's actually a groove to cut, both a
   // length along the strut and a depth into it.
-  if (midGrooveLength > 0 && grooveDepth > 0) {
+  if (midGrooveLengthPercent > 0 && grooveDepth > 0) {
     negativeShapes.push(
       draw()
         .movePointerTo(shoulderEndPointExtEffective)
@@ -488,7 +500,7 @@ function createShoulderGeometry(
   }
 
   // The two end-groove notches (Ext/Inn), right at this end - same existence check.
-  if (endGrooveLength > 0 && grooveDepth > 0) {
+  if (endGrooveLengthPercent > 0 && grooveDepth > 0) {
     negativeShapes.push(
       draw()
         .movePointerTo(endGroovePointExt1)
@@ -537,8 +549,8 @@ export function computeStrutBoundaryManual2D(
   offsetB: number,
   cornerLength: number,
   halfWidth: number,
-  endGrooveLength: number,
-  midGrooveLength: number,
+  endGrooveLengthPercent: number,
+  midGrooveLengthPercent: number,
   grooveDepth: number,
   millingDiameter: number,
   chamferLength: number,
@@ -550,8 +562,8 @@ export function computeStrutBoundaryManual2D(
     offsetB,
     cornerLength,
     halfWidth,
-    endGrooveLength,
-    midGrooveLength,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
     grooveDepth,
     chamferLength,
     millingDiameter,
@@ -564,8 +576,8 @@ export function computeStrutBoundaryManual2D(
     offsetA,
     cornerLength,
     halfWidth,
-    endGrooveLength,
-    midGrooveLength,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
     grooveDepth,
     chamferLength,
     millingDiameter,

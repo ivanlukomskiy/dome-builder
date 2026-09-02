@@ -13,8 +13,8 @@ interface Params {
   cornerLength: number
   radius: number
   angleDeg: number
-  endGrooveLength: number
-  midGrooveLength: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
@@ -27,8 +27,8 @@ const DEFAULT_PARAMS: Params = {
   cornerLength: 375,
   radius: 2500,
   angleDeg: 60,
-  endGrooveLength: 75,
-  midGrooveLength: 90,
+  endGrooveLengthPercent: 25,
+  midGrooveLengthPercent: 35,
   grooveDepth: 20,
   millingDiameter: 8,
   chamferLength: 6,
@@ -79,8 +79,8 @@ export function StrutShapeDebug() {
           offset2,
           cornerLength,
           width,
-          endGrooveLength,
-          midGrooveLength,
+          endGrooveLengthPercent,
+          midGrooveLengthPercent,
           grooveDepth,
           millingDiameter,
           chamferLength,
@@ -98,8 +98,8 @@ export function StrutShapeDebug() {
           offset2,
           cornerLength,
           width / 2,
-          endGrooveLength,
-          midGrooveLength,
+          endGrooveLengthPercent,
+          midGrooveLengthPercent,
           grooveDepth,
           millingDiameter,
           chamferLength,
@@ -186,12 +186,22 @@ export function StrutShapeDebug() {
         <section className="control-group">
           <h2>Grooves</h2>
           <div className="transform-field">
-            <label>End groove length (mm)</label>
-            <NumberField value={params.endGrooveLength} step={5} min={0} onCommit={setParam('endGrooveLength')} />
+            <label>End groove length (%)</label>
+            <NumberField
+              value={params.endGrooveLengthPercent}
+              step={5}
+              min={0}
+              onCommit={setParam('endGrooveLengthPercent')}
+            />
           </div>
           <div className="transform-field">
-            <label>Mid groove length (mm)</label>
-            <NumberField value={params.midGrooveLength} step={5} min={0} onCommit={setParam('midGrooveLength')} />
+            <label>Mid groove length (%)</label>
+            <NumberField
+              value={params.midGrooveLengthPercent}
+              step={5}
+              min={0}
+              onCommit={setParam('midGrooveLengthPercent')}
+            />
           </div>
           <div className="transform-field">
             <label>Groove depth (mm)</label>
