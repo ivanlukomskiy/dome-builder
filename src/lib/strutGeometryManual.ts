@@ -311,7 +311,10 @@ function precalculateStrutEnd(
   if (millingDiameter > 0) {
     connectionWallThickness = Math.max(connectionWallThickness, millingDiameterDip + TINY_DISTANCE)
   }
-  console.log('cwt', connectionWallThickness, millingDiameter)
+  if (connectionWallThickness > 0) {
+    const minPositiveConnWidth = cornerLength * 0.05
+    connectionWallThickness = Math.max(minPositiveConnWidth, connectionWallThickness)
+  }
   return {
     offset,
     cornerLength,
@@ -348,7 +351,8 @@ function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
 
   if (p.chamferLength > 0) {
     main = main.vLineTo((p.halfWidth - p.chamferLength))
-    main = main.lineTo([p.effectiveCornerLength, p.halfWidth])
+    main = main.lineTo([p.cornerLength + p.chamferLength, p.halfWidth])
+    main = main.hLineTo(p.effectiveCornerLength)
   } else if (p.effectiveCornerLength > p.cornerLength) {
     main = main.vLineTo(p.halfWidth)
     main = main.hLineTo(p.effectiveCornerLength)
@@ -357,31 +361,36 @@ function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
 
   // let negativeShapes: HelperDrawing[] = []
   let helpers: HelperDrawing[] = []
+  let negativeShapes: Drawing[] = []
   if (p.millingDiameter) {
     const mp1 = drawMillingCircle([p.tenonStart, p.halfWidth - p.grooveDepth], 'top-left', p.millingDiameter);
     helpers.push({drawing: mp1, color: 'red', name: 'mp1'})
+    negativeShapes.push(mp1)
     const mp2 = drawMillingCircle([p.tenonEnd, p.halfWidth - p.grooveDepth], 'top-right', p.millingDiameter);
     helpers.push({drawing: mp2, color: 'red', name: 'mp2'})
+    negativeShapes.push(mp2)
     const mp3 = drawMillingCircle([p.cornerLength, p.halfWidth - p.grooveDepth], 'top-left', p.millingDiameter);
     helpers.push({drawing: mp3, color: 'red', name: 'mp3'})
+    negativeShapes.push(mp3)
   }
 
   return {
     main: main.close(),
     helpers,
-    negativeShapes: [],
+    negativeShapes,
   }
 }
 
-function createStrutEnd(p: StrutEndMeasurements): Geometry {
+function createStrutEnd(p: StrutEndMeasurements): Drawing {
   const half1 = createStrutEndHalf(p)
   const half2 = half1.main.mirror([1, 0], [0, 0], "plane")
-
-  return {
-    main: half1.main.fuse(half2),
-    helpers: half1.helpers,
-    negativeShapes: half1.negativeShapes,
-  }
+  let main = half1.main.fuse(half2)
+  half1.negativeShapes.forEach(s => {
+    main = main.cut(s)
+    const mirrored = s.mirror([1, 0], [0, 0], "plane")
+    main = main.cut(mirrored)
+  })
+  return main
 }
 
 export function computeStrutBoundaryManual2D(
@@ -411,19 +420,28 @@ export function computeStrutBoundaryManual2D(
     {drawing: drawPointMarker(b, MARKER_RADIUS), color: 'green', name: 'B'},
   ]
 
+  const endA = precalculateStrutEnd(
+    offsetA, cornerLength, endGrooveLengthPercent, midGrooveLengthPercent, chamferLength, millingDiameter,
+    grooveDepth, halfWidth
+  )
+  let strutA = createStrutEnd(endA)
+  strutA = strutA.rotate(Math.atan2(center[1] - a[1], center[0] - a[0]) * 180 / Math.PI - 90)
+  strutA = strutA.translate(a[0], a[1])
+
   const endB = precalculateStrutEnd(
     offsetB, cornerLength, endGrooveLengthPercent, midGrooveLengthPercent, chamferLength, millingDiameter,
     grooveDepth, halfWidth
   )
-
-  const strutB = createStrutEnd(endB)
+  let strutB = createStrutEnd(endB)
+  strutB = strutB.rotate(Math.atan2(center[1] - b[1], center[0] - b[0]) * 180 / Math.PI + 90)
+  strutB = strutB.translate(b[0], b[1])
 
   helpers = [
-    {drawing: strutB.main, color: 'darkblue', name: 'shoulder b'},
+    {drawing: strutB, color: 'magenta', name: 'shoulder b'},
+    {drawing: strutA, color: 'magenta', name: 'shoulder a'},
     ...helpers,
-    ...strutB.helpers,
+    // ...strutB.helpers,
     ];
-  const negativeShapes = [...strutB.negativeShapes];
 
   // The two shoulders only reach as far as cornerLength (each one's own shoulderEndPoint is
   // already capped there); if the tangent lines' own intersection is further out than that,
