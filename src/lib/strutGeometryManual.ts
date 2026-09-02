@@ -93,6 +93,10 @@ function angleBetweenDeg(v1: Point2D, v2: Point2D): number {
   return (angleBetweenRad(v1, v2) * 180) / Math.PI;
 }
 
+function rotate90(v: Point2D, sign: 1 | -1): Point2D {
+  return sign === 1 ? [-v[1], v[0]] : [v[1], -v[0]];
+}
+
 // Direction tangent to the circle centered at `center` at point `p`, leaning toward `towards` -
 // same idea as strutGeometry.ts's own (private) tangentDirection2D: perpendicular to the radius
 // center->p, picking whichever of the two perpendicular directions points more toward `towards`.
@@ -127,7 +131,11 @@ function drawPointMarker(p: Point2D, radius: number): Drawing {
   return drawCircle(radius).translate(p);
 }
 
-type MillingDirection = "top-right" | "top-left" | "bottom-left" | "bottom-right";
+type MillingDirection =
+  | "top-right"
+  | "top-left"
+  | "bottom-left"
+  | "bottom-right";
 
 // A mill-relief circle of the given diameter, tucked into the corner at `p` - offset diagonally
 // (by millingDiameter/2/sqrt(2) along each of `right`/`up`, toward `direction`, rather than the
@@ -139,9 +147,13 @@ function drawMillingCircle(
   millingDiameter: number,
 ): Drawing {
   const offset = millingDiameter / 2 / Math.sqrt(2);
-  const rightSign = direction === "top-right" || direction === "bottom-right" ? 1 : -1;
+  const rightSign =
+    direction === "top-right" || direction === "bottom-right" ? 1 : -1;
   const upSign = direction === "top-right" || direction === "top-left" ? 1 : -1;
-  const circleCenter: Point2D = [p[0] + rightSign * offset, p[1] + upSign * offset];
+  const circleCenter: Point2D = [
+    p[0] + rightSign * offset,
+    p[1] + upSign * offset,
+  ];
   return drawCircle(millingDiameter / 2).translate(circleCenter);
 }
 
@@ -157,7 +169,10 @@ function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
   while (delta > Math.PI) delta -= 2 * Math.PI;
   while (delta < -Math.PI) delta += 2 * Math.PI;
   const mid = angle1 + delta / 2;
-  return [center[0] + radius * Math.cos(mid), center[1] + radius * Math.sin(mid)];
+  return [
+    center[0] + radius * Math.cos(mid),
+    center[1] + radius * Math.sin(mid),
+  ];
 }
 
 // Whether a Drawing still has real, meshable area - a boolean op that goes wrong (see the
@@ -178,7 +193,12 @@ function isNonEmptyDrawing(drawing: Drawing): boolean {
 // A diamond (45-degree square, oriented to the given right/up axes rather than the global X/Y
 // ones) centered at `p`, reaching `size` in each of the four right/up directions - used as a
 // chamfer-cut shape at a corner point.
-function drawDiamond(p: Point2D, size: number, right: Point2D, up: Point2D): Drawing {
+function drawDiamond(
+  p: Point2D,
+  size: number,
+  right: Point2D,
+  up: Point2D,
+): Drawing {
   return draw()
     .movePointerTo(add2(p, scale2(right, -size)))
     .lineTo(add2(p, scale2(up, size)))
@@ -196,7 +216,13 @@ function logDrawingPoints(label: string, drawing: Drawing): void {
     const mesh = face.mesh({ tolerance: 0.5, angularTolerance: 0.5 });
     face.delete();
     for (let i = 0; i < mesh.vertices.length; i += 3) {
-      console.log(label, i / 3, mesh.vertices[i], mesh.vertices[i + 1], mesh.vertices[i + 2]);
+      console.log(
+        label,
+        i / 3,
+        mesh.vertices[i],
+        mesh.vertices[i + 1],
+        mesh.vertices[i + 2],
+      );
     }
   } catch (err) {
     console.log(label, "failed to mesh for logging", err);
@@ -271,19 +297,19 @@ const nullShoulderGeometry: Geometry = {
 };
 
 interface StrutEndMeasurements {
-  offset: number,
-  cornerLength: number,
-  tenonStart: number,
-  tenonEnd: number,
-  chamferLength: number,
-  millingDiameter: number,
-  effectiveCornerLength: number, // includes space for chamfer / milling diameter
-  halfWidth: number,
-  grooveDepth: number,
-  connectionHalfWidth: number,
+  offset: number;
+  cornerLength: number;
+  tenonStart: number;
+  tenonEnd: number;
+  chamferLength: number;
+  millingDiameter: number;
+  effectiveCornerLength: number; // includes space for chamfer / milling diameter
+  halfWidth: number;
+  grooveDepth: number;
+  connectionHalfWidth: number;
 }
 
-const TINY_DISTANCE = 0.01
+const TINY_DISTANCE = 0.01;
 
 function precalculateStrutEnd(
   offset: number,
@@ -296,101 +322,197 @@ function precalculateStrutEnd(
   halfWidth: number,
 ): StrutEndMeasurements {
   const workableLength = cornerLength - offset;
-  const tenonWidth = workableLength * (100 - endGrooveLengthPercent - midGrooveLengthPercent) / 100
-  const millingDiameterDip = millingDiameter / 2 * (1 - 1 / Math.sqrt(2))
-  const safeChamferLength = Math.max(0,
+  const tenonWidth =
+    (workableLength * (100 - endGrooveLengthPercent - midGrooveLengthPercent)) /
+    100;
+  const millingDiameterDip = (millingDiameter / 2) * (1 - 1 / Math.sqrt(2));
+  const safeChamferLength = Math.max(
+    0,
     Math.min(
       tenonWidth / 2 - TINY_DISTANCE,
       grooveDepth - TINY_DISTANCE,
       chamferLength,
-    ))
-  let connectionWallThickness = 0
+    ),
+  );
+  let connectionWallThickness = 0;
   if (safeChamferLength > 0) {
-    connectionWallThickness = safeChamferLength + TINY_DISTANCE
+    connectionWallThickness = safeChamferLength + TINY_DISTANCE;
   }
   if (millingDiameter > 0) {
-    connectionWallThickness = Math.max(connectionWallThickness, millingDiameterDip + TINY_DISTANCE)
+    connectionWallThickness = Math.max(
+      connectionWallThickness,
+      millingDiameterDip + TINY_DISTANCE,
+    );
   }
   if (connectionWallThickness > 0) {
-    const minPositiveConnWidth = cornerLength * 0.05
-    connectionWallThickness = Math.max(minPositiveConnWidth, connectionWallThickness)
+    const minPositiveConnWidth = cornerLength * 0.05;
+    connectionWallThickness = Math.max(
+      minPositiveConnWidth,
+      connectionWallThickness,
+    );
   }
   return {
     offset,
     cornerLength,
-    tenonStart: offset + workableLength * endGrooveLengthPercent / 100,
-    tenonEnd: cornerLength - workableLength * midGrooveLengthPercent / 100,
+    tenonStart: offset + (workableLength * endGrooveLengthPercent) / 100,
+    tenonEnd: cornerLength - (workableLength * midGrooveLengthPercent) / 100,
     chamferLength: safeChamferLength,
     millingDiameter,
     effectiveCornerLength: cornerLength + connectionWallThickness,
     halfWidth,
     grooveDepth,
-    connectionHalfWidth: connectionWallThickness > 0 ? halfWidth : halfWidth - grooveDepth,
-  }
+    connectionHalfWidth:
+      connectionWallThickness > 0 ? halfWidth : halfWidth - grooveDepth,
+  };
 }
 
 function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
-  let main: DrawingPen = draw()
+  let main: DrawingPen = draw();
 
-  console.log("cl",p.chamferLength)
+  console.log("cl", p.chamferLength);
 
-  main = main.movePointerTo([p.offset, 0])
-  main = main.vLineTo((p.halfWidth - p.grooveDepth))
-  main = main.hLineTo(p.tenonStart)
-  main = main.vLineTo(p.halfWidth)
+  main = main.movePointerTo([p.offset, 0]);
+  main = main.vLineTo(p.halfWidth - p.grooveDepth);
+  main = main.hLineTo(p.tenonStart);
+  main = main.vLineTo(p.halfWidth);
 
   if (p.chamferLength > 0) {
-    main = main.customCorner(p.chamferLength, "chamfer")
+    main = main.customCorner(p.chamferLength, "chamfer");
   }
-  main = main.hLineTo(p.tenonEnd)
+  main = main.hLineTo(p.tenonEnd);
   if (p.chamferLength > 0) {
-    main = main.customCorner(p.chamferLength, "chamfer")
+    main = main.customCorner(p.chamferLength, "chamfer");
   }
-  main = main.vLineTo((p.halfWidth - p.grooveDepth))
-  main = main.hLineTo(p.cornerLength)
+  main = main.vLineTo(p.halfWidth - p.grooveDepth);
+  main = main.hLineTo(p.cornerLength);
 
   if (p.chamferLength > 0) {
-    main = main.vLineTo((p.halfWidth - p.chamferLength))
-    main = main.lineTo([p.cornerLength + p.chamferLength, p.halfWidth])
-    main = main.hLineTo(p.effectiveCornerLength)
+    main = main.vLineTo(p.halfWidth - p.chamferLength);
+    main = main.lineTo([p.cornerLength + p.chamferLength, p.halfWidth]);
+    main = main.hLineTo(p.effectiveCornerLength);
   } else if (p.effectiveCornerLength > p.cornerLength) {
-    main = main.vLineTo(p.halfWidth)
-    main = main.hLineTo(p.effectiveCornerLength)
+    main = main.vLineTo(p.halfWidth);
+    main = main.hLineTo(p.effectiveCornerLength);
   }
-  main = main.vLineTo(0)
+  main = main.vLineTo(0);
 
   // let negativeShapes: HelperDrawing[] = []
-  let helpers: HelperDrawing[] = []
-  let negativeShapes: Drawing[] = []
+  let helpers: HelperDrawing[] = [];
+  let negativeShapes: Drawing[] = [];
   if (p.millingDiameter) {
-    const mp1 = drawMillingCircle([p.tenonStart, p.halfWidth - p.grooveDepth], 'top-left', p.millingDiameter);
-    helpers.push({drawing: mp1, color: 'red', name: 'mp1'})
-    negativeShapes.push(mp1)
-    const mp2 = drawMillingCircle([p.tenonEnd, p.halfWidth - p.grooveDepth], 'top-right', p.millingDiameter);
-    helpers.push({drawing: mp2, color: 'red', name: 'mp2'})
-    negativeShapes.push(mp2)
-    const mp3 = drawMillingCircle([p.cornerLength, p.halfWidth - p.grooveDepth], 'top-left', p.millingDiameter);
-    helpers.push({drawing: mp3, color: 'red', name: 'mp3'})
-    negativeShapes.push(mp3)
+    const mp1 = drawMillingCircle(
+      [p.tenonStart, p.halfWidth - p.grooveDepth],
+      "top-left",
+      p.millingDiameter,
+    );
+    helpers.push({ drawing: mp1, color: "red", name: "mp1" });
+    negativeShapes.push(mp1);
+    const mp2 = drawMillingCircle(
+      [p.tenonEnd, p.halfWidth - p.grooveDepth],
+      "top-right",
+      p.millingDiameter,
+    );
+    helpers.push({ drawing: mp2, color: "red", name: "mp2" });
+    negativeShapes.push(mp2);
+    const mp3 = drawMillingCircle(
+      [p.cornerLength, p.halfWidth - p.grooveDepth],
+      "top-left",
+      p.millingDiameter,
+    );
+    helpers.push({ drawing: mp3, color: "red", name: "mp3" });
+    negativeShapes.push(mp3);
   }
 
   return {
     main: main.close(),
     helpers,
     negativeShapes,
-  }
+  };
 }
 
 function createStrutEnd(p: StrutEndMeasurements): Drawing {
-  const half1 = createStrutEndHalf(p)
-  const half2 = half1.main.mirror([1, 0], [0, 0], "plane")
-  let main = half1.main.fuse(half2)
-  half1.negativeShapes.forEach(s => {
-    main = main.cut(s)
-    const mirrored = s.mirror([1, 0], [0, 0], "plane")
-    main = main.cut(mirrored)
-  })
-  return main
+  const half1 = createStrutEndHalf(p);
+  const half2 = half1.main.mirror([1, 0], [0, 0], "plane");
+  let main = half1.main.fuse(half2);
+  half1.negativeShapes.forEach((s) => {
+    main = main.cut(s);
+    const mirrored = s.mirror([1, 0], [0, 0], "plane");
+    main = main.cut(mirrored);
+  });
+  return main;
+}
+
+function arcStart(
+  midPoint: Point2D,
+  tangent: Point2D,
+  sign: 1 | -1,
+  measurements: StrutEndMeasurements,
+): Point2D {
+  let innA = add2(
+    midPoint,
+    scale2(tangent, measurements.effectiveCornerLength),
+  );
+  innA = add2(innA, scale2(rotate90(tangent, sign), measurements.halfWidth));
+  return innA;
+}
+
+function calculateArcPoints(
+  start: Point2D,
+  end: Point2D,
+  center: Point2D,
+  steps: number,
+): Point2D[] {
+  const va = normalize2(sub2(start, center));
+  const vb = normalize2(sub2(end, center));
+  const angleA = Math.atan2(va[1], va[0]);
+  const angleB = Math.atan2(vb[1], vb[0]);
+  let delta = angleB - angleA;
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta < -Math.PI) delta += 2 * Math.PI;
+
+  const angles = Array.from({ length: steps + 1 }, (_, i) => {
+    const angle = angleA + (delta * i) / steps;
+    return [Math.cos(angle), Math.sin(angle)] as Point2D;
+  });
+  const da = length2(sub2(start, center));
+  const db = length2(sub2(end, center));
+  return angles.map((a, i) => {
+    const len = da + (i * (db - da)) / steps;
+    return add2(center, scale2(a, len));
+  });
+}
+
+function arc(
+  a: Point2D,
+  b: Point2D,
+  center: Point2D,
+  aMeasurements: StrutEndMeasurements,
+  bMeasurements: StrutEndMeasurements,
+): Drawing {
+  const tangentA = tangentDirection2D(a, b, center);
+  const tangentB = tangentDirection2D(b, a, center);
+
+  let innA = arcStart(a, tangentA, 1, aMeasurements);
+  let innB = arcStart(b, tangentB, -1, bMeasurements);
+  let extA = arcStart(a, tangentA, -1, aMeasurements);
+  let extB = arcStart(b, tangentB, 1, bMeasurements);
+
+  let conn = draw();
+  const innArcPoints = calculateArcPoints(innA, innB, center, 50);
+  const extArcPoints = calculateArcPoints(extA, extB, center, 50);
+
+  innArcPoints.forEach((p, i) => {
+    if (i == 0) {
+      conn = conn.movePointerTo(p);
+      return;
+    }
+    conn = conn.lineTo(p);
+  });
+  extArcPoints.reverse().forEach((p) => {
+    conn = conn.lineTo(p);
+  });
+
+  return conn.close();
 }
 
 export function computeStrutBoundaryManual2D(
@@ -408,100 +530,62 @@ export function computeStrutBoundaryManual2D(
   chamferLength: number,
 ): StrutBoundaryManualResult {
   // calculate intersection point
-  const tangentA = tangentDirection2D(a, b, center);
-  const tangentB = tangentDirection2D(b, a, center);
-  const intersection = lineIntersection2D(a, tangentA, b, tangentB);
-  if (!intersection) return nullShoulderGeometry;
-  const distanceToIntersection = length2(sub2(intersection, a));
-  const main = draw().movePointerTo(center).lineTo(a).lineTo(b).close();
+
+  // const intersection = lineIntersection2D(a, tangentA, b, tangentB);
+  // if (!intersection) return nullShoulderGeometry;
+  // const distanceToIntersection = length2(sub2(intersection, a));
   let helpers = [
-    {drawing: drawPointMarker(center, MARKER_RADIUS), color: 'red', name: 'center'},
-    {drawing: drawPointMarker(a, MARKER_RADIUS), color: 'green', name: 'A'},
-    {drawing: drawPointMarker(b, MARKER_RADIUS), color: 'green', name: 'B'},
-  ]
+    {
+      drawing: drawPointMarker(center, MARKER_RADIUS),
+      color: "red",
+      name: "center",
+    },
+    { drawing: drawPointMarker(a, MARKER_RADIUS), color: "green", name: "A" },
+    { drawing: drawPointMarker(b, MARKER_RADIUS), color: "green", name: "B" },
+  ];
 
   const endA = precalculateStrutEnd(
-    offsetA, cornerLength, endGrooveLengthPercent, midGrooveLengthPercent, chamferLength, millingDiameter,
-    grooveDepth, halfWidth
-  )
-  let strutA = createStrutEnd(endA)
-  strutA = strutA.rotate(Math.atan2(center[1] - a[1], center[0] - a[0]) * 180 / Math.PI - 90)
-  strutA = strutA.translate(a[0], a[1])
+    offsetA,
+    cornerLength,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    chamferLength,
+    millingDiameter,
+    grooveDepth,
+    halfWidth,
+  );
+  let strutA = createStrutEnd(endA);
+  strutA = strutA.rotate(
+    (Math.atan2(center[1] - a[1], center[0] - a[0]) * 180) / Math.PI - 90,
+  );
+  strutA = strutA.translate(a[0], a[1]);
 
   const endB = precalculateStrutEnd(
-    offsetB, cornerLength, endGrooveLengthPercent, midGrooveLengthPercent, chamferLength, millingDiameter,
-    grooveDepth, halfWidth
-  )
-  let strutB = createStrutEnd(endB)
-  strutB = strutB.rotate(Math.atan2(center[1] - b[1], center[0] - b[0]) * 180 / Math.PI + 90)
-  strutB = strutB.translate(b[0], b[1])
+    offsetB,
+    cornerLength,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    chamferLength,
+    millingDiameter,
+    grooveDepth,
+    halfWidth,
+  );
+  let strutB = createStrutEnd(endB);
+  strutB = strutB.rotate(
+    (Math.atan2(center[1] - b[1], center[0] - b[0]) * 180) / Math.PI + 90,
+  );
+  strutB = strutB.translate(b[0], b[1]);
+
+  const arcBody = arc(a, b, center, endA, endB);
 
   helpers = [
-    {drawing: strutB, color: 'magenta', name: 'shoulder b'},
-    {drawing: strutA, color: 'magenta', name: 'shoulder a'},
-    ...helpers,
-    // ...strutB.helpers,
-    ];
+    // { drawing: strutB, color: "magenta", name: "shoulder b" },
+    // { drawing: strutA, color: "magenta", name: "shoulder a" },
+    // { drawing: arcBody, color: "magenta", name: "arc" },
+    // ...helpers,
+  ];
 
-  // The two shoulders only reach as far as cornerLength (each one's own shoulderEndPoint is
-  // already capped there); if the tangent lines' own intersection is further out than that,
-  // there's a gap left between them - bridge it with two arcs (centered at `center`, same as the
-  // radial construction everywhere else here) and two straight sides.
-  // let main = geometryB.main;
-  // if (
-  //   main &&
-  //   geometryB.distanceToIntersection > cornerLength &&
-  //   geometryB.shoulderEndPointInn &&
-  //   geometryB.shoulderEndPointExt &&
-  //   geometryA.shoulderEndPointInn &&
-  //   geometryA.shoulderEndPointExt
-  // ) {
-  //   const connection = draw()
-  //     .movePointerTo(geometryB.shoulderEndPointInn)
-  //     .threePointsArcTo(
-  //       geometryA.shoulderEndPointInn,
-  //       arcMidpoint(geometryB.shoulderEndPointInn, geometryA.shoulderEndPointInn, center),
-  //     )
-  //     .lineTo(geometryA.shoulderEndPointExt)
-  //     .threePointsArcTo(
-  //       geometryB.shoulderEndPointExt,
-  //       arcMidpoint(geometryA.shoulderEndPointExt, geometryB.shoulderEndPointExt, center),
-  //     )
-  //     .close();
-  //   main = main.fuse(connection);
-  // }
-  // main = main.fuse(geometryA.main)
-
-  // logDrawingPoints("main polygon point", main);
-
-  // Cut the negative shapes one at a time, verifying each cut actually produced a real
-  // (non-empty, meshable) shape before keeping it - a mill-relief circle landing exactly on an
-  // already-cut groove notch's own corner is a coincident-curve case OpenCascade's boolean ops
-  // can silently botch, collapsing the whole shape to nothing without throwing. Skipping just
-  // that one cut (falling back to the last known-good shape) is far better than losing
-  // everything downstream of it.
-  // let result = main;
-  // for (const shape of negativeShapes) {
-  //   if (!result) break;
-  //   const candidate = result.cut(shape);
-  //   if (isNonEmptyDrawing(candidate)) {
-  //     result = candidate;
-  //   }
-  // }
-
-  // Chamfer last, only after every negative shape (grooves and mill-relief circles alike) has
-  // already been subtracted - each chamfer point needs to already be a real corner of the final
-  // boundary for CornerFinder.inList to match it, and an earlier mill-relief cut landing near one
-  // of these corners could otherwise still be reshaping the boundary out from under it.
-  // const clampedChamferLength = Math.min(chamferLength, grooveDepth);
-  // const chamferPoints = [...geometryB.chamferPoints, ...geometryA.chamferPoints];
-  // if (result && clampedChamferLength > 0 && chamferPoints.length > 0) {
-  //   try {
-  //     result = result.chamfer(clampedChamferLength, (c) => c.inList(chamferPoints));
-  //   } catch (err) {
-  //     console.log("final chamfer failed, keeping the un-chamfered shape", err);
-  //   }
-  // }
+  const main = strutA.fuse(arcBody).fuse(strutB)
 
   return { main: main, helpers };
 }
