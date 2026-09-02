@@ -127,18 +127,6 @@ function drawPointMarker(p: Point2D, radius: number): Drawing {
   return drawCircle(radius).translate(p);
 }
 
-// A diamond (45-degree square, oriented to the given right/up axes rather than the global X/Y
-// ones) centered at `p`, reaching `size` in each of the four right/up directions - used as a
-// chamfer-cut shape at a corner point.
-function drawDiamond(p: Point2D, size: number, right: Point2D, up: Point2D): Drawing {
-  return draw()
-    .movePointerTo(add2(p, scale2(right, -size)))
-    .lineTo(add2(p, scale2(up, size)))
-    .lineTo(add2(p, scale2(right, size)))
-    .lineTo(add2(p, scale2(up, -size)))
-    .close();
-}
-
 type MillingDirection = "top-right" | "top-left" | "bottom-left" | "bottom-right";
 
 // A mill-relief circle of the given diameter, tucked into the corner at `p` - offset diagonally
