@@ -256,7 +256,7 @@ export function computeStrutBoundaryManual(
 
 const MARKER_RADIUS = 8;
 
-interface ShoulderGeometry {
+interface Geometry {
   main: Drawing;
   helpers: HelperDrawing[];
   // Cuts (grooves, chamfers, mill-relief) - kept separate from `main` rather than subtracted
@@ -264,46 +264,68 @@ interface ShoulderGeometry {
   // `main`s and pooling their negativeShapes) and cut once, instead of each end fighting over
   // its own copy of `main`.
   negativeShapes: Drawing[];
-  // How far the tangent lines from A and B would cross, from this end's own vertex - the caller
-  // uses this (both ends' values are the same point, so either one works) to decide whether the
-  // two shoulders actually reach each other or need a connecting piece bridging the gap.
-  distanceToIntersection: number;
-  // The three boundary points a connecting piece needs to tie into - null if this shoulder
-  // itself failed to build (see the two early nullShoulderGeometry returns below).
-  shoulderEndPointExt: Point2D | null;
-  shoulderEndPointInn: Point2D | null;
-  shoulderEndPointExtEffective: Point2D | null;
-  // Points to chamfer, once the caller has fused both ends' `main` together and cut every
-  // negativeShape out of the result - see the chamfer comment in computeStrutBoundaryManual2D for
-  // why this has to happen last, after every other cut.
-  chamferPoints: Point2D[];
 }
 
-const nullShoulderGeometry: ShoulderGeometry = {
+const nullShoulderGeometry: Geometry = {
   main: draw().close(),
   helpers: [],
   negativeShapes: [],
-  distanceToIntersection: 0,
-  shoulderEndPointExt: null,
-  shoulderEndPointInn: null,
-  shoulderEndPointExtEffective: null,
-  chamferPoints: [],
 };
 
-function createShoulderGeometryV2(
-  vertex: Point2D,
-  center: Point2D,
+interface StrutEndMeasurements {
   offset: number,
   cornerLength: number,
-  halfWidth: number,
-  endGrooveLengthPercent: number,
-  midGrooveLengthPercent: number,
-  grooveDepth: number,
+  tenonStart: number,
+  tenonEnd: number,
   chamferLength: number,
   millingDiameter: number,
-  label: string,
-): ShoulderGeometry {
-  return nullShoulderGeometry
+  effectiveCornerLength: number, // includes space for chamfer / milling diameter
+  halfWidth: number,
+  grooveDepth: number,
+}
+
+function precalculateStrutEnd(
+  offset: number,
+  cornerLength: number,
+  endGrooveLengthPercent: number,
+  midGrooveLengthPercent: number,
+  chamferLength: number,
+  millingDiameter: number,
+  grooveDepth: number,
+  halfWidth: number,
+): StrutEndMeasurements {
+  const workableLength = cornerLength - offset;
+  return {
+    offset,
+    cornerLength,
+    tenonStart: offset + workableLength * endGrooveLengthPercent / 100,
+    tenonEnd: cornerLength - workableLength * midGrooveLengthPercent / 100,
+    chamferLength,
+    millingDiameter,
+    effectiveCornerLength: cornerLength + chamferLength,
+    halfWidth,
+    grooveDepth,
+  }
+}
+
+function createStrutEndHalf(p: StrutEndMeasurements, sign: number): Geometry {
+  let main = draw()
+    .movePointerTo([p.offset, 0])
+    .vLineTo((p.halfWidth - p.grooveDepth) * sign)
+    .hLineTo(p.tenonStart)
+    .customCorner(p.chamferLength, "chamfer")
+    .vLineTo(p.halfWidth * sign)
+    .hLineTo(p.tenonEnd)
+    .vLineTo((p.halfWidth - p.grooveDepth) * sign)
+    .hLineTo(p.cornerLength)
+    .vLineTo(0)
+    .close()
+
+  return {
+    main,
+    helpers: [],
+    negativeShapes: [],
+  }
 }
 
 // Everything built around one end of the strut - centerline, offset/shoulder points, end/mid
@@ -324,7 +346,7 @@ function createShoulderGeometry(
   chamferLength: number,
   millingDiameter: number,
   label: string,
-): ShoulderGeometry {
+): Geometry {
   // `right` is the lead-in direction at `vertex`, leaning toward `otherVertex`. `up` is the
   // radial direction straight away from `center` at `vertex` - computeStrutBoundaryManual (the
   // 3D wrapper) rotates everything so this is exactly [0, 1] for B specifically, but the general
@@ -588,11 +610,6 @@ function createShoulderGeometry(
     main,
     helpers,
     negativeShapes,
-    distanceToIntersection,
-    shoulderEndPointExt,
-    shoulderEndPointInn,
-    shoulderEndPointExtEffective,
-    chamferPoints,
   };
 }
 
@@ -621,23 +638,14 @@ export function computeStrutBoundaryManual2D(
     {drawing: drawPointMarker(center, MARKER_RADIUS), color: 'red', name: 'center'},
     {drawing: drawPointMarker(a, MARKER_RADIUS), color: 'green', name: 'A'},
     {drawing: drawPointMarker(b, MARKER_RADIUS), color: 'green', name: 'B'},
-    
   ]
 
+  const endB = precalculateStrutEnd(
+    offsetB, cornerLength, endGrooveLengthPercent, midGrooveLengthPercent, chamferLength, millingDiameter,
+    grooveDepth, halfWidth
+  )
 
-  const geometryB = createShoulderGeometryV2(
-    b,
-    center,
-    offsetB,
-    cornerLength,
-    halfWidth,
-    endGrooveLengthPercent,
-    midGrooveLengthPercent,
-    grooveDepth,
-    chamferLength,
-    millingDiameter,
-    "B",
-  );
+  const geometryB = createStrutEndHalf(endB, 1)
   // const geometryA = createShoulderGeometry(
   //   a,
   //   b,
@@ -653,7 +661,9 @@ export function computeStrutBoundaryManual2D(
   //   "A",
   // );
 
-  helpers = [...helpers, ...geometryB.helpers];
+  helpers = [{drawing: geometryB.main, color: 'red', name: 'shoulder b'},
+    ...helpers,
+    ...geometryB.helpers];
   const negativeShapes = [...geometryB.negativeShapes];
 
   // The two shoulders only reach as far as cornerLength (each one's own shoulderEndPoint is

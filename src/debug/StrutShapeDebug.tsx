@@ -88,7 +88,7 @@ export function StrutShapeDebug() {
         } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
-        const a = new THREE.Vector3(radius / 2, 0, 0)
+        const a = new THREE.Vector3(radius, 0, 0)
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
         const result = computeStrutBoundaryManual(
