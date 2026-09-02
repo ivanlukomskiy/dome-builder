@@ -234,14 +234,14 @@ export function computeStrutBoundaryManual(
   const bRaw = toLocal2D(b, plane.origin, plane.xDir, yDir);
   const centerRaw = toLocal2D(center, plane.origin, plane.xDir, yDir);
 
-  const a2 = alignVertical(aRaw, bRaw);
-  const b2 = alignVertical(bRaw, bRaw);
-  const center2 = alignVertical(centerRaw, bRaw);
+  // const a2 = alignVertical(aRaw, bRaw);
+  // const b2 = alignVertical(bRaw, bRaw);
+  // const center2 = alignVertical(centerRaw, bRaw);
 
   return computeStrutBoundaryManual2D(
-    a2,
-    b2,
-    center2,
+    aRaw,
+    bRaw,
+    centerRaw,
     offsetA,
     offsetB,
     cornerLength,
@@ -254,7 +254,7 @@ export function computeStrutBoundaryManual(
   );
 }
 
-const MARKER_RADIUS = 3;
+const MARKER_RADIUS = 8;
 
 interface ShoulderGeometry {
   main: Drawing;
@@ -289,6 +289,22 @@ const nullShoulderGeometry: ShoulderGeometry = {
   shoulderEndPointExtEffective: null,
   chamferPoints: [],
 };
+
+function createShoulderGeometryV2(
+  vertex: Point2D,
+  center: Point2D,
+  offset: number,
+  cornerLength: number,
+  halfWidth: number,
+  endGrooveLengthPercent: number,
+  midGrooveLengthPercent: number,
+  grooveDepth: number,
+  chamferLength: number,
+  millingDiameter: number,
+  label: string,
+): ShoulderGeometry {
+  return nullShoulderGeometry
+}
 
 // Everything built around one end of the strut - centerline, offset/shoulder points, end/mid
 // groove notches, chamfers, mill-relief circles. Generic over which vertex it's building around:
@@ -338,11 +354,6 @@ function createShoulderGeometry(
   const shoulderEndPointInn = lineIntersection2D(center, shoulderRefDir, offsetPointInn, right);
   const shoulderEndPointExt = lineIntersection2D(center, shoulderRefDir, offsetPointExt, right);
   if (!shoulderEndPointInn || !shoulderEndPointExt) return nullShoulderGeometry;
-
-  console.log(
-    `angle between offsetPointExt${label}→shoulderEndPointExt${label} and offsetPointInn${label}→shoulderEndPointInn${label} (deg)`,
-    angleBetweenDeg(sub2(shoulderEndPointExt, offsetPointExt), sub2(shoulderEndPointInn, offsetPointInn)),
-  );
 
   // How much the Ext cap edge (shoulderEndPointInn->shoulderEndPointExt, which runs exactly along
   // shoulderRefDir) has tilted away from vertical (the offset cap edge, offsetPointInn->
@@ -599,9 +610,23 @@ export function computeStrutBoundaryManual2D(
   millingDiameter: number,
   chamferLength: number,
 ): StrutBoundaryManualResult {
-  const geometryB = createShoulderGeometry(
+  // calculate intersection point
+  const tangentA = tangentDirection2D(a, b, center);
+  const tangentB = tangentDirection2D(b, a, center);
+  const intersection = lineIntersection2D(a, tangentA, b, tangentB);
+  if (!intersection) return nullShoulderGeometry;
+  const distanceToIntersection = length2(sub2(intersection, a));
+  const main = draw().movePointerTo(center).lineTo(a).lineTo(b).close();
+  let helpers = [
+    {drawing: drawPointMarker(center, MARKER_RADIUS), color: 'red', name: 'center'},
+    {drawing: drawPointMarker(a, MARKER_RADIUS), color: 'green', name: 'A'},
+    {drawing: drawPointMarker(b, MARKER_RADIUS), color: 'green', name: 'B'},
+    
+  ]
+
+
+  const geometryB = createShoulderGeometryV2(
     b,
-    a,
     center,
     offsetB,
     cornerLength,
@@ -613,54 +638,54 @@ export function computeStrutBoundaryManual2D(
     millingDiameter,
     "B",
   );
-  const geometryA = createShoulderGeometry(
-    a,
-    b,
-    center,
-    offsetA,
-    cornerLength,
-    halfWidth,
-    endGrooveLengthPercent,
-    midGrooveLengthPercent,
-    grooveDepth,
-    chamferLength,
-    millingDiameter,
-    "A",
-  );
+  // const geometryA = createShoulderGeometry(
+  //   a,
+  //   b,
+  //   center,
+  //   offsetA,
+  //   cornerLength,
+  //   halfWidth,
+  //   endGrooveLengthPercent,
+  //   midGrooveLengthPercent,
+  //   grooveDepth,
+  //   chamferLength,
+  //   millingDiameter,
+  //   "A",
+  // );
 
-  const helpers = [...geometryB.helpers, ...geometryA.helpers];
-  const negativeShapes = [...geometryB.negativeShapes, ...geometryA.negativeShapes];
+  helpers = [...helpers, ...geometryB.helpers];
+  const negativeShapes = [...geometryB.negativeShapes];
 
   // The two shoulders only reach as far as cornerLength (each one's own shoulderEndPoint is
   // already capped there); if the tangent lines' own intersection is further out than that,
   // there's a gap left between them - bridge it with two arcs (centered at `center`, same as the
   // radial construction everywhere else here) and two straight sides.
-  let main = geometryB.main;
-  if (
-    main &&
-    geometryB.distanceToIntersection > cornerLength &&
-    geometryB.shoulderEndPointInn &&
-    geometryB.shoulderEndPointExt &&
-    geometryA.shoulderEndPointInn &&
-    geometryA.shoulderEndPointExt
-  ) {
-    const connection = draw()
-      .movePointerTo(geometryB.shoulderEndPointInn)
-      .threePointsArcTo(
-        geometryA.shoulderEndPointInn,
-        arcMidpoint(geometryB.shoulderEndPointInn, geometryA.shoulderEndPointInn, center),
-      )
-      .lineTo(geometryA.shoulderEndPointExt)
-      .threePointsArcTo(
-        geometryB.shoulderEndPointExt,
-        arcMidpoint(geometryA.shoulderEndPointExt, geometryB.shoulderEndPointExt, center),
-      )
-      .close();
-    main = main.fuse(connection);
-  }
-  main = main.fuse(geometryA.main)
+  // let main = geometryB.main;
+  // if (
+  //   main &&
+  //   geometryB.distanceToIntersection > cornerLength &&
+  //   geometryB.shoulderEndPointInn &&
+  //   geometryB.shoulderEndPointExt &&
+  //   geometryA.shoulderEndPointInn &&
+  //   geometryA.shoulderEndPointExt
+  // ) {
+  //   const connection = draw()
+  //     .movePointerTo(geometryB.shoulderEndPointInn)
+  //     .threePointsArcTo(
+  //       geometryA.shoulderEndPointInn,
+  //       arcMidpoint(geometryB.shoulderEndPointInn, geometryA.shoulderEndPointInn, center),
+  //     )
+  //     .lineTo(geometryA.shoulderEndPointExt)
+  //     .threePointsArcTo(
+  //       geometryB.shoulderEndPointExt,
+  //       arcMidpoint(geometryA.shoulderEndPointExt, geometryB.shoulderEndPointExt, center),
+  //     )
+  //     .close();
+  //   main = main.fuse(connection);
+  // }
+  // main = main.fuse(geometryA.main)
 
-  logDrawingPoints("main polygon point", main);
+  // logDrawingPoints("main polygon point", main);
 
   // Cut the negative shapes one at a time, verifying each cut actually produced a real
   // (non-empty, meshable) shape before keeping it - a mill-relief circle landing exactly on an
@@ -668,30 +693,30 @@ export function computeStrutBoundaryManual2D(
   // can silently botch, collapsing the whole shape to nothing without throwing. Skipping just
   // that one cut (falling back to the last known-good shape) is far better than losing
   // everything downstream of it.
-  let result = main;
-  for (const shape of negativeShapes) {
-    if (!result) break;
-    const candidate = result.cut(shape);
-    if (isNonEmptyDrawing(candidate)) {
-      result = candidate;
-    }
-  }
+  // let result = main;
+  // for (const shape of negativeShapes) {
+  //   if (!result) break;
+  //   const candidate = result.cut(shape);
+  //   if (isNonEmptyDrawing(candidate)) {
+  //     result = candidate;
+  //   }
+  // }
 
   // Chamfer last, only after every negative shape (grooves and mill-relief circles alike) has
   // already been subtracted - each chamfer point needs to already be a real corner of the final
   // boundary for CornerFinder.inList to match it, and an earlier mill-relief cut landing near one
   // of these corners could otherwise still be reshaping the boundary out from under it.
-  const clampedChamferLength = Math.min(chamferLength, grooveDepth);
-  const chamferPoints = [...geometryB.chamferPoints, ...geometryA.chamferPoints];
-  if (result && clampedChamferLength > 0 && chamferPoints.length > 0) {
-    try {
-      result = result.chamfer(clampedChamferLength, (c) => c.inList(chamferPoints));
-    } catch (err) {
-      console.log("final chamfer failed, keeping the un-chamfered shape", err);
-    }
-  }
+  // const clampedChamferLength = Math.min(chamferLength, grooveDepth);
+  // const chamferPoints = [...geometryB.chamferPoints, ...geometryA.chamferPoints];
+  // if (result && clampedChamferLength > 0 && chamferPoints.length > 0) {
+  //   try {
+  //     result = result.chamfer(clampedChamferLength, (c) => c.inList(chamferPoints));
+  //   } catch (err) {
+  //     console.log("final chamfer failed, keeping the un-chamfered shape", err);
+  //   }
+  // }
 
-  return { main: result, helpers };
+  return { main: main, helpers };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and

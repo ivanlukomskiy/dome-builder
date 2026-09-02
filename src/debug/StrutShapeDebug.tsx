@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
+import { drawingToDXF } from '../lib/dxfExport'
 import type { StrutMesh } from '../lib/replicadCad'
 import { StrutShapeScene } from './StrutShapeScene'
 
@@ -42,7 +43,7 @@ interface HelperMesh {
 
 type State =
   | { status: 'loading' }
-  | { status: 'ready'; main: StrutMesh | null; helpers: HelperMesh[] }
+  | { status: 'ready'; main: StrutMesh | null; helpers: HelperMesh[]; dxf: string | null }
   | { status: 'empty' }
   | { status: 'error'; message: string }
 
@@ -57,7 +58,7 @@ export function StrutShapeDebug() {
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS)
   const setParam = (field: keyof Params) => (value: number) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [showHelperPoints, setShowHelperPoints] = useState(false)
+  const [showHelperPoints, setShowHelperPoints] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -87,7 +88,7 @@ export function StrutShapeDebug() {
         } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
-        const a = new THREE.Vector3(radius, 0, 0)
+        const a = new THREE.Vector3(radius / 2, 0, 0)
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
         const result = computeStrutBoundaryManual(
@@ -107,6 +108,14 @@ export function StrutShapeDebug() {
         if (cancelled) return
 
         const main = result.main ? meshDrawing(result.main) : null
+        let dxf: string | null = null
+        if (result.main) {
+          try {
+            dxf = drawingToDXF(result.main)
+          } catch (err) {
+            console.error('Failed to build DXF export', err)
+          }
+        }
         const helpers: HelperMesh[] = []
         for (const helper of result.helpers) {
           const mesh = meshDrawing(helper.drawing)
@@ -114,7 +123,7 @@ export function StrutShapeDebug() {
         }
         if (cancelled) return
 
-        setState(main || helpers.length > 0 ? { status: 'ready', main, helpers } : { status: 'empty' })
+        setState(main || helpers.length > 0 ? { status: 'ready', main, helpers, dxf } : { status: 'empty' })
       } catch (err) {
         if (!cancelled) setState({ status: 'error', message: err instanceof Error ? err.message : String(err) })
       }
@@ -125,12 +134,29 @@ export function StrutShapeDebug() {
     }
   }, [params])
 
+  const dxf = state.status === 'ready' ? state.dxf : null
+  const downloadDxf = () => {
+    if (!dxf) return
+    const blob = new Blob([dxf], { type: 'application/dxf' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'strut-shape.dxf'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
         <h1>Strut Shape Debug</h1>
         <div className="button-row">
           <a href={import.meta.env.BASE_URL}>&larr; Back to builder</a>
+        </div>
+        <div className="button-row">
+          <button type="button" onClick={downloadDxf} disabled={!dxf}>
+            Download as DXF
+          </button>
         </div>
         <p className="hint">
           Renders whatever <code>computeStrutBoundaryManual</code> in{' '}
