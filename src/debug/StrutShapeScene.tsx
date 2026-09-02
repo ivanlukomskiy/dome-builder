@@ -1,8 +1,13 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import type { StrutMesh } from '../lib/replicadCad'
+
+export interface StrutShapeViewport {
+  target: [number, number, number]
+  distance: number
+}
 
 const FILL_COLOR = '#5b9bd5'
 const WIREFRAME_COLOR = '#2dd4bf'
@@ -35,6 +40,12 @@ interface HelperMesh {
 interface StrutShapeSceneProps {
   main: StrutMesh | null
   helpers: HelperMesh[]
+  // Camera state (pan target + zoom distance) to start from instead of fitting to the shape's
+  // bounding box - lets the caller restore whatever view the user left the page on. Only read on
+  // mount (see `useInitialCameraFit`); pass a new `key` on the component to force a re-fit.
+  initialViewport?: StrutShapeViewport | null
+  // Fires (debounced) whenever the user pans or zooms, so the caller can persist the result.
+  onViewportChange?: (viewport: StrutShapeViewport) => void
 }
 
 function boundingBoxOf({ main, helpers }: StrutShapeSceneProps) {
@@ -53,16 +64,44 @@ function boundingBoxOf({ main, helpers }: StrutShapeSceneProps) {
 // around.
 function useInitialCameraFit(props: StrutShapeSceneProps) {
   const [fit] = useState(() => {
+    const fov = 45
+    if (props.initialViewport) return { ...props.initialViewport, fov }
+
     const { minX, maxX, minY, maxY } = boundingBoxOf(props)
     const width = maxX - minX
     const height = maxY - minY
     const maxDim = Math.max(width, height, 10)
-    const fov = 45
     const distance = (maxDim / 2 / Math.tan((fov * Math.PI) / 360)) * 1.7
     const target: [number, number, number] = [(minX + maxX) / 2, (minY + maxY) / 2, 0]
     return { target, distance, fov }
   })
   return fit
+}
+
+// Debounces OrbitControls' `change` events (which fire continuously mid-drag) down to one
+// `onViewportChange` call ~300ms after the user stops panning/zooming - cheap enough to persist
+// on every call without janking the interaction itself.
+function useViewportChangeHandler(onViewportChange?: (viewport: StrutShapeViewport) => void) {
+  const timeoutRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
+  return (event?: { target?: { target: THREE.Vector3; object: THREE.Camera } }) => {
+    if (!onViewportChange) return
+    const controls = event?.target
+    if (!controls) return
+
+    if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
+    timeoutRef.current = window.setTimeout(() => {
+      const t = controls.target
+      const distance = controls.object.position.distanceTo(t)
+      onViewportChange({ target: [t.x, t.y, t.z], distance })
+    }, 300)
+  }
 }
 
 function MainShape({ mesh }: { mesh: StrutMesh }) {
@@ -145,6 +184,7 @@ function SceneContents({
 // source itself.
 export function StrutShapeScene(props: StrutShapeSceneProps) {
   const { target, distance, fov } = useInitialCameraFit(props)
+  const handleControlsChange = useViewportChangeHandler(props.onViewportChange)
   const [hoveredName, setHoveredName] = useState<string | null>(null)
   const [copiedName, setCopiedName] = useState<string | null>(null)
   const [pointer, setPointer] = useState({ x: 0, y: 0 })
@@ -183,6 +223,7 @@ export function StrutShapeScene(props: StrutShapeSceneProps) {
           dampingFactor={0.08}
           mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
           touches={{ ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }}
+          onChange={handleControlsChange}
         />
         <SceneContents {...props} onHoverHelper={setHoveredName} onSelectHelper={handleSelect} />
       </Canvas>

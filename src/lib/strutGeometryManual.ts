@@ -1,4 +1,4 @@
-import { draw, drawCircle } from "replicad";
+import { draw, drawCircle, DrawingPen } from "replicad";
 import { Drawing, type Point2D } from "replicad";
 import type * as THREE from "three";
 import { computeStrutPlane } from "./strutGeometry";
@@ -295,34 +295,49 @@ function precalculateStrutEnd(
   halfWidth: number,
 ): StrutEndMeasurements {
   const workableLength = cornerLength - offset;
+  const tenonWidth = workableLength * (100 - endGrooveLengthPercent - midGrooveLengthPercent) / 100
+  const safeChamferLength = Math.min(tenonWidth / 2 - 0.1, grooveDepth - 0.1, chamferLength)
   return {
     offset,
     cornerLength,
     tenonStart: offset + workableLength * endGrooveLengthPercent / 100,
     tenonEnd: cornerLength - workableLength * midGrooveLengthPercent / 100,
-    chamferLength,
+    chamferLength: safeChamferLength,
     millingDiameter,
-    effectiveCornerLength: cornerLength + chamferLength,
+    effectiveCornerLength: cornerLength + safeChamferLength,
     halfWidth,
     grooveDepth,
   }
 }
 
 function createStrutEndHalf(p: StrutEndMeasurements, sign: number): Geometry {
-  let main = draw()
-    .movePointerTo([p.offset, 0])
-    .vLineTo((p.halfWidth - p.grooveDepth) * sign)
-    .hLineTo(p.tenonStart)
-    .customCorner(p.chamferLength, "chamfer")
-    .vLineTo(p.halfWidth * sign)
-    .hLineTo(p.tenonEnd)
-    .vLineTo((p.halfWidth - p.grooveDepth) * sign)
-    .hLineTo(p.cornerLength)
-    .vLineTo(0)
-    .close()
+  let main: DrawingPen = draw()
+
+  console.log("cl",p.chamferLength)
+
+  main = main.movePointerTo([p.offset, 0])
+  main = main.vLineTo((p.halfWidth - p.grooveDepth) * sign)
+  main = main.hLineTo(p.tenonStart)
+  main = main.vLineTo(p.halfWidth * sign)
+
+  if (p.chamferLength > 0) {
+    main = main.customCorner(p.chamferLength, "chamfer")
+  }
+  main = main.hLineTo(p.tenonEnd)
+  if (p.chamferLength > 0) {
+    main = main.customCorner(p.chamferLength, "chamfer")
+  }
+  main = main.vLineTo((p.halfWidth - p.grooveDepth) * sign)
+  main = main.hLineTo(p.cornerLength)
+
+  if (p.chamferLength > 0) {
+    main = main.vLineTo((p.halfWidth - p.chamferLength) * sign)
+    main = main.lineTo([p.effectiveCornerLength, p.halfWidth])
+  }
+  main = main.vLineTo(0)
 
   return {
-    main,
+    main: main.close(),
     helpers: [],
     negativeShapes: [],
   }
@@ -661,7 +676,7 @@ export function computeStrutBoundaryManual2D(
   //   "A",
   // );
 
-  helpers = [{drawing: geometryB.main, color: 'red', name: 'shoulder b'},
+  helpers = [{drawing: geometryB.main, color: 'darkblue', name: 'shoulder b'},
     ...helpers,
     ...geometryB.helpers];
   const negativeShapes = [...geometryB.negativeShapes];
