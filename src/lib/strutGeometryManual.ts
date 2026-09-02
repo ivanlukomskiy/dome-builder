@@ -137,13 +137,11 @@ function drawMillingCircle(
   p: Point2D,
   direction: MillingDirection,
   millingDiameter: number,
-  right: Point2D,
-  up: Point2D,
 ): Drawing {
   const offset = millingDiameter / 2 / Math.sqrt(2);
   const rightSign = direction === "top-right" || direction === "bottom-right" ? 1 : -1;
   const upSign = direction === "top-right" || direction === "top-left" ? 1 : -1;
-  const circleCenter = add2(add2(p, scale2(right, rightSign * offset)), scale2(up, upSign * offset));
+  const circleCenter: Point2D = [p[0] + rightSign * offset, p[1] + upSign * offset];
   return drawCircle(millingDiameter / 2).translate(circleCenter);
 }
 
@@ -282,7 +280,10 @@ interface StrutEndMeasurements {
   effectiveCornerLength: number, // includes space for chamfer / milling diameter
   halfWidth: number,
   grooveDepth: number,
+  connectionHalfWidth: number,
 }
+
+const TINY_DISTANCE = 0.01
 
 function precalculateStrutEnd(
   offset: number,
@@ -296,7 +297,21 @@ function precalculateStrutEnd(
 ): StrutEndMeasurements {
   const workableLength = cornerLength - offset;
   const tenonWidth = workableLength * (100 - endGrooveLengthPercent - midGrooveLengthPercent) / 100
-  const safeChamferLength = Math.min(tenonWidth / 2 - 0.1, grooveDepth - 0.1, chamferLength)
+  const millingDiameterDip = millingDiameter / 2 * (1 - 1 / Math.sqrt(2))
+  const safeChamferLength = Math.max(0,
+    Math.min(
+      tenonWidth / 2 - TINY_DISTANCE,
+      grooveDepth - TINY_DISTANCE,
+      chamferLength,
+    ))
+  let connectionWallThickness = 0
+  if (safeChamferLength > 0) {
+    connectionWallThickness = safeChamferLength + TINY_DISTANCE
+  }
+  if (millingDiameter > 0) {
+    connectionWallThickness = Math.max(connectionWallThickness, millingDiameterDip + TINY_DISTANCE)
+  }
+  console.log('cwt', connectionWallThickness, millingDiameter)
   return {
     offset,
     cornerLength,
@@ -304,21 +319,22 @@ function precalculateStrutEnd(
     tenonEnd: cornerLength - workableLength * midGrooveLengthPercent / 100,
     chamferLength: safeChamferLength,
     millingDiameter,
-    effectiveCornerLength: cornerLength + safeChamferLength,
+    effectiveCornerLength: cornerLength + connectionWallThickness,
     halfWidth,
     grooveDepth,
+    connectionHalfWidth: connectionWallThickness > 0 ? halfWidth : halfWidth - grooveDepth,
   }
 }
 
-function createStrutEndHalf(p: StrutEndMeasurements, sign: number): Geometry {
+function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
   let main: DrawingPen = draw()
 
   console.log("cl",p.chamferLength)
 
   main = main.movePointerTo([p.offset, 0])
-  main = main.vLineTo((p.halfWidth - p.grooveDepth) * sign)
+  main = main.vLineTo((p.halfWidth - p.grooveDepth))
   main = main.hLineTo(p.tenonStart)
-  main = main.vLineTo(p.halfWidth * sign)
+  main = main.vLineTo(p.halfWidth)
 
   if (p.chamferLength > 0) {
     main = main.customCorner(p.chamferLength, "chamfer")
@@ -327,305 +343,45 @@ function createStrutEndHalf(p: StrutEndMeasurements, sign: number): Geometry {
   if (p.chamferLength > 0) {
     main = main.customCorner(p.chamferLength, "chamfer")
   }
-  main = main.vLineTo((p.halfWidth - p.grooveDepth) * sign)
+  main = main.vLineTo((p.halfWidth - p.grooveDepth))
   main = main.hLineTo(p.cornerLength)
 
   if (p.chamferLength > 0) {
-    main = main.vLineTo((p.halfWidth - p.chamferLength) * sign)
+    main = main.vLineTo((p.halfWidth - p.chamferLength))
     main = main.lineTo([p.effectiveCornerLength, p.halfWidth])
+  } else if (p.effectiveCornerLength > p.cornerLength) {
+    main = main.vLineTo(p.halfWidth)
+    main = main.hLineTo(p.effectiveCornerLength)
   }
   main = main.vLineTo(0)
 
+  // let negativeShapes: HelperDrawing[] = []
+  let helpers: HelperDrawing[] = []
+  if (p.millingDiameter) {
+    const mp1 = drawMillingCircle([p.tenonStart, p.halfWidth - p.grooveDepth], 'top-left', p.millingDiameter);
+    helpers.push({drawing: mp1, color: 'red', name: 'mp1'})
+    const mp2 = drawMillingCircle([p.tenonEnd, p.halfWidth - p.grooveDepth], 'top-right', p.millingDiameter);
+    helpers.push({drawing: mp2, color: 'red', name: 'mp2'})
+    const mp3 = drawMillingCircle([p.cornerLength, p.halfWidth - p.grooveDepth], 'top-left', p.millingDiameter);
+    helpers.push({drawing: mp3, color: 'red', name: 'mp3'})
+  }
+
   return {
     main: main.close(),
-    helpers: [],
+    helpers,
     negativeShapes: [],
   }
 }
 
-// Everything built around one end of the strut - centerline, offset/shoulder points, end/mid
-// groove notches, chamfers, mill-relief circles. Generic over which vertex it's building around:
-// called once for B (vertex=b, other=a) and once for A (vertex=a, other=b) from
-// computeStrutBoundaryManual2D below, which fuses the two `main`s and combines their
-// negativeShapes before cutting once. `label` ("A" or "B") only affects helper names/logging.
-function createShoulderGeometry(
-  vertex: Point2D,
-  otherVertex: Point2D,
-  center: Point2D,
-  offset: number,
-  cornerLength: number,
-  halfWidth: number,
-  endGrooveLengthPercent: number,
-  midGrooveLengthPercent: number,
-  grooveDepth: number,
-  chamferLength: number,
-  millingDiameter: number,
-  label: string,
-): Geometry {
-  // `right` is the lead-in direction at `vertex`, leaning toward `otherVertex`. `up` is the
-  // radial direction straight away from `center` at `vertex` - computeStrutBoundaryManual (the
-  // 3D wrapper) rotates everything so this is exactly [0, 1] for B specifically, but the general
-  // formula here also gives the correct answer for A (which isn't vertically aligned). Every
-  // point below is just a plain right/up step from another, instead of a per-point
-  // tangent/radial recompute.
-  const right = tangentDirection2D(vertex, otherVertex, center);
-  const up = normalize2(sub2(vertex, center));
-
-  // Where the tangent lines from A and B would cross - the sharp corner the two lead-ins would
-  // meet at. Caps how far this end's shoulder can travel: never past that intersection, even if
-  // cornerLength would otherwise take it further.
-  const tangentOther = tangentDirection2D(otherVertex, vertex, center);
-  const intersection = lineIntersection2D(vertex, right, otherVertex, tangentOther);
-  if (!intersection) return nullShoulderGeometry;
-  const distanceToIntersection = length2(sub2(intersection, vertex));
-
-  const offsetPoint = add2(vertex, scale2(right, offset));
-  const shoulderEndPoint = add2(vertex, scale2(right, Math.min(cornerLength, distanceToIntersection)));
-
-  const offsetPointExt = add2(offsetPoint, scale2(up, halfWidth));
-  const offsetPointInn = add2(offsetPoint, scale2(up, -halfWidth));
-
-  // Both shoulder points are where the horizontal line at that offset point's own height crosses
-  // the line from center through the raw shoulderEndPoint.
-  const shoulderRefDir = sub2(shoulderEndPoint, center);
-  const shoulderEndPointInn = lineIntersection2D(center, shoulderRefDir, offsetPointInn, right);
-  const shoulderEndPointExt = lineIntersection2D(center, shoulderRefDir, offsetPointExt, right);
-  if (!shoulderEndPointInn || !shoulderEndPointExt) return nullShoulderGeometry;
-
-  // How much the Ext cap edge (shoulderEndPointInn->shoulderEndPointExt, which runs exactly along
-  // shoulderRefDir) has tilted away from vertical (the offset cap edge, offsetPointInn->
-  // offsetPointExt, which is exactly vertical by construction) - sliding back down that edge by
-  // grooveDepth*tan(angle) keeps the groove floor flat.
-  const cornerJunctionAngle = angleBetweenRad(
-    sub2(shoulderEndPointExt, shoulderEndPointInn),
-    sub2(offsetPointExt, offsetPointInn),
-  );
-  const minExtGrooveOffset = grooveDepth * Math.tan(cornerJunctionAngle);
-  const shoulderEndPointExtEffective = add2(shoulderEndPointExt, scale2(right, -minExtGrooveOffset));
-
-  // endGrooveLengthPercent/midGrooveLengthPercent are fractions of how far the offset point is
-  // from the shoulder it caps out at - 100% on the Inn side reaches shoulderEndPointInn exactly,
-  // 100% on the Ext side reaches shoulderEndPointExtEffective exactly (Ext and Inn get scaled
-  // separately since that "available" span isn't the same length on both sides - see the
-  // cornerJunctionAngle comment above).
-  const availableLengthInn = length2(sub2(shoulderEndPointInn, offsetPointInn));
-  const availableLengthExt = length2(sub2(shoulderEndPointExtEffective, offsetPointExt));
-  const endGrooveLengthExt = (endGrooveLengthPercent / 100) * availableLengthExt;
-  const endGrooveLengthInn = (endGrooveLengthPercent / 100) * availableLengthInn;
-  const midGrooveLengthExt = (midGrooveLengthPercent / 100) * availableLengthExt;
-  const midGrooveLengthInn = (midGrooveLengthPercent / 100) * availableLengthInn;
-
-  // The end groove: a plain endGrooveLength x grooveDepth rectangle notched into the Ext/Inn edge
-  // right at offsetPointExt/Inn, cutting inward (Ext down, Inn up - both toward the offsetPoint
-  // centerline) by grooveDepth.
-  const endGroovePointExt1 = add2(offsetPointExt, scale2(right, endGrooveLengthExt));
-  const endGroovePointExt3 = add2(offsetPointExt, scale2(up, -grooveDepth));
-  const endGroovePointExt2 = add2(endGroovePointExt1, scale2(up, -grooveDepth));
-
-  const endGroovePointInn1 = add2(offsetPointInn, scale2(right, endGrooveLengthInn));
-  const endGroovePointInn3 = add2(offsetPointInn, scale2(up, grooveDepth));
-  const endGroovePointInn2 = add2(endGroovePointInn1, scale2(up, grooveDepth));
-
-  // The mid-strut groove: from each shoulder point (the Effective one on the Ext side), step
-  // inward (toward each other) by grooveDepth to reach the groove floor, then walk back by
-  // midGrooveLength - the third corner needs no extra step since it's a plain horizontal/vertical
-  // rectangle now, not a diagonal-then-perpendicular path.
-  const midGroovePointInn1 = add2(shoulderEndPointInn, scale2(up, grooveDepth));
-  const midGroovePointInn2 = add2(midGroovePointInn1, scale2(right, -midGrooveLengthInn));
-  const midGroovePointInn3 = add2(shoulderEndPointInn, scale2(right, -midGrooveLengthInn));
-
-  const midGroovePointExt1 = add2(shoulderEndPointExtEffective, scale2(up, -grooveDepth));
-  const midGroovePointExt2 = add2(midGroovePointExt1, scale2(right, -midGrooveLengthExt));
-  const midGroovePointExt3 = add2(shoulderEndPointExtEffective, scale2(right, -midGrooveLengthExt));
-
-  // Clamped to grooveDepth so a chamfer can never eat past the bottom of a groove it sits next
-  // to. A zero-or-negative clamp (chamferLength <= 0) means no chamfer at all.
-  const clampedChamferLength = Math.min(chamferLength, grooveDepth);
-  const negativeShapes: Drawing[] = [];
-
-  const helpers: HelperDrawing[] = [
-    { drawing: drawPointMarker(offsetPoint, MARKER_RADIUS), color: "#b47eea", name: `offsetPoint${label}` },
-    { drawing: drawPointMarker(shoulderEndPoint, MARKER_RADIUS), color: "#a3e635", name: `shoulderEndPoint${label}` },
-    { drawing: drawPointMarker(offsetPointExt, MARKER_RADIUS), color: "#ddd6fe", name: `offsetPointExt${label}` },
-    { drawing: drawPointMarker(offsetPointInn, MARKER_RADIUS), color: "#6b21a8", name: `offsetPointInn${label}` },
-    {
-      drawing: drawPointMarker(shoulderEndPointExt, MARKER_RADIUS),
-      color: "#d9f99d",
-      name: `shoulderEndPointExt${label}`,
-    },
-    {
-      drawing: drawPointMarker(shoulderEndPointInn, MARKER_RADIUS),
-      color: "#4d7c0f",
-      name: `shoulderEndPointInn${label}`,
-    },
-    {
-      drawing: drawPointMarker(shoulderEndPointExtEffective, MARKER_RADIUS),
-      color: "#fb7185",
-      name: `shoulderEndPointExtEffective${label}`,
-    },
-    {
-      drawing: drawPointMarker(midGroovePointExt1, MARKER_RADIUS),
-      color: "#fdba74",
-      name: `midGroovePointExt${label}1`,
-    },
-    {
-      drawing: drawPointMarker(midGroovePointInn1, MARKER_RADIUS),
-      color: "#c2410c",
-      name: `midGroovePointInn${label}1`,
-    },
-    {
-      drawing: drawPointMarker(midGroovePointExt2, MARKER_RADIUS),
-      color: "#fde047",
-      name: `midGroovePointExt${label}2`,
-    },
-    {
-      drawing: drawPointMarker(midGroovePointInn2, MARKER_RADIUS),
-      color: "#a16207",
-      name: `midGroovePointInn${label}2`,
-    },
-    {
-      drawing: drawPointMarker(midGroovePointExt3, MARKER_RADIUS),
-      color: "#5eead4",
-      name: `midGroovePointExt${label}3`,
-    },
-    {
-      drawing: drawPointMarker(midGroovePointInn3, MARKER_RADIUS),
-      color: "#0f766e",
-      name: `midGroovePointInn${label}3`,
-    },
-    { drawing: drawPointMarker(intersection, MARKER_RADIUS), color: "#f5a623", name: `intersection${label}` },
-    {
-      drawing: drawPointMarker(endGroovePointExt1, MARKER_RADIUS),
-      color: "#fca5a5",
-      name: `endGroovePointExt${label}1`,
-    },
-    {
-      drawing: drawPointMarker(endGroovePointExt2, MARKER_RADIUS),
-      color: "#b91c1c",
-      name: `endGroovePointExt${label}2`,
-    },
-    {
-      drawing: drawPointMarker(endGroovePointExt3, MARKER_RADIUS),
-      color: "#7f1d1d",
-      name: `endGroovePointExt${label}3`,
-    },
-    {
-      drawing: drawPointMarker(endGroovePointInn1, MARKER_RADIUS),
-      color: "#93c5fd",
-      name: `endGroovePointInn${label}1`,
-    },
-    {
-      drawing: drawPointMarker(endGroovePointInn2, MARKER_RADIUS),
-      color: "#1d4ed8",
-      name: `endGroovePointInn${label}2`,
-    },
-    {
-      drawing: drawPointMarker(endGroovePointInn3, MARKER_RADIUS),
-      color: "#1e3a8a",
-      name: `endGroovePointInn${label}3`,
-    },
-    {
-      drawing: drawMillingCircle(midGroovePointExt1, "top-left", millingDiameter, right, up),
-      color: "#1e3a8a",
-      name: `endGroovePointInn${label}3`,
-    },
-  ];
-
-  let main = draw()
-    .movePointerTo(offsetPointExt)
-    .lineTo(shoulderEndPointExt)
-    .lineTo(shoulderEndPointInn)
-    .lineTo(offsetPointInn)
-    .close();
-
-  // The two mid-groove notches (Ext/Inn) - only if there's actually a groove to cut, both a
-  // length along the strut and a depth into it. Cut straight into `main` (rather than deferred
-  // via negativeShapes like the mill-relief circles below) so the notch's own corners - where the
-  // chamfer below needs to find them - actually exist in `main`'s boundary afterward.
-  if (midGrooveLengthPercent > 0 && grooveDepth > 0) {
-    main = main.cut(
-      draw()
-        .movePointerTo(shoulderEndPointExtEffective)
-        .lineTo(midGroovePointExt1)
-        .lineTo(midGroovePointExt2)
-        .lineTo(midGroovePointExt3)
-        .close(),
-    );
-    main = main.cut(
-      draw()
-        .movePointerTo(shoulderEndPointInn)
-        .lineTo(midGroovePointInn1)
-        .lineTo(midGroovePointInn2)
-        .lineTo(midGroovePointInn3)
-        .close(),
-    );
-  }
-
-  // The two end-groove notches (Ext/Inn), right at this end - same existence check, same
-  // straight-into-`main` treatment.
-  if (endGrooveLengthPercent > 0 && grooveDepth > 0) {
-    main = main.cut(
-      draw()
-        .movePointerTo(endGroovePointExt1)
-        .lineTo(endGroovePointExt2)
-        .lineTo(endGroovePointExt3)
-        .lineTo(offsetPointExt)
-        .close(),
-    );
-    main = main.cut(
-      draw()
-        .movePointerTo(endGroovePointInn1)
-        .lineTo(endGroovePointInn2)
-        .lineTo(endGroovePointInn3)
-        .lineTo(offsetPointInn)
-        .close(),
-    );
-  }
-
-  // The points to chamfer, once this end's `main` has been fused with the other end's and every
-  // negativeShape (including the mill-relief circles below) has been cut out of the result - see
-  // computeStrutBoundaryManual2D. Chamfering can't happen here: doing it before the mill-relief
-  // circles are cut would mean chamfering corners that a later cut might still alter, and
-  // chamfering the groove notches themselves (rather than `main`, after they're cut in) was tried
-  // first and went the wrong way - it shrank how much area those notches removed, which put
-  // material back rather than cutting it away.
-  const chamferPoints: Point2D[] =
-    clampedChamferLength > 0
-      ? [
-          endGroovePointExt1,
-          midGroovePointExt3,
-          shoulderEndPointExtEffective,
-          shoulderEndPointInn,
-          midGroovePointInn3,
-          endGroovePointInn1,
-        ]
-      : [];
-
-  // Mill-relief circles at each groove's inside corner, clearing room for a round end mill to
-  // reach all the way into the square notch instead of leaving material a real mill can't cut.
-  if (millingDiameter > 0) {
-    negativeShapes.push(
-      drawMillingCircle(midGroovePointExt2, "top-right", millingDiameter, right, up),
-      drawMillingCircle(endGroovePointExt2, "top-left", millingDiameter, right, up),
-      drawMillingCircle(midGroovePointExt1, "top-left", millingDiameter, right, up),
-      drawMillingCircle(midGroovePointInn1, "bottom-left", millingDiameter, right, up),
-      drawMillingCircle(midGroovePointInn2, "bottom-right", millingDiameter, right, up),
-      drawMillingCircle(endGroovePointInn2, "bottom-left", millingDiameter, right, up),
-    );
-  }
-  if (chamferLength > 0) {
-    negativeShapes.push(
-      // this chamfer can't be drawn using built-in chamfer tool because it's a short piece of line plus an arc
-      // which both need to be cut
-      drawDiamond(shoulderEndPointExtEffective, chamferLength, right, up)
-    )
-  }
+function createStrutEnd(p: StrutEndMeasurements): Geometry {
+  const half1 = createStrutEndHalf(p)
+  const half2 = half1.main.mirror([1, 0], [0, 0], "plane")
 
   return {
-    main,
-    helpers,
-    negativeShapes,
-  };
+    main: half1.main.fuse(half2),
+    helpers: half1.helpers,
+    negativeShapes: half1.negativeShapes,
+  }
 }
 
 export function computeStrutBoundaryManual2D(
@@ -660,26 +416,14 @@ export function computeStrutBoundaryManual2D(
     grooveDepth, halfWidth
   )
 
-  const geometryB = createStrutEndHalf(endB, 1)
-  // const geometryA = createShoulderGeometry(
-  //   a,
-  //   b,
-  //   center,
-  //   offsetA,
-  //   cornerLength,
-  //   halfWidth,
-  //   endGrooveLengthPercent,
-  //   midGrooveLengthPercent,
-  //   grooveDepth,
-  //   chamferLength,
-  //   millingDiameter,
-  //   "A",
-  // );
+  const strutB = createStrutEnd(endB)
 
-  helpers = [{drawing: geometryB.main, color: 'darkblue', name: 'shoulder b'},
+  helpers = [
+    {drawing: strutB.main, color: 'darkblue', name: 'shoulder b'},
     ...helpers,
-    ...geometryB.helpers];
-  const negativeShapes = [...geometryB.negativeShapes];
+    ...strutB.helpers,
+    ];
+  const negativeShapes = [...strutB.negativeShapes];
 
   // The two shoulders only reach as far as cornerLength (each one's own shoulderEndPoint is
   // already capped there); if the tangent lines' own intersection is further out than that,
