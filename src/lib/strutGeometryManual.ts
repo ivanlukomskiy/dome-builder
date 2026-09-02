@@ -189,6 +189,22 @@ function isNonEmptyDrawing(drawing: Drawing): boolean {
   }
 }
 
+// Prints every vertex coordinate of `drawing` (meshed just for this - a Drawing itself doesn't
+// expose its polygon points directly) as [x, y, z] triples, tagged with `label`.
+function logDrawingPoints(label: string, drawing: Drawing): void {
+  try {
+    const sketched = drawing.sketchOnPlane();
+    const face = "face" in sketched ? sketched.face() : sketched.faces();
+    const mesh = face.mesh({ tolerance: 0.5, angularTolerance: 0.5 });
+    face.delete();
+    for (let i = 0; i < mesh.vertices.length; i += 3) {
+      console.log(label, i / 3, mesh.vertices[i], mesh.vertices[i + 1], mesh.vertices[i + 2]);
+    }
+  } catch (err) {
+    console.log(label, "failed to mesh for logging", err);
+  }
+}
+
 // The 3D-to-2D wrapper - see the file-level comment. `computeStrutPlane` builds the exact same
 // meridian plane (origin at the gravity center, normal perpendicular to it, xDir toward `a`) the
 // real strut pipeline uses; projecting a/b/center onto that plane's own basis turns them into
@@ -257,6 +273,10 @@ interface ShoulderGeometry {
   shoulderEndPointExt: Point2D | null;
   shoulderEndPointInn: Point2D | null;
   shoulderEndPointExtEffective: Point2D | null;
+  // Points to chamfer, once the caller has fused both ends' `main` together and cut every
+  // negativeShape out of the result - see the chamfer comment in computeStrutBoundaryManual2D for
+  // why this has to happen last, after every other cut.
+  chamferPoints: Point2D[];
 }
 
 const nullShoulderGeometry: ShoulderGeometry = {
@@ -267,6 +287,7 @@ const nullShoulderGeometry: ShoulderGeometry = {
   shoulderEndPointExt: null,
   shoulderEndPointInn: null,
   shoulderEndPointExtEffective: null,
+  chamferPoints: [],
 };
 
 // Everything built around one end of the strut - centerline, offset/shoulder points, end/mid
@@ -369,21 +390,10 @@ function createShoulderGeometry(
   const midGroovePointExt2 = add2(midGroovePointExt1, scale2(right, -midGrooveLengthExt));
   const midGroovePointExt3 = add2(shoulderEndPointExtEffective, scale2(right, -midGrooveLengthExt));
 
-  // Chamfer cuts at each sharp corner - clamped to grooveDepth so a chamfer can never eat past
-  // the bottom of a groove it sits next to. A zero-or-negative clamp (chamferLength <= 0) means
-  // no chamfer at all, not a degenerate zero-size cut.
+  // Clamped to grooveDepth so a chamfer can never eat past the bottom of a groove it sits next
+  // to. A zero-or-negative clamp (chamferLength <= 0) means no chamfer at all.
   const clampedChamferLength = Math.min(chamferLength, grooveDepth);
-  const negativeShapes: Drawing[] =
-    clampedChamferLength > 0
-      ? [
-          drawDiamond(endGroovePointExt1, clampedChamferLength, right, up),
-          drawDiamond(midGroovePointExt3, clampedChamferLength, right, up),
-          drawDiamond(shoulderEndPointExtEffective, clampedChamferLength, right, up),
-          drawDiamond(shoulderEndPointInn, clampedChamferLength, right, up),
-          drawDiamond(midGroovePointInn3, clampedChamferLength, right, up),
-          drawDiamond(endGroovePointInn1, clampedChamferLength, right, up),
-        ]
-      : [];
+  const negativeShapes: Drawing[] = [];
 
   const helpers: HelperDrawing[] = [
     { drawing: drawPointMarker(offsetPoint, MARKER_RADIUS), color: "#b47eea", name: `offsetPoint${label}` },
@@ -473,7 +483,7 @@ function createShoulderGeometry(
     },
   ];
 
-  const main = draw()
+  let main = draw()
     .movePointerTo(offsetPointExt)
     .lineTo(shoulderEndPointExt)
     .lineTo(shoulderEndPointInn)
@@ -481,15 +491,19 @@ function createShoulderGeometry(
     .close();
 
   // The two mid-groove notches (Ext/Inn) - only if there's actually a groove to cut, both a
-  // length along the strut and a depth into it.
+  // length along the strut and a depth into it. Cut straight into `main` (rather than deferred
+  // via negativeShapes like the mill-relief circles below) so the notch's own corners - where the
+  // chamfer below needs to find them - actually exist in `main`'s boundary afterward.
   if (midGrooveLengthPercent > 0 && grooveDepth > 0) {
-    negativeShapes.push(
+    main = main.cut(
       draw()
         .movePointerTo(shoulderEndPointExtEffective)
         .lineTo(midGroovePointExt1)
         .lineTo(midGroovePointExt2)
         .lineTo(midGroovePointExt3)
         .close(),
+    );
+    main = main.cut(
       draw()
         .movePointerTo(shoulderEndPointInn)
         .lineTo(midGroovePointInn1)
@@ -499,15 +513,18 @@ function createShoulderGeometry(
     );
   }
 
-  // The two end-groove notches (Ext/Inn), right at this end - same existence check.
+  // The two end-groove notches (Ext/Inn), right at this end - same existence check, same
+  // straight-into-`main` treatment.
   if (endGrooveLengthPercent > 0 && grooveDepth > 0) {
-    negativeShapes.push(
+    main = main.cut(
       draw()
         .movePointerTo(endGroovePointExt1)
         .lineTo(endGroovePointExt2)
         .lineTo(endGroovePointExt3)
         .lineTo(offsetPointExt)
         .close(),
+    );
+    main = main.cut(
       draw()
         .movePointerTo(endGroovePointInn1)
         .lineTo(endGroovePointInn2)
@@ -516,6 +533,25 @@ function createShoulderGeometry(
         .close(),
     );
   }
+
+  // The points to chamfer, once this end's `main` has been fused with the other end's and every
+  // negativeShape (including the mill-relief circles below) has been cut out of the result - see
+  // computeStrutBoundaryManual2D. Chamfering can't happen here: doing it before the mill-relief
+  // circles are cut would mean chamfering corners that a later cut might still alter, and
+  // chamfering the groove notches themselves (rather than `main`, after they're cut in) was tried
+  // first and went the wrong way - it shrank how much area those notches removed, which put
+  // material back rather than cutting it away.
+  const chamferPoints: Point2D[] =
+    clampedChamferLength > 0
+      ? [
+          endGroovePointExt1,
+          midGroovePointExt3,
+          shoulderEndPointExtEffective,
+          shoulderEndPointInn,
+          midGroovePointInn3,
+          endGroovePointInn1,
+        ]
+      : [];
 
   // Mill-relief circles at each groove's inside corner, clearing room for a round end mill to
   // reach all the way into the square notch instead of leaving material a real mill can't cut.
@@ -538,6 +574,7 @@ function createShoulderGeometry(
     shoulderEndPointExt,
     shoulderEndPointInn,
     shoulderEndPointExtEffective,
+    chamferPoints,
   };
 }
 
@@ -616,6 +653,8 @@ export function computeStrutBoundaryManual2D(
   }
   main = main.fuse(geometryA.main)
 
+  logDrawingPoints("main polygon point", main);
+
   // Cut the negative shapes one at a time, verifying each cut actually produced a real
   // (non-empty, meshable) shape before keeping it - a mill-relief circle landing exactly on an
   // already-cut groove notch's own corner is a coincident-curve case OpenCascade's boolean ops
@@ -628,6 +667,20 @@ export function computeStrutBoundaryManual2D(
     const candidate = result.cut(shape);
     if (isNonEmptyDrawing(candidate)) {
       result = candidate;
+    }
+  }
+
+  // Chamfer last, only after every negative shape (grooves and mill-relief circles alike) has
+  // already been subtracted - each chamfer point needs to already be a real corner of the final
+  // boundary for CornerFinder.inList to match it, and an earlier mill-relief cut landing near one
+  // of these corners could otherwise still be reshaping the boundary out from under it.
+  const clampedChamferLength = Math.min(chamferLength, grooveDepth);
+  const chamferPoints = [...geometryB.chamferPoints, ...geometryA.chamferPoints];
+  if (result && clampedChamferLength > 0 && chamferPoints.length > 0) {
+    try {
+      result = result.chamfer(clampedChamferLength, (c) => c.inList(chamferPoints));
+    } catch (err) {
+      console.log("final chamfer failed, keeping the un-chamfered shape", err);
     }
   }
 
