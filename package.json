@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "strut-shape-debug": "vite --open /dome-builder/strut-shape-debug",
+    "flange-shape-debug": "vite --open /dome-builder/flange-shape-debug",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",

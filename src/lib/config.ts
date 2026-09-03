@@ -1,13 +1,14 @@
 import * as THREE from 'three'
 import type { Edge, Face, PolyhedronData, SelectionMode, VertexTransform } from './polyhedra'
 import { computeLayers } from './polyhedra'
+import { downloadJson } from './download'
 
 // A saved config captures the *result* of picking a shape in the "New" tab - the concrete
 // vertex/face/edge data - plus every edit and view/preview setting made on top of it. It does
 // not capture the shape/axis/subdivisions recipe (that's only meaningful while still choosing
 // a shape), which tab is active, or the redo stack (session-only, not worth persisting).
 export interface DomeConfig {
-  version: 9
+  version: 11
   vertices: [number, number, number][]
   faces: Face[]
   edges: Edge[]
@@ -22,12 +23,24 @@ export interface DomeConfig {
   // (positive) or closer to (negative) its vertex than the raw miter math calls for. 0 means no
   // change.
   offsetModifier: number
-  // Interlocking tooth cut into each strut end's lead-in, mirrored on both boundary sides (see
-  // computeStrutBoundary's `tooth` param / buildToothedRun). 0 height means no tooth.
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  // Shouldered tenon cut into each strut end (see computeStrutBoundaryManual's groove/mill
+  // params in strutGeometryManual.ts).
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
+  // The flat connector plate pair built at every hub vertex (see flangeGeometry.ts) - shares the
+  // strut fields above (cornerLength, halfWidth from extrudeDistance, offsetModifier, groove/
+  // chamfer/milling params) for its own tenon layout, plus these of its own.
+  toleranceLongitudinal: number
+  toleranceTransverse: number
+  centerHoleDiameter: number
+  sideHoleDiameter: number
+  sideHoleDiameterOffset: number
+  overshoot: number
+  minSide: number
+  flangeMillingDiameter: number
   deletedGroups: number[][]
   vertexTransforms: [number, VertexTransform][]
   addedVertices: [number, [number, number, number]][]
@@ -57,10 +70,19 @@ export interface DomeState {
   thickness: number
   cornerLength: number
   offsetModifier: number
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
+  toleranceLongitudinal: number
+  toleranceTransverse: number
+  centerHoleDiameter: number
+  sideHoleDiameter: number
+  sideHoleDiameterOffset: number
+  overshoot: number
+  minSide: number
+  flangeMillingDiameter: number
   deletedGroups: number[][]
   vertexTransforms: ReadonlyMap<number, VertexTransform>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
@@ -74,7 +96,7 @@ export interface DomeState {
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 9,
+    version: 11,
     vertices: state.baseData.vertices.map((v) => [v.x, v.y, v.z]),
     faces: state.baseData.faces,
     edges: state.baseData.edges,
@@ -85,10 +107,19 @@ export function serializeConfig(state: DomeState): DomeConfig {
     thickness: state.thickness,
     cornerLength: state.cornerLength,
     offsetModifier: state.offsetModifier,
-    toothHeight: state.toothHeight,
-    toothLength: state.toothLength,
-    toothChamfer: state.toothChamfer,
-    millRadius: state.millRadius,
+    endGrooveLengthPercent: state.endGrooveLengthPercent,
+    midGrooveLengthPercent: state.midGrooveLengthPercent,
+    grooveDepth: state.grooveDepth,
+    millingDiameter: state.millingDiameter,
+    chamferLength: state.chamferLength,
+    toleranceLongitudinal: state.toleranceLongitudinal,
+    toleranceTransverse: state.toleranceTransverse,
+    centerHoleDiameter: state.centerHoleDiameter,
+    sideHoleDiameter: state.sideHoleDiameter,
+    sideHoleDiameterOffset: state.sideHoleDiameterOffset,
+    overshoot: state.overshoot,
+    minSide: state.minSide,
+    flangeMillingDiameter: state.flangeMillingDiameter,
     deletedGroups: state.deletedGroups,
     vertexTransforms: Array.from(state.vertexTransforms.entries()),
     addedVertices: Array.from(state.addedVertices.entries()).map(([id, v]) => [
@@ -120,10 +151,19 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     thickness: config.thickness,
     cornerLength: config.cornerLength,
     offsetModifier: config.offsetModifier,
-    toothHeight: config.toothHeight,
-    toothLength: config.toothLength,
-    toothChamfer: config.toothChamfer,
-    millRadius: config.millRadius,
+    endGrooveLengthPercent: config.endGrooveLengthPercent,
+    midGrooveLengthPercent: config.midGrooveLengthPercent,
+    grooveDepth: config.grooveDepth,
+    millingDiameter: config.millingDiameter,
+    chamferLength: config.chamferLength,
+    toleranceLongitudinal: config.toleranceLongitudinal,
+    toleranceTransverse: config.toleranceTransverse,
+    centerHoleDiameter: config.centerHoleDiameter,
+    sideHoleDiameter: config.sideHoleDiameter,
+    sideHoleDiameterOffset: config.sideHoleDiameterOffset,
+    overshoot: config.overshoot,
+    minSide: config.minSide,
+    flangeMillingDiameter: config.flangeMillingDiameter,
     deletedGroups: config.deletedGroups,
     vertexTransforms: new Map(config.vertexTransforms),
     addedVertices: new Map(
@@ -149,7 +189,7 @@ export function loadConfigFromLocalStorage(): DomeConfig | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as DomeConfig
-    return parsed.version === 9 ? parsed : null
+    return parsed.version === 11 ? parsed : null
   } catch {
     return null
   }
@@ -169,13 +209,7 @@ export function loadInitialState(): DomeState | null {
 }
 
 export function downloadConfigAsJson(config: DomeConfig, filename = 'dome-config.json'): void {
-  const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadJson(config, filename)
 }
 
 export function readConfigFromFile(file: File): Promise<DomeConfig> {

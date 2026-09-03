@@ -31,6 +31,7 @@ const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
 interface SidebarProps {
   onExportConfig: () => void
   onImportConfig: (file: File) => void
+  onGetEdgesInfo: () => void
   mode: ViewMode
   onOpenNew: () => void
   onCreateNew: () => void
@@ -81,14 +82,34 @@ interface SidebarProps {
   onCornerLengthChange: (value: number) => void
   offsetModifier: number
   onOffsetModifierChange: (value: number) => void
-  toothHeight: number
-  onToothHeightChange: (value: number) => void
-  toothLength: number
-  onToothLengthChange: (value: number) => void
-  toothChamfer: number
-  onToothChamferChange: (value: number) => void
-  millRadius: number
-  onMillRadiusChange: (value: number) => void
+  endGrooveLengthPercent: number
+  onEndGrooveLengthPercentChange: (value: number) => void
+  midGrooveLengthPercent: number
+  onMidGrooveLengthPercentChange: (value: number) => void
+  grooveDepth: number
+  onGrooveDepthChange: (value: number) => void
+  millingDiameter: number
+  onMillingDiameterChange: (value: number) => void
+  chamferLength: number
+  onChamferLengthChange: (value: number) => void
+  toleranceLongitudinal: number
+  onToleranceLongitudinalChange: (value: number) => void
+  toleranceTransverse: number
+  onToleranceTransverseChange: (value: number) => void
+  centerHoleDiameter: number
+  onCenterHoleDiameterChange: (value: number) => void
+  sideHoleDiameter: number
+  onSideHoleDiameterChange: (value: number) => void
+  sideHoleDiameterOffset: number
+  onSideHoleDiameterOffsetChange: (value: number) => void
+  overshoot: number
+  onOvershootChange: (value: number) => void
+  minSide: number
+  onMinSideChange: (value: number) => void
+  flangeMillingDiameter: number
+  onFlangeMillingDiameterChange: (value: number) => void
+  previewParamsDirty: boolean
+  onApplyPreview: () => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -182,6 +203,7 @@ export function NumberField({ value, onCommit, step, min, placeholder, clamp }: 
 export function Sidebar({
   onExportConfig,
   onImportConfig,
+  onGetEdgesInfo,
   mode,
   onOpenNew,
   onCreateNew,
@@ -232,14 +254,34 @@ export function Sidebar({
   onCornerLengthChange,
   offsetModifier,
   onOffsetModifierChange,
-  toothHeight,
-  onToothHeightChange,
-  toothLength,
-  onToothLengthChange,
-  toothChamfer,
-  onToothChamferChange,
-  millRadius,
-  onMillRadiusChange,
+  endGrooveLengthPercent,
+  onEndGrooveLengthPercentChange,
+  midGrooveLengthPercent,
+  onMidGrooveLengthPercentChange,
+  grooveDepth,
+  onGrooveDepthChange,
+  millingDiameter,
+  onMillingDiameterChange,
+  chamferLength,
+  onChamferLengthChange,
+  toleranceLongitudinal,
+  onToleranceLongitudinalChange,
+  toleranceTransverse,
+  onToleranceTransverseChange,
+  centerHoleDiameter,
+  onCenterHoleDiameterChange,
+  sideHoleDiameter,
+  onSideHoleDiameterChange,
+  sideHoleDiameterOffset,
+  onSideHoleDiameterOffsetChange,
+  overshoot,
+  onOvershootChange,
+  minSide,
+  onMinSideChange,
+  flangeMillingDiameter,
+  onFlangeMillingDiameterChange,
+  previewParamsDirty,
+  onApplyPreview,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -426,6 +468,21 @@ export function Sidebar({
 
       {mode === 'preview' && (
         <section className="control-group">
+          <div className="button-row">
+            <button onClick={onApplyPreview} disabled={!previewParamsDirty}>
+              Apply
+            </button>
+          </div>
+          <p className="hint">
+            {previewParamsDirty
+              ? 'Unapplied changes below - click Apply to regenerate the preview.'
+              : 'Rebuilding every strut solid is slow, so changes to the fields below only take effect once you click Apply.'}
+          </p>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
           <h2>Edge Curvature</h2>
           <div className="transform-field">
             <label>Corner length (D, mm)</label>
@@ -467,30 +524,136 @@ export function Sidebar({
 
       {mode === 'preview' && (
         <section className="control-group">
-          <h2>Corner Teeth</h2>
+          <h2>Grooves</h2>
           <div className="transform-field">
-            <label>Tooth height (mm)</label>
-            <NumberField value={toothHeight} step={5} min={0} onCommit={onToothHeightChange} />
+            <label>End groove length (%)</label>
+            <NumberField
+              value={endGrooveLengthPercent}
+              step={5}
+              min={0}
+              onCommit={onEndGrooveLengthPercentChange}
+            />
           </div>
           <div className="transform-field">
-            <label>Tooth length (mm)</label>
-            <NumberField value={toothLength} step={5} min={0} onCommit={onToothLengthChange} />
+            <label>Mid groove length (%)</label>
+            <NumberField
+              value={midGrooveLengthPercent}
+              step={5}
+              min={0}
+              onCommit={onMidGrooveLengthPercentChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Groove depth (mm)</label>
+            <NumberField value={grooveDepth} step={1} min={0} onCommit={onGrooveDepthChange} />
+          </div>
+          <div className="transform-field">
+            <label>Milling diameter (mm)</label>
+            <NumberField value={millingDiameter} step={1} min={0} onCommit={onMillingDiameterChange} />
           </div>
           <div className="transform-field">
             <label>Chamfer length (mm)</label>
-            <NumberField value={toothChamfer} step={1} min={0} onCommit={onToothChamferChange} />
-          </div>
-          <div className="transform-field">
-            <label>Mill radius (mm)</label>
-            <NumberField value={millRadius} step={1} min={0} onCommit={onMillRadiusChange} />
+            <NumberField value={chamferLength} step={1} min={0} onCommit={onChamferLengthChange} />
           </div>
           <p className="hint">
-            An interlocking tooth cut into each strut end's lead-in, mirrored on both the outer
-            and inner boundary. 0 height turns it off. Mill radius sets a dogbone relief cut into
-            the main line at each of the tooth's two concave base corners - the corner itself
-            stays sharp, but a real round cutting bit can't reach all the way into it, so a
-            semicircle is cut in just before, leaving room for a square mating part to seat
-            flush.
+            Each strut end forms a shouldered tenon: the end and mid groove percentages split the
+            workable length (past the offset) into the shoulder, tenon, and far shoulder, cut back
+            by groove depth. Chamfer length bevels the tenon's top corners; milling diameter sets
+            a relief circle tucked into each of its concave base corners, clearing room for a
+            square mating part to seat flush against a round cutting bit.
+          </p>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Flange</h2>
+          <div className="transform-field">
+            <label>Tolerance longitudinal (mm)</label>
+            <NumberField
+              value={toleranceLongitudinal}
+              step={1}
+              min={0}
+              onCommit={onToleranceLongitudinalChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Tolerance transverse (mm)</label>
+            <NumberField
+              value={toleranceTransverse}
+              step={1}
+              min={0}
+              onCommit={onToleranceTransverseChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Center hole diameter (mm)</label>
+            <NumberField
+              value={centerHoleDiameter}
+              step={1}
+              min={0}
+              onCommit={onCenterHoleDiameterChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Side hole diameter (mm)</label>
+            <NumberField
+              value={sideHoleDiameter}
+              step={1}
+              min={0}
+              onCommit={onSideHoleDiameterChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Side hole diameter offset (mm)</label>
+            <NumberField
+              value={sideHoleDiameterOffset}
+              step={1}
+              min={0}
+              onCommit={onSideHoleDiameterOffsetChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Overshoot (mm)</label>
+            <NumberField value={overshoot} step={1} min={0} onCommit={onOvershootChange} />
+          </div>
+          <div className="transform-field">
+            <label>Min side (mm)</label>
+            <NumberField value={minSide} step={1} min={0} onCommit={onMinSideChange} />
+          </div>
+          <div className="transform-field">
+            <label>Flange milling diameter (mm)</label>
+            <NumberField
+              value={flangeMillingDiameter}
+              step={1}
+              min={0}
+              onCommit={onFlangeMillingDiameterChange}
+            />
+          </div>
+          <p className="hint">
+            The flat connector plate pair at each hub vertex, filling the wedges between struts
+            that have no face of their own - a plate on each face of the strut ends, seated in the
+            groove notch cut into them (see Groove depth above). Tolerances loosen the fit
+            lengthwise/across each strut arm; overshoot and min side set how far the plate reaches
+            past a strut's own corner and how narrow it's allowed to pinch; the side/center holes
+            and their offsets are the plate's own bolt pattern.
+          </p>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <div className="button-row">
+            <button onClick={onApplyPreview} disabled={!previewParamsDirty}>
+              Apply
+            </button>
+            <button onClick={onGetEdgesInfo}>Get Edges Info</button>
+          </div>
+          <p className="hint">
+            Downloads a JSON file with, for every visible vertex: each edge going into it, its
+            precalculated strut-end measurements (offset, tenon, chamfer, milling), which
+            neighboring edges have a face between them and which don&rsquo;t, and the tangent
+            plane those edges were projected onto to work that out.
           </p>
         </section>
       )}

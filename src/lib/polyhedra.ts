@@ -659,12 +659,32 @@ export interface HubEdgeMetric {
   offsetMm: number
 }
 
-// The hub-connector geometry at a vertex: the tangent plane there (normal = the direction from
-// the gravity center to the vertex, i.e. perpendicular to the radius), with every connected
-// edge's direction projected onto it. Reports, going around that plane, the angle from each
-// edge to the next (wrapping back to the first) and each edge's own thickness (its override, or
-// the model's default strut thickness) - what you'd need to lay out a flat connector plate for
-// that vertex.
+export interface TangentPlane {
+  normal: THREE.Vector3
+  e1: THREE.Vector3
+  e2: THREE.Vector3
+}
+
+// The tangent plane at a vertex on the sphere: normal = the direction from the gravity center to
+// the vertex (i.e. perpendicular to the radius), with an arbitrary right-handed in-plane basis
+// (e1, e2) - shared by computeVertexHubMetrics below and anything else that needs to project a
+// vertex's surroundings onto that plane (e.g. reporting edge angles for export).
+export function computeVertexTangentPlane(vertexPos: THREE.Vector3, center: THREE.Vector3): TangentPlane {
+  const normal = vertexPos.clone().sub(center)
+  if (normal.lengthSq() < RADIAL_EPS) normal.set(0, 1, 0)
+  else normal.normalize()
+
+  const arbitrary = Math.abs(normal.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
+  const e1 = arbitrary.clone().addScaledVector(normal, -arbitrary.dot(normal)).normalize()
+  const e2 = normal.clone().cross(e1)
+  return { normal, e1, e2 }
+}
+
+// The hub-connector geometry at a vertex: the tangent plane there (see computeVertexTangentPlane),
+// with every connected edge's direction projected onto it. Reports, going around that plane, the
+// angle from each edge to the next (wrapping back to the first) and each edge's own thickness
+// (its override, or the model's default strut thickness) - what you'd need to lay out a flat
+// connector plate for that vertex.
 export function computeVertexHubMetrics(
   vertexPos: THREE.Vector3,
   center: THREE.Vector3,
@@ -674,14 +694,7 @@ export function computeVertexHubMetrics(
 ): HubEdgeMetric[] {
   if (edges.length === 0) return []
 
-  const normal = vertexPos.clone().sub(center)
-  if (normal.lengthSq() < RADIAL_EPS) normal.set(0, 1, 0)
-  else normal.normalize()
-
-  // An arbitrary right-handed basis (e1, e2) for the tangent plane.
-  const arbitrary = Math.abs(normal.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
-  const e1 = arbitrary.clone().addScaledVector(normal, -arbitrary.dot(normal)).normalize()
-  const e2 = normal.clone().cross(e1)
+  const { normal, e1, e2 } = computeVertexTangentPlane(vertexPos, center)
 
   const withAngles = edges.map((ref) => {
     const direction = positionOf(ref.neighborId).clone().sub(vertexPos)

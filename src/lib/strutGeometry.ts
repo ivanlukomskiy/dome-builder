@@ -6,6 +6,7 @@ import {
   computeVisibleVertexIds,
   resolveVertexPosition,
 } from './polyhedra'
+import { add2, sub2, scale2, dot2, cross2, length2, normalize2 } from './vec2'
 
 // Pure 2D math for a single flat "meridian" plane - the plane through an edge's two vertices
 // and the gravity center. Kept dependency-free (no replicad/WASM) so it's easy to reason about
@@ -15,28 +16,6 @@ export type Vec2 = [number, number]
 
 const EPS = 1e-9
 
-function add2(a: Vec2, b: Vec2): Vec2 {
-  return [a[0] + b[0], a[1] + b[1]]
-}
-function sub2(a: Vec2, b: Vec2): Vec2 {
-  return [a[0] - b[0], a[1] - b[1]]
-}
-function scale2(a: Vec2, s: number): Vec2 {
-  return [a[0] * s, a[1] * s]
-}
-function dot2(a: Vec2, b: Vec2): number {
-  return a[0] * b[0] + a[1] * b[1]
-}
-function cross2(a: Vec2, b: Vec2): number {
-  return a[0] * b[1] - a[1] * b[0]
-}
-function length2(a: Vec2): number {
-  return Math.hypot(a[0], a[1])
-}
-function normalize2(a: Vec2): Vec2 {
-  const len = length2(a)
-  return len < EPS ? [1, 0] : [a[0] / len, a[1] / len]
-}
 // Rotates a 2D vector by 90 degrees - used as a fallback tangent direction when the direct
 // computation is degenerate.
 function perp2(a: Vec2): Vec2 {

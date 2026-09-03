@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
+import { drawingToDXF } from '../lib/dxfExport'
 import type { StrutMesh } from '../lib/replicadCad'
-import { StrutShapeScene } from './StrutShapeScene'
+import { StrutShapeScene, type StrutShapeViewport } from './StrutShapeScene'
 
 const DEG2RAD = Math.PI / 180
 
@@ -34,6 +35,39 @@ const DEFAULT_PARAMS: Params = {
   chamferLength: 6,
 }
 
+const DEFAULT_SHOW_HELPER_POINTS = true
+
+// Persisted across reloads so tweaking params or the viewport doesn't get reset by Vite's HMR
+// full-reloads (e.g. after editing strutGeometryManual.ts) or a manual page refresh.
+const PARAMS_STORAGE_KEY = 'strut-shape-debug:params'
+const VIEWPORT_STORAGE_KEY = 'strut-shape-debug:viewport'
+
+function loadParams(): Params {
+  try {
+    const raw = localStorage.getItem(PARAMS_STORAGE_KEY)
+    if (!raw) return DEFAULT_PARAMS
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_PARAMS
+    return { ...DEFAULT_PARAMS, ...parsed }
+  } catch {
+    return DEFAULT_PARAMS
+  }
+}
+
+function loadViewport(): StrutShapeViewport | null {
+  try {
+    const raw = localStorage.getItem(VIEWPORT_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<StrutShapeViewport> | null
+    if (!parsed || typeof parsed.distance !== 'number' || !Array.isArray(parsed.target) || parsed.target.length !== 3) {
+      return null
+    }
+    return parsed as StrutShapeViewport
+  } catch {
+    return null
+  }
+}
+
 interface HelperMesh {
   mesh: StrutMesh
   color: string
@@ -42,7 +76,7 @@ interface HelperMesh {
 
 type State =
   | { status: 'loading' }
-  | { status: 'ready'; main: StrutMesh | null; helpers: HelperMesh[] }
+  | { status: 'ready'; main: StrutMesh | null; helpers: HelperMesh[]; dxf: string | null }
   | { status: 'empty' }
   | { status: 'error'; message: string }
 
@@ -54,10 +88,30 @@ type State =
 // including a clear error message if your function throws, which is expected to happen a lot
 // while iterating.
 export function StrutShapeDebug() {
-  const [params, setParams] = useState<Params>(DEFAULT_PARAMS)
+  const [params, setParams] = useState<Params>(loadParams)
   const setParam = (field: keyof Params) => (value: number) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [showHelperPoints, setShowHelperPoints] = useState(false)
+  const [showHelperPoints, setShowHelperPoints] = useState(DEFAULT_SHOW_HELPER_POINTS)
+  const [initialViewport, setInitialViewport] = useState<StrutShapeViewport | null>(loadViewport)
+  // Bumped on Reset to force StrutShapeScene to remount (via `key`) and re-fit the camera to the
+  // shape, rather than reusing whatever pan/zoom it already settled into.
+  const [viewportResetCount, setViewportResetCount] = useState(0)
+
+  useEffect(() => {
+    localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(params))
+  }, [params])
+
+  const handleViewportChange = (viewport: StrutShapeViewport) => {
+    localStorage.setItem(VIEWPORT_STORAGE_KEY, JSON.stringify(viewport))
+  }
+
+  const handleReset = () => {
+    setParams(DEFAULT_PARAMS)
+    setShowHelperPoints(DEFAULT_SHOW_HELPER_POINTS)
+    setInitialViewport(null)
+    localStorage.removeItem(VIEWPORT_STORAGE_KEY)
+    setViewportResetCount((n) => n + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -87,7 +141,7 @@ export function StrutShapeDebug() {
         } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
-        const a = new THREE.Vector3(radius, 0, 0)
+        const a = new THREE.Vector3(radius * 1.11, 0, 0)
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
         const result = computeStrutBoundaryManual(
@@ -107,6 +161,14 @@ export function StrutShapeDebug() {
         if (cancelled) return
 
         const main = result.main ? meshDrawing(result.main) : null
+        let dxf: string | null = null
+        if (result.main) {
+          try {
+            dxf = drawingToDXF(result.main)
+          } catch (err) {
+            console.error('Failed to build DXF export', err)
+          }
+        }
         const helpers: HelperMesh[] = []
         for (const helper of result.helpers) {
           const mesh = meshDrawing(helper.drawing)
@@ -114,7 +176,7 @@ export function StrutShapeDebug() {
         }
         if (cancelled) return
 
-        setState(main || helpers.length > 0 ? { status: 'ready', main, helpers } : { status: 'empty' })
+        setState(main || helpers.length > 0 ? { status: 'ready', main, helpers, dxf } : { status: 'empty' })
       } catch (err) {
         if (!cancelled) setState({ status: 'error', message: err instanceof Error ? err.message : String(err) })
       }
@@ -125,12 +187,34 @@ export function StrutShapeDebug() {
     }
   }, [params])
 
+  const dxf = state.status === 'ready' ? state.dxf : null
+  const downloadDxf = () => {
+    if (!dxf) return
+    const blob = new Blob([dxf], { type: 'application/dxf' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'strut-shape.dxf'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
         <h1>Strut Shape Debug</h1>
         <div className="button-row">
           <a href={import.meta.env.BASE_URL}>&larr; Back to builder</a>
+        </div>
+        <div className="button-row">
+          <button type="button" onClick={downloadDxf} disabled={!dxf}>
+            Download as DXF
+          </button>
+        </div>
+        <div className="button-row">
+          <button type="button" onClick={handleReset}>
+            Reset to defaults
+          </button>
         </div>
         <p className="hint">
           Renders whatever <code>computeStrutBoundaryManual</code> in{' '}
@@ -219,7 +303,13 @@ export function StrutShapeDebug() {
       </aside>
       <div className="viewport">
         {state.status === 'ready' && (
-          <StrutShapeScene main={state.main} helpers={showHelperPoints ? state.helpers : []} />
+          <StrutShapeScene
+            key={viewportResetCount}
+            main={state.main}
+            helpers={showHelperPoints ? state.helpers : []}
+            initialViewport={initialViewport}
+            onViewportChange={handleViewportChange}
+          />
         )}
         {state.status === 'loading' && <div className="hud">Loading CAD engine…</div>}
         {state.status === 'empty' && <div className="hud">computeStrutBoundaryManual returned nothing to show.</div>}

@@ -5,8 +5,11 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
 import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
-import type { ToothParams } from '../lib/strutGeometry'
-import { computeEdgeEndOffsets, computeStrutBoundary } from '../lib/strutGeometry'
+import { computeEdgeEndOffsets, computeStrutPlane } from '../lib/strutGeometry'
+import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
+import { computeEdgesInfo } from '../lib/edgesInfo'
+import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
+import type { StrutMesh } from '../lib/replicadCad'
 
 // Vertex/center marker sizes, in mm - purely visual, sized to stay visible without dwarfing a
 // typical (few-meter) dome.
@@ -22,6 +25,9 @@ const EDGE_OVERRIDE_MIN_COLOR = new THREE.Color('#4fd97e')
 const EDGE_OVERRIDE_MAX_COLOR = new THREE.Color('#ff3b3b')
 // Override magnitude (mm) at which the color heatmap maxes out.
 const EDGE_OVERRIDE_COLOR_REFERENCE = 300
+// A neutral steel-plate tone for flange solids, distinct from any strut color so the hub
+// hardware reads as its own part rather than blending into the beams it connects.
+const FLANGE_COLOR = new THREE.Color('#b0b4bc')
 
 // The heatmap color for a given thickness override (or the default tone if there isn't one) -
 // shared between the clickable edge markers in Edit mode and the beam mesh in Preview, so a
@@ -35,6 +41,27 @@ function edgeThicknessColor(override: number | undefined): THREE.Color {
 function edgeMarkerColor(override: number | undefined, isSelected: boolean): string {
   if (isSelected) return SELECTED_COLOR
   return `#${edgeThicknessColor(override).getHexString()}`
+}
+
+// A BufferGeometry from a replicad mesh result, flat-shaded with a single solid vertex color -
+// shared by strut and flange solids alike, since both merge into the same preview geometry (see
+// the preview-build effect below) and mergeGeometries needs every piece to carry the same set of
+// attributes.
+function buildColoredGeometry(mesh: StrutMesh, color: THREE.Color): THREE.BufferGeometry {
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3))
+  geom.setAttribute('normal', new THREE.Float32BufferAttribute(mesh.normals, 3))
+  geom.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1))
+
+  const vertexCount = mesh.positions.length / 3
+  const colors = new Float32Array(vertexCount * 3)
+  for (let i = 0; i < vertexCount; i++) {
+    colors[i * 3] = color.r
+    colors[i * 3 + 1] = color.g
+    colors[i * 3 + 2] = color.b
+  }
+  geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  return geom
 }
 
 // Fan-triangulates a face (a triangle, or a pentagon/hexagon for a Goldberg dual face) from its
@@ -74,10 +101,19 @@ interface DomeMeshProps {
   thickness: number
   cornerLength: number
   offsetModifier: number
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
+  toleranceLongitudinal: number
+  toleranceTransverse: number
+  centerHoleDiameter: number
+  sideHoleDiameter: number
+  sideHoleDiameterOffset: number
+  overshoot: number
+  minSide: number
+  flangeMillingDiameter: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -104,10 +140,19 @@ export function DomeMesh({
   thickness,
   cornerLength,
   offsetModifier,
-  toothHeight,
-  toothLength,
-  toothChamfer,
-  millRadius,
+  endGrooveLengthPercent,
+  midGrooveLengthPercent,
+  grooveDepth,
+  millingDiameter,
+  chamferLength,
+  toleranceLongitudinal,
+  toleranceTransverse,
+  centerHoleDiameter,
+  sideHoleDiameter,
+  sideHoleDiameterOffset,
+  overshoot,
+  minSide,
+  flangeMillingDiameter,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -280,7 +325,7 @@ export function DomeMesh({
     ]
 
     ;(async () => {
-      const { ensureReplicadReady, buildStrutMesh } = await import('../lib/replicadCad')
+      const { ensureReplicadReady, buildStrutMeshFromDrawing } = await import('../lib/replicadCad')
       await ensureReplicadReady()
       if (cancelled) return
 
@@ -298,7 +343,6 @@ export function DomeMesh({
       )
       const center = new THREE.Vector3(0, centerY, 0)
       const halfWidth = extrudeDistance / 2
-      const tooth: ToothParams = { height: toothHeight, length: toothLength, chamfer: toothChamfer, millRadius }
 
       // Colored the same way the clickable edge markers are in Edit mode, so a strut's color
       // means the same thing (thickness override, and by how much) in both places.
@@ -308,28 +352,112 @@ export function DomeMesh({
         const beamThickness = override ?? thickness
         const offsetA = (offsets.get(index)?.get(a) ?? 0) + offsetModifier
         const offsetB = (offsets.get(index)?.get(b) ?? 0) + offsetModifier
-        const boundary = computeStrutBoundary(posA, posB, center, offsetA, offsetB, cornerLength, halfWidth, tooth)
-        if (!boundary) continue
+        const boundary = computeStrutBoundaryManual(
+          posA,
+          posB,
+          center,
+          offsetA,
+          offsetB,
+          cornerLength,
+          halfWidth,
+          endGrooveLengthPercent,
+          midGrooveLengthPercent,
+          grooveDepth,
+          millingDiameter,
+          chamferLength,
+        )
+        if (!boundary.main) continue
 
         try {
-          const strut = buildStrutMesh(boundary, beamThickness)
-          const geom = new THREE.BufferGeometry()
-          geom.setAttribute('position', new THREE.Float32BufferAttribute(strut.positions, 3))
-          geom.setAttribute('normal', new THREE.Float32BufferAttribute(strut.normals, 3))
-          geom.setIndex(new THREE.Uint32BufferAttribute(strut.indices, 1))
-
-          const color = edgeThicknessColor(override)
-          const vertexCount = strut.positions.length / 3
-          const colors = new Float32Array(vertexCount * 3)
-          for (let i = 0; i < vertexCount; i++) {
-            colors[i * 3] = color.r
-            colors[i * 3 + 1] = color.g
-            colors[i * 3 + 2] = color.b
-          }
-          geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-          geometries.push(geom)
+          const plane = computeStrutPlane(posA, posB, center)
+          const strut = buildStrutMeshFromDrawing(boundary.main, plane, beamThickness)
+          if (!strut) continue
+          geometries.push(buildColoredGeometry(strut, edgeThicknessColor(override)))
         } catch (err) {
           console.error(`Failed to build strut solid for edge ${index}`, err)
+        }
+      }
+
+      // One flat connector plate per hub vertex, covering the wedges between struts that have no
+      // face of their own (see flangeGeometry.ts) - built from the exact same per-edge tenon
+      // layout and angular geometry `computeEdgesInfo` already works out for the live struts
+      // above, so a flange's arms always land flush against them.
+      const edgesInfo = computeEdgesInfo({
+        data,
+        transformedVertices,
+        addedVertices,
+        layerCount,
+        deletedVertexIndices,
+        deletedEdgeIndices,
+        deletedFaceIndices,
+        addedFaces,
+        addedEdges,
+        centerY,
+        edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? thickness,
+        cornerLength,
+        halfWidth,
+        offsetModifier,
+        endGrooveLengthPercent,
+        midGrooveLengthPercent,
+        grooveDepth,
+        millingDiameter,
+        chamferLength,
+      })
+
+      const flangeParams: FlangeShapeParams = {
+        toleranceLongitudinal,
+        toleranceTransverse,
+        centerHoleDiameter,
+        sideHoleDiameter,
+        sideHoleDiameterOffset,
+        overshoot,
+        minSide,
+        millingDiameter: flangeMillingDiameter,
+      }
+
+      // Each flange plate is `grooveDepth` thick and seated flush in the shoulder notch cut into
+      // the struts' own ends (see precalculateStrutEnd) - one plate's outer face level with the
+      // struts' own outer surface (halfWidth from the vertex), the other's inner face level with
+      // their inner surface, both parallel to the vertex's own tangent plane. `buildStrutMeshFromDrawing`
+      // centers its extrusion on the plane it's given, so each plane sits at the midpoint of its
+      // plate's span - `halfWidth - grooveDepth / 2` out from the vertex, one on either side.
+      const flangeSpan = halfWidth - grooveDepth / 2
+
+      // Building every vertex's pair of plates is a lot of boolean/extrude/mesh calls into
+      // opencascade.js - yielding back to the event loop every few vertices keeps the tab
+      // responsive (and lets a stale build bail out via `cancelled`, e.g. if Apply is clicked
+      // again before this one finishes) instead of blocking it solid until the whole dome is done.
+      const YIELD_EVERY = 5
+      for (let i = 0; i < edgesInfo.vertices.length; i++) {
+        if (i > 0 && i % YIELD_EVERY === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          if (cancelled) break
+        }
+
+        const vertex = edgesInfo.vertices[i]
+        const boundary = computeFlangeBoundary2D(
+          { vertexId: vertex.vertexId, edges: vertex.edges },
+          flangeParams,
+        )
+        if (!boundary.main) continue
+
+        const vertexPos = new THREE.Vector3(...vertex.position)
+        const normal = new THREE.Vector3(...vertex.tangentPlane.normal)
+        const xDir = new THREE.Vector3(...vertex.tangentPlane.e1)
+
+        try {
+          for (const sign of [1, -1] as const) {
+            const plane = {
+              origin: vertexPos.clone().addScaledVector(normal, sign * flangeSpan),
+              normal,
+              xDir,
+            }
+            const flange = buildStrutMeshFromDrawing(boundary.main, plane, grooveDepth)
+            if (!flange) continue
+            geometries.push(buildColoredGeometry(flange, FLANGE_COLOR))
+          }
+        } catch (err) {
+          console.error(`Failed to build flange solid for vertex ${vertex.vertexId}`, err)
         }
       }
 
@@ -358,6 +486,7 @@ export function DomeMesh({
     layerCount,
     deletedVertexIndices,
     deletedEdgeIndices,
+    deletedFaceIndices,
     addedFaces,
     addedEdges,
     centerY,
@@ -366,10 +495,19 @@ export function DomeMesh({
     extrudeDistance,
     cornerLength,
     offsetModifier,
-    toothHeight,
-    toothLength,
-    toothChamfer,
-    millRadius,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
+    toleranceLongitudinal,
+    toleranceTransverse,
+    centerHoleDiameter,
+    sideHoleDiameter,
+    sideHoleDiameterOffset,
+    overshoot,
+    minSide,
+    flangeMillingDiameter,
     visibleEdgeEntries,
     visibleAddedEdgeEntries,
     sliced.vertices,

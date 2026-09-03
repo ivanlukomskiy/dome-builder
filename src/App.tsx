@@ -42,10 +42,37 @@ import {
   saveConfigToLocalStorage,
   serializeConfig,
 } from './lib/config'
+import { downloadJson } from './lib/download'
+import { computeEdgesInfo } from './lib/edgesInfo'
+import { DEFAULT_FLANGE_SHAPE_PARAMS } from './lib/flangeGeometry'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
 export type EditOrPreviewMode = 'edit' | 'preview'
 export type EditTarget = 'vertices' | 'edges' | 'faces'
+
+// The strut-shape fields in the Sidebar's "Edge Curvature" and "Grooves" sections - the only
+// preview settings, since rebuilding every strut solid via replicad/opencascade.js is slow.
+// Kept separate from the live (draft) state below: the Viewport only ever sees this applied
+// snapshot, so editing these fields doesn't retrigger that rebuild until "Apply" is clicked.
+export interface PreviewShapeParams {
+  extrudeDistance: number
+  thickness: number
+  cornerLength: number
+  offsetModifier: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
+  toleranceLongitudinal: number
+  toleranceTransverse: number
+  centerHoleDiameter: number
+  sideHoleDiameter: number
+  sideHoleDiameterOffset: number
+  overshoot: number
+  minSide: number
+  flangeMillingDiameter: number
+}
 
 // Face ids are signed like added-vertex ids: non-negative indexes into `data.faces`
 // (canonical), negative into `addedFaces` via -(index + 1).
@@ -87,12 +114,12 @@ const DEFAULT_EXTRUDE_DISTANCE = 125
 const DEFAULT_THICKNESS = 75
 const DEFAULT_CORNER_LENGTH = 375
 const DEFAULT_OFFSET_MODIFIER = 0
-// Off by default (0 height) so existing domes don't suddenly grow teeth - see the "Corner Teeth"
-// section in Sidebar and computeStrutBoundary's `tooth` param.
-const DEFAULT_TOOTH_HEIGHT = 0
-const DEFAULT_TOOTH_LENGTH = 60
-const DEFAULT_TOOTH_CHAMFER = 8
-const DEFAULT_MILL_RADIUS = 6
+// See the "Grooves" section in Sidebar and computeStrutBoundaryManual's shoulder/tenon params.
+const DEFAULT_END_GROOVE_LENGTH_PERCENT = 25
+const DEFAULT_MID_GROOVE_LENGTH_PERCENT = 35
+const DEFAULT_GROOVE_DEPTH = 20
+const DEFAULT_MILLING_DIAMETER = 8
+const DEFAULT_CHAMFER_LENGTH = 6
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
@@ -198,10 +225,88 @@ function App() {
   const [offsetModifier, setOffsetModifier] = useState(
     initial?.offsetModifier ?? DEFAULT_OFFSET_MODIFIER,
   )
-  const [toothHeight, setToothHeight] = useState(initial?.toothHeight ?? DEFAULT_TOOTH_HEIGHT)
-  const [toothLength, setToothLength] = useState(initial?.toothLength ?? DEFAULT_TOOTH_LENGTH)
-  const [toothChamfer, setToothChamfer] = useState(initial?.toothChamfer ?? DEFAULT_TOOTH_CHAMFER)
-  const [millRadius, setMillRadius] = useState(initial?.millRadius ?? DEFAULT_MILL_RADIUS)
+  const [endGrooveLengthPercent, setEndGrooveLengthPercent] = useState(
+    initial?.endGrooveLengthPercent ?? DEFAULT_END_GROOVE_LENGTH_PERCENT,
+  )
+  const [midGrooveLengthPercent, setMidGrooveLengthPercent] = useState(
+    initial?.midGrooveLengthPercent ?? DEFAULT_MID_GROOVE_LENGTH_PERCENT,
+  )
+  const [grooveDepth, setGrooveDepth] = useState(initial?.grooveDepth ?? DEFAULT_GROOVE_DEPTH)
+  const [millingDiameter, setMillingDiameter] = useState(
+    initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
+  )
+  const [chamferLength, setChamferLength] = useState(initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH)
+
+  // The flange connector plate at each hub vertex - see the "Flange" Sidebar section and
+  // flangeGeometry.ts's FlangeShapeParams (which these mirror field-for-field, aside from its
+  // own `millingDiameter` living here as `flangeMillingDiameter` to stay distinct from the
+  // strut-shared one above).
+  const [toleranceLongitudinal, setToleranceLongitudinal] = useState(
+    initial?.toleranceLongitudinal ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
+  )
+  const [toleranceTransverse, setToleranceTransverse] = useState(
+    initial?.toleranceTransverse ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
+  )
+  const [centerHoleDiameter, setCenterHoleDiameter] = useState(
+    initial?.centerHoleDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
+  )
+  const [sideHoleDiameter, setSideHoleDiameter] = useState(
+    initial?.sideHoleDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameter,
+  )
+  const [sideHoleDiameterOffset, setSideHoleDiameterOffset] = useState(
+    initial?.sideHoleDiameterOffset ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
+  )
+  const [overshoot, setOvershoot] = useState(initial?.overshoot ?? DEFAULT_FLANGE_SHAPE_PARAMS.overshoot)
+  const [minSide, setMinSide] = useState(initial?.minSide ?? DEFAULT_FLANGE_SHAPE_PARAMS.minSide)
+  const [flangeMillingDiameter, setFlangeMillingDiameter] = useState(
+    initial?.flangeMillingDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
+  )
+
+  // The draft values above update live as the Sidebar's Preview fields are edited; the Viewport
+  // instead renders this applied snapshot, only updated by handleApplyPreview - see
+  // PreviewShapeParams's own doc.
+  const [appliedPreviewParams, setAppliedPreviewParams] = useState<PreviewShapeParams>(() => ({
+    extrudeDistance,
+    thickness,
+    cornerLength,
+    offsetModifier,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
+    toleranceLongitudinal,
+    toleranceTransverse,
+    centerHoleDiameter,
+    sideHoleDiameter,
+    sideHoleDiameterOffset,
+    overshoot,
+    minSide,
+    flangeMillingDiameter,
+  }))
+  const draftPreviewParams: PreviewShapeParams = {
+    extrudeDistance,
+    thickness,
+    cornerLength,
+    offsetModifier,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
+    toleranceLongitudinal,
+    toleranceTransverse,
+    centerHoleDiameter,
+    sideHoleDiameter,
+    sideHoleDiameterOffset,
+    overshoot,
+    minSide,
+    flangeMillingDiameter,
+  }
+  const previewParamsDirty = (Object.keys(draftPreviewParams) as (keyof PreviewShapeParams)[]).some(
+    (key) => draftPreviewParams[key] !== appliedPreviewParams[key],
+  )
+  const handleApplyPreview = () => setAppliedPreviewParams(draftPreviewParams)
 
   const data = baseData
 
@@ -614,10 +719,38 @@ function App() {
     setThickness(DEFAULT_THICKNESS)
     setCornerLength(DEFAULT_CORNER_LENGTH)
     setOffsetModifier(DEFAULT_OFFSET_MODIFIER)
-    setToothHeight(DEFAULT_TOOTH_HEIGHT)
-    setToothLength(DEFAULT_TOOTH_LENGTH)
-    setToothChamfer(DEFAULT_TOOTH_CHAMFER)
-    setMillRadius(DEFAULT_MILL_RADIUS)
+    setEndGrooveLengthPercent(DEFAULT_END_GROOVE_LENGTH_PERCENT)
+    setMidGrooveLengthPercent(DEFAULT_MID_GROOVE_LENGTH_PERCENT)
+    setGrooveDepth(DEFAULT_GROOVE_DEPTH)
+    setMillingDiameter(DEFAULT_MILLING_DIAMETER)
+    setChamferLength(DEFAULT_CHAMFER_LENGTH)
+    setToleranceLongitudinal(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal)
+    setToleranceTransverse(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse)
+    setCenterHoleDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter)
+    setSideHoleDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameter)
+    setSideHoleDiameterOffset(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset)
+    setOvershoot(DEFAULT_FLANGE_SHAPE_PARAMS.overshoot)
+    setMinSide(DEFAULT_FLANGE_SHAPE_PARAMS.minSide)
+    setFlangeMillingDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter)
+    setAppliedPreviewParams({
+      extrudeDistance: DEFAULT_EXTRUDE_DISTANCE,
+      thickness: DEFAULT_THICKNESS,
+      cornerLength: DEFAULT_CORNER_LENGTH,
+      offsetModifier: DEFAULT_OFFSET_MODIFIER,
+      endGrooveLengthPercent: DEFAULT_END_GROOVE_LENGTH_PERCENT,
+      midGrooveLengthPercent: DEFAULT_MID_GROOVE_LENGTH_PERCENT,
+      grooveDepth: DEFAULT_GROOVE_DEPTH,
+      millingDiameter: DEFAULT_MILLING_DIAMETER,
+      chamferLength: DEFAULT_CHAMFER_LENGTH,
+      toleranceLongitudinal: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
+      toleranceTransverse: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
+      centerHoleDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
+      sideHoleDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameter,
+      sideHoleDiameterOffset: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
+      overshoot: DEFAULT_FLANGE_SHAPE_PARAMS.overshoot,
+      minSide: DEFAULT_FLANGE_SHAPE_PARAMS.minSide,
+      flangeMillingDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
+    })
     setMode(preNewMode)
   }
 
@@ -635,10 +768,38 @@ function App() {
     setThickness(state.thickness)
     setCornerLength(state.cornerLength)
     setOffsetModifier(state.offsetModifier)
-    setToothHeight(state.toothHeight)
-    setToothLength(state.toothLength)
-    setToothChamfer(state.toothChamfer)
-    setMillRadius(state.millRadius)
+    setEndGrooveLengthPercent(state.endGrooveLengthPercent)
+    setMidGrooveLengthPercent(state.midGrooveLengthPercent)
+    setGrooveDepth(state.grooveDepth)
+    setMillingDiameter(state.millingDiameter)
+    setChamferLength(state.chamferLength)
+    setToleranceLongitudinal(state.toleranceLongitudinal)
+    setToleranceTransverse(state.toleranceTransverse)
+    setCenterHoleDiameter(state.centerHoleDiameter)
+    setSideHoleDiameter(state.sideHoleDiameter)
+    setSideHoleDiameterOffset(state.sideHoleDiameterOffset)
+    setOvershoot(state.overshoot)
+    setMinSide(state.minSide)
+    setFlangeMillingDiameter(state.flangeMillingDiameter)
+    setAppliedPreviewParams({
+      extrudeDistance: state.extrudeDistance,
+      thickness: state.thickness,
+      cornerLength: state.cornerLength,
+      offsetModifier: state.offsetModifier,
+      endGrooveLengthPercent: state.endGrooveLengthPercent,
+      midGrooveLengthPercent: state.midGrooveLengthPercent,
+      grooveDepth: state.grooveDepth,
+      millingDiameter: state.millingDiameter,
+      chamferLength: state.chamferLength,
+      toleranceLongitudinal: state.toleranceLongitudinal,
+      toleranceTransverse: state.toleranceTransverse,
+      centerHoleDiameter: state.centerHoleDiameter,
+      sideHoleDiameter: state.sideHoleDiameter,
+      sideHoleDiameterOffset: state.sideHoleDiameterOffset,
+      overshoot: state.overshoot,
+      minSide: state.minSide,
+      flangeMillingDiameter: state.flangeMillingDiameter,
+    })
     setDeletedGroups(state.deletedGroups)
     setRedoStack([])
     setVertexTransforms(new Map(state.vertexTransforms))
@@ -666,10 +827,19 @@ function App() {
       thickness,
       cornerLength,
       offsetModifier,
-      toothHeight,
-      toothLength,
-      toothChamfer,
-      millRadius,
+      endGrooveLengthPercent,
+      midGrooveLengthPercent,
+      grooveDepth,
+      millingDiameter,
+      chamferLength,
+      toleranceLongitudinal,
+      toleranceTransverse,
+      centerHoleDiameter,
+      sideHoleDiameter,
+      sideHoleDiameterOffset,
+      overshoot,
+      minSide,
+      flangeMillingDiameter,
       deletedGroups,
       vertexTransforms,
       addedVertices,
@@ -693,10 +863,19 @@ function App() {
     thickness,
     cornerLength,
     offsetModifier,
-    toothHeight,
-    toothLength,
-    toothChamfer,
-    millRadius,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
+    toleranceLongitudinal,
+    toleranceTransverse,
+    centerHoleDiameter,
+    sideHoleDiameter,
+    sideHoleDiameterOffset,
+    overshoot,
+    minSide,
+    flangeMillingDiameter,
     deletedGroups,
     vertexTransforms,
     addedVertices,
@@ -717,6 +896,35 @@ function App() {
     applyConfig(deserializeConfig(config))
   }
 
+  // Preview-mode export: the same shouldered-tenon strut-end layout (precalculateStrutEnd) and
+  // miter offsets the live Preview solids are built from (see DomeMesh's preview effect), plus
+  // - per vertex - which adjacent edges have a face between them and which don't, and the
+  // tangent plane those edges were projected onto to work that out.
+  const handleGetEdgesInfo = () => {
+    const edgesInfo = computeEdgesInfo({
+      data,
+      transformedVertices,
+      addedVertices: transformedAddedVertices,
+      layerCount,
+      deletedVertexIndices,
+      deletedEdgeIndices,
+      deletedFaceIndices,
+      addedFaces,
+      addedEdges,
+      centerY,
+      edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? appliedPreviewParams.thickness,
+      cornerLength: appliedPreviewParams.cornerLength,
+      halfWidth: appliedPreviewParams.extrudeDistance / 2,
+      offsetModifier: appliedPreviewParams.offsetModifier,
+      endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
+      midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
+      grooveDepth: appliedPreviewParams.grooveDepth,
+      millingDiameter: appliedPreviewParams.millingDiameter,
+      chamferLength: appliedPreviewParams.chamferLength,
+    })
+    downloadJson(edgesInfo, 'edges-info.json')
+  }
+
   const isNew = mode === 'new'
 
   return (
@@ -724,6 +932,7 @@ function App() {
       <Sidebar
         onExportConfig={handleExportConfig}
         onImportConfig={handleImportConfig}
+        onGetEdgesInfo={handleGetEdgesInfo}
         mode={mode}
         onOpenNew={handleOpenNew}
         onCreateNew={handleCreateNew}
@@ -774,14 +983,34 @@ function App() {
         onCornerLengthChange={setCornerLength}
         offsetModifier={offsetModifier}
         onOffsetModifierChange={setOffsetModifier}
-        toothHeight={toothHeight}
-        onToothHeightChange={setToothHeight}
-        toothLength={toothLength}
-        onToothLengthChange={setToothLength}
-        toothChamfer={toothChamfer}
-        onToothChamferChange={setToothChamfer}
-        millRadius={millRadius}
-        onMillRadiusChange={setMillRadius}
+        endGrooveLengthPercent={endGrooveLengthPercent}
+        onEndGrooveLengthPercentChange={setEndGrooveLengthPercent}
+        midGrooveLengthPercent={midGrooveLengthPercent}
+        onMidGrooveLengthPercentChange={setMidGrooveLengthPercent}
+        grooveDepth={grooveDepth}
+        onGrooveDepthChange={setGrooveDepth}
+        millingDiameter={millingDiameter}
+        onMillingDiameterChange={setMillingDiameter}
+        chamferLength={chamferLength}
+        onChamferLengthChange={setChamferLength}
+        toleranceLongitudinal={toleranceLongitudinal}
+        onToleranceLongitudinalChange={setToleranceLongitudinal}
+        toleranceTransverse={toleranceTransverse}
+        onToleranceTransverseChange={setToleranceTransverse}
+        centerHoleDiameter={centerHoleDiameter}
+        onCenterHoleDiameterChange={setCenterHoleDiameter}
+        sideHoleDiameter={sideHoleDiameter}
+        onSideHoleDiameterChange={setSideHoleDiameter}
+        sideHoleDiameterOffset={sideHoleDiameterOffset}
+        onSideHoleDiameterOffsetChange={setSideHoleDiameterOffset}
+        overshoot={overshoot}
+        onOvershootChange={setOvershoot}
+        minSide={minSide}
+        onMinSideChange={setMinSide}
+        flangeMillingDiameter={flangeMillingDiameter}
+        onFlangeMillingDiameterChange={setFlangeMillingDiameter}
+        previewParamsDirty={previewParamsDirty}
+        onApplyPreview={handleApplyPreview}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -806,14 +1035,23 @@ function App() {
         addedFaces={isNew ? EMPTY_FACES : addedFaces}
         addedEdges={isNew ? EMPTY_EDGES : addedEdges}
         centerY={centerY}
-        extrudeDistance={extrudeDistance}
-        thickness={thickness}
-        cornerLength={cornerLength}
-        offsetModifier={offsetModifier}
-        toothHeight={toothHeight}
-        toothLength={toothLength}
-        toothChamfer={toothChamfer}
-        millRadius={millRadius}
+        extrudeDistance={appliedPreviewParams.extrudeDistance}
+        thickness={appliedPreviewParams.thickness}
+        cornerLength={appliedPreviewParams.cornerLength}
+        offsetModifier={appliedPreviewParams.offsetModifier}
+        endGrooveLengthPercent={appliedPreviewParams.endGrooveLengthPercent}
+        midGrooveLengthPercent={appliedPreviewParams.midGrooveLengthPercent}
+        grooveDepth={appliedPreviewParams.grooveDepth}
+        millingDiameter={appliedPreviewParams.millingDiameter}
+        chamferLength={appliedPreviewParams.chamferLength}
+        toleranceLongitudinal={appliedPreviewParams.toleranceLongitudinal}
+        toleranceTransverse={appliedPreviewParams.toleranceTransverse}
+        centerHoleDiameter={appliedPreviewParams.centerHoleDiameter}
+        sideHoleDiameter={appliedPreviewParams.sideHoleDiameter}
+        sideHoleDiameterOffset={appliedPreviewParams.sideHoleDiameterOffset}
+        overshoot={appliedPreviewParams.overshoot}
+        minSide={appliedPreviewParams.minSide}
+        flangeMillingDiameter={appliedPreviewParams.flangeMillingDiameter}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}
