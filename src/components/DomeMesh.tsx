@@ -1,15 +1,38 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
 import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
-import { computeEdgeEndOffsets, computeStrutPlane } from '../lib/strutGeometry'
-import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
-import { computeEdgesInfo } from '../lib/edgesInfo'
-import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
-import type { StrutMesh } from '../lib/replicadCad'
+import { computeEdgeEndOffsets } from '../lib/strutGeometry'
+import { computeEdgesInfo, type VertexEdgesInfo } from '../lib/edgesInfo'
+import type { FlangeShapeParams } from '../lib/flangeGeometry'
+import type {
+  PreviewBuildPhase,
+  PreviewBuildRequest,
+  PreviewPiece,
+  PreviewWorkerMessage,
+  StrutBuildJob,
+} from '../workers/previewBuilder.worker'
+
+// How many struts (or flange vertices) one worker builds before it's torn down and a fresh one
+// takes over - see the preview-build effect's runBatch. Small enough to keep a bound on how much
+// opencascade garbage any one instance accumulates, large enough that most domes don't pay the
+// WASM-reinit cost more than a handful of times.
+const BATCH_SIZE = 12
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = []
+  for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size))
+  return batches
+}
+
+export interface PreviewProgress {
+  phase: 'loading' | 'struts' | 'flanges'
+  done: number
+  total: number
+}
 
 // Vertex/center marker sizes, in mm - purely visual, sized to stay visible without dwarfing a
 // typical (few-meter) dome.
@@ -43,22 +66,23 @@ function edgeMarkerColor(override: number | undefined, isSelected: boolean): str
   return `#${edgeThicknessColor(override).getHexString()}`
 }
 
-// A BufferGeometry from a replicad mesh result, flat-shaded with a single solid vertex color -
-// shared by strut and flange solids alike, since both merge into the same preview geometry (see
-// the preview-build effect below) and mergeGeometries needs every piece to carry the same set of
-// attributes.
-function buildColoredGeometry(mesh: StrutMesh, color: THREE.Color): THREE.BufferGeometry {
+// A BufferGeometry from one piece the preview worker built, flat-shaded with a single solid
+// vertex color - shared by strut and flange solids alike, since both merge into the same preview
+// geometry (see the preview-build effect below) and mergeGeometries needs every piece to carry
+// the same set of attributes.
+function buildColoredGeometry(piece: PreviewPiece): THREE.BufferGeometry {
   const geom = new THREE.BufferGeometry()
-  geom.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3))
-  geom.setAttribute('normal', new THREE.Float32BufferAttribute(mesh.normals, 3))
-  geom.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1))
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(piece.positions, 3))
+  geom.setAttribute('normal', new THREE.Float32BufferAttribute(piece.normals, 3))
+  geom.setIndex(new THREE.Uint32BufferAttribute(piece.indices, 1))
 
-  const vertexCount = mesh.positions.length / 3
+  const [r, g, b] = piece.color
+  const vertexCount = piece.positions.length / 3
   const colors = new Float32Array(vertexCount * 3)
   for (let i = 0; i < vertexCount; i++) {
-    colors[i * 3] = color.r
-    colors[i * 3 + 1] = color.g
-    colors[i * 3 + 2] = color.b
+    colors[i * 3] = r
+    colors[i * 3 + 1] = g
+    colors[i * 3 + 2] = b
   }
   geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
   return geom
@@ -117,6 +141,7 @@ interface DomeMeshProps {
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
+  onPreviewProgress: (progress: PreviewProgress | null) => void
 }
 
 export function DomeMesh({
@@ -156,6 +181,7 @@ export function DomeMesh({
   onVertexClick,
   onEdgeClick,
   onFaceClick,
+  onPreviewProgress,
 }: DomeMeshProps) {
   const sliced = useMemo(() => {
     const layered = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
@@ -293,21 +319,44 @@ export function DomeMesh({
     return geom
   }, [visibleAddedEdgeEntries, resolvePosition])
 
-  // Preview mode instead turns each edge into a real solid strut, built with replicad/
-  // opencascade.js: a flat sketch on the meridian plane through the edge and the gravity center
-  // (mitered lead-ins at each end, trimmed back by that hub's minOffset, bridged by a sharp
-  // corner or a true circular arc centered on the gravity center - see strutGeometry.ts),
-  // extruded by the sheet thickness (or that edge's own override, same as before). Building a
-  // solid is async (opencascade.js's WASM module has to load first, and .mesh() calls happen
-  // off this effect's synchronous path), so the merged result lives in state rather than a
-  // useMemo.
+  // Preview mode turns each edge into a real solid strut and each hub vertex into a flange plate
+  // pair, built with replicad/opencascade.js (see strutGeometry.ts, flangeGeometry.ts). The 2D
+  // drawing and extrude/mesh steps both need opencascade's WASM module and are, by far, the
+  // expensive part - so they run entirely inside previewBuilder.worker.ts, off this thread, with
+  // this effect only doing the cheap, pure-JS bookkeeping (which edges/vertices are visible,
+  // their offsets and angles) before handing it off. Running each build in a fresh worker (and
+  // terminating it once done) also reclaims that worker's whole opencascade heap on its own,
+  // rather than relying on every intermediate shape being individually .delete()'d.
   const [previewGeometry, setPreviewGeometry] = useState<THREE.BufferGeometry | null>(null)
+  const workerRef = useRef<Worker | null>(null)
+  const nextRequestIdRef = useRef(0)
 
   useEffect(() => {
-    if (mode !== 'preview') return
-    let cancelled = false
+    if (mode !== 'preview') {
+      workerRef.current?.terminate()
+      workerRef.current = null
+      onPreviewProgress(null)
+      return
+    }
 
-    const entries = [
+    const requestId = ++nextRequestIdRef.current
+    onPreviewProgress({ phase: 'loading', done: 0, total: 0 })
+
+    const offsets = computeEdgeEndOffsets(
+      data,
+      transformedVertices,
+      addedVertices,
+      layerCount,
+      deletedVertexIndices,
+      deletedEdgeIndices,
+      addedFaces,
+      addedEdges,
+      centerY,
+      (edgeId) => edgeThickness.get(edgeId) ?? thickness,
+    )
+    const halfWidth = extrudeDistance / 2
+
+    const strutEntries = [
       ...visibleEdgeEntries.map(({ edge: [a, b], index }) => ({
         a,
         b,
@@ -324,159 +373,157 @@ export function DomeMesh({
       })),
     ]
 
-    ;(async () => {
-      const { ensureReplicadReady, buildStrutMeshFromDrawing } = await import('../lib/replicadCad')
-      await ensureReplicadReady()
-      if (cancelled) return
-
-      const offsets = computeEdgeEndOffsets(
-        data,
-        transformedVertices,
-        addedVertices,
-        layerCount,
-        deletedVertexIndices,
-        deletedEdgeIndices,
-        addedFaces,
-        addedEdges,
-        centerY,
-        (edgeId) => edgeThickness.get(edgeId) ?? thickness,
-      )
-      const center = new THREE.Vector3(0, centerY, 0)
-      const halfWidth = extrudeDistance / 2
-
-      // Colored the same way the clickable edge markers are in Edit mode, so a strut's color
-      // means the same thing (thickness override, and by how much) in both places.
-      const geometries: THREE.BufferGeometry[] = []
-      for (const { a, b, index, posA, posB } of entries) {
-        const override = edgeThickness.get(index)
-        const beamThickness = override ?? thickness
-        const offsetA = (offsets.get(index)?.get(a) ?? 0) + offsetModifier
-        const offsetB = (offsets.get(index)?.get(b) ?? 0) + offsetModifier
-        const boundary = computeStrutBoundaryManual(
-          posA,
-          posB,
-          center,
-          offsetA,
-          offsetB,
-          cornerLength,
-          halfWidth,
-          endGrooveLengthPercent,
-          midGrooveLengthPercent,
-          grooveDepth,
-          millingDiameter,
-          chamferLength,
-        )
-        if (!boundary.main) continue
-
-        try {
-          const plane = computeStrutPlane(posA, posB, center)
-          const strut = buildStrutMeshFromDrawing(boundary.main, plane, beamThickness)
-          if (!strut) continue
-          geometries.push(buildColoredGeometry(strut, edgeThicknessColor(override)))
-        } catch (err) {
-          console.error(`Failed to build strut solid for edge ${index}`, err)
-        }
+    // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
+    // the same thing (thickness override, and by how much) in both places.
+    const strutJobs: StrutBuildJob[] = strutEntries.map(({ a, b, index, posA, posB }) => {
+      const override = edgeThickness.get(index)
+      const color = edgeThicknessColor(override)
+      return {
+        index,
+        posA: [posA.x, posA.y, posA.z],
+        posB: [posB.x, posB.y, posB.z],
+        offsetA: (offsets.get(index)?.get(a) ?? 0) + offsetModifier,
+        offsetB: (offsets.get(index)?.get(b) ?? 0) + offsetModifier,
+        beamThickness: override ?? thickness,
+        color: [color.r, color.g, color.b],
       }
+    })
 
-      // One flat connector plate per hub vertex, covering the wedges between struts that have no
-      // face of their own (see flangeGeometry.ts) - built from the exact same per-edge tenon
-      // layout and angular geometry `computeEdgesInfo` already works out for the live struts
-      // above, so a flange's arms always land flush against them.
-      const edgesInfo = computeEdgesInfo({
-        data,
-        transformedVertices,
-        addedVertices,
-        layerCount,
-        deletedVertexIndices,
-        deletedEdgeIndices,
-        deletedFaceIndices,
-        addedFaces,
-        addedEdges,
-        centerY,
-        edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? thickness,
-        cornerLength,
-        halfWidth,
-        offsetModifier,
-        endGrooveLengthPercent,
-        midGrooveLengthPercent,
-        grooveDepth,
-        millingDiameter,
-        chamferLength,
-      })
+    // One flat connector plate per hub vertex, covering the wedges between struts that have no
+    // face of their own (see flangeGeometry.ts) - built from the exact same per-edge tenon
+    // layout and angular geometry the struts above use, so a flange's arms always land flush
+    // against them. `computeEdgesInfo` is pure JS (no opencascade), so it runs here rather than
+    // in the worker; its result is already plain, structured-clone-friendly data.
+    const edgesInfo = computeEdgesInfo({
+      data,
+      transformedVertices,
+      addedVertices,
+      layerCount,
+      deletedVertexIndices,
+      deletedEdgeIndices,
+      deletedFaceIndices,
+      addedFaces,
+      addedEdges,
+      centerY,
+      edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? thickness,
+      cornerLength,
+      halfWidth,
+      offsetModifier,
+      endGrooveLengthPercent,
+      midGrooveLengthPercent,
+      grooveDepth,
+      millingDiameter,
+      chamferLength,
+    })
 
-      const flangeParams: FlangeShapeParams = {
-        toleranceLongitudinal,
-        toleranceTransverse,
-        centerHoleDiameter,
-        sideHoleDiameter,
-        sideHoleDiameterOffset,
-        overshoot,
-        minSide,
-        millingDiameter: flangeMillingDiameter,
-      }
+    const flangeParams: FlangeShapeParams = {
+      toleranceLongitudinal,
+      toleranceTransverse,
+      centerHoleDiameter,
+      sideHoleDiameter,
+      sideHoleDiameterOffset,
+      overshoot,
+      minSide,
+      millingDiameter: flangeMillingDiameter,
+    }
 
-      // Each flange plate is `grooveDepth` thick and seated flush in the shoulder notch cut into
-      // the struts' own ends (see precalculateStrutEnd) - one plate's outer face level with the
-      // struts' own outer surface (halfWidth from the vertex), the other's inner face level with
-      // their inner surface, both parallel to the vertex's own tangent plane. `buildStrutMeshFromDrawing`
-      // centers its extrusion on the plane it's given, so each plane sits at the midpoint of its
-      // plate's span - `halfWidth - grooveDepth / 2` out from the vertex, one on either side.
-      const flangeSpan = halfWidth - grooveDepth / 2
+    const sharedRequestFields = {
+      requestId,
+      centerY,
+      cornerLength,
+      halfWidth,
+      endGrooveLengthPercent,
+      midGrooveLengthPercent,
+      grooveDepth,
+      millingDiameter,
+      chamferLength,
+      flangeParams,
+      flangeColor: [FLANGE_COLOR.r, FLANGE_COLOR.g, FLANGE_COLOR.b] as [number, number, number],
+    }
 
-      // Building every vertex's pair of plates is a lot of boolean/extrude/mesh calls into
-      // opencascade.js - yielding back to the event loop every few vertices keeps the tab
-      // responsive (and lets a stale build bail out via `cancelled`, e.g. if Apply is clicked
-      // again before this one finishes) instead of blocking it solid until the whole dome is done.
-      const YIELD_EVERY = 5
-      for (let i = 0; i < edgesInfo.vertices.length; i++) {
-        if (i > 0 && i % YIELD_EVERY === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 0))
-          if (cancelled) break
+    // Runs one batch (a handful of struts, or of flange vertices - never both) in its own fresh
+    // worker, terminated the moment its result comes back. A single opencascade instance building
+    // *everything* for a large dome in one go is what was running out of memory - splitting the
+    // work across many short-lived instances instead means no single one ever has to hold more
+    // than one batch's worth of accumulated geometry before its whole heap gets reclaimed.
+    const runBatch = (
+      jobs: StrutBuildJob[],
+      vertices: VertexEdgesInfo[],
+      phase: PreviewBuildPhase,
+      doneBefore: number,
+      total: number,
+    ): Promise<PreviewPiece[]> =>
+      new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('../workers/previewBuilder.worker.ts', import.meta.url), {
+          type: 'module',
+        })
+        workerRef.current = worker
+
+        const settle = (fn: () => void) => {
+          worker.terminate()
+          if (workerRef.current === worker) workerRef.current = null
+          fn()
         }
 
-        const vertex = edgesInfo.vertices[i]
-        const boundary = computeFlangeBoundary2D(
-          { vertexId: vertex.vertexId, edges: vertex.edges },
-          flangeParams,
-        )
-        if (!boundary.main) continue
+        worker.onmessage = (event: MessageEvent<PreviewWorkerMessage>) => {
+          const msg = event.data
+          if (msg.requestId !== requestId) return
 
-        const vertexPos = new THREE.Vector3(...vertex.position)
-        const normal = new THREE.Vector3(...vertex.tangentPlane.normal)
-        const xDir = new THREE.Vector3(...vertex.tangentPlane.e1)
-
-        try {
-          for (const sign of [1, -1] as const) {
-            const plane = {
-              origin: vertexPos.clone().addScaledVector(normal, sign * flangeSpan),
-              normal,
-              xDir,
-            }
-            const flange = buildStrutMeshFromDrawing(boundary.main, plane, grooveDepth)
-            if (!flange) continue
-            geometries.push(buildColoredGeometry(flange, FLANGE_COLOR))
+          if (msg.type === 'progress') {
+            onPreviewProgress({ phase, done: doneBefore + msg.done, total })
+          } else if (msg.type === 'result') {
+            settle(() => resolve(msg.pieces))
+          } else if (msg.type === 'error') {
+            settle(() => reject(new Error(msg.message)))
           }
-        } catch (err) {
-          console.error(`Failed to build flange solid for vertex ${vertex.vertexId}`, err)
         }
-      }
+        worker.onerror = (event) => {
+          settle(() => reject(new Error(event.message)))
+        }
 
-      if (cancelled) {
-        geometries.forEach((g) => g.dispose())
-        return
-      }
-
-      const merged = geometries.length > 0 ? mergeGeometries(geometries, false) : null
-      geometries.forEach((g) => g.dispose())
-
-      setPreviewGeometry((prev) => {
-        prev?.dispose()
-        return merged
+        const request: PreviewBuildRequest = { ...sharedRequestFields, strutJobs: jobs, vertices }
+        worker.postMessage(request)
       })
+
+    let cancelled = false
+    ;(async () => {
+      const allPieces: PreviewPiece[] = []
+      try {
+        onPreviewProgress({ phase: 'struts', done: 0, total: strutJobs.length })
+        const strutBatches = chunk(strutJobs, BATCH_SIZE)
+        for (let i = 0; i < strutBatches.length; i++) {
+          if (cancelled) return
+          const pieces = await runBatch(strutBatches[i], [], 'struts', i * BATCH_SIZE, strutJobs.length)
+          allPieces.push(...pieces)
+        }
+
+        onPreviewProgress({ phase: 'flanges', done: 0, total: edgesInfo.vertices.length })
+        const vertexBatches = chunk(edgesInfo.vertices, BATCH_SIZE)
+        for (let i = 0; i < vertexBatches.length; i++) {
+          if (cancelled) return
+          const pieces = await runBatch([], vertexBatches[i], 'flanges', i * BATCH_SIZE, edgesInfo.vertices.length)
+          allPieces.push(...pieces)
+        }
+
+        if (cancelled) return
+        const geometries = allPieces.map(buildColoredGeometry)
+        const merged = geometries.length > 0 ? mergeGeometries(geometries, false) : null
+        geometries.forEach((g) => g.dispose())
+        setPreviewGeometry((prev) => {
+          prev?.dispose()
+          return merged
+        })
+      } catch (err) {
+        console.error('Failed to build preview', err)
+      } finally {
+        if (!cancelled) onPreviewProgress(null)
+      }
     })()
 
     return () => {
       cancelled = true
+      workerRef.current?.terminate()
+      workerRef.current = null
     }
   }, [
     mode,
@@ -512,6 +559,7 @@ export function DomeMesh({
     visibleAddedEdgeEntries,
     sliced.vertices,
     resolvePosition,
+    onPreviewProgress,
   ])
 
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {

@@ -255,3 +255,26 @@ body,
   font-size: 11px;
   color: rgba(255, 255, 255, 0.55);
 }
+
+.hud-progress {
+  margin-bottom: 6px;
+}
+
+.hud-progress-label {
+  margin-bottom: 4px;
+}
+
+.hud-progress-track {
+  width: 160px;
+  height: 4px;
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hud-progress-fill {
+  height: 100%;
+  background: #4fd97e;
+  transition: width 0.15s ease-out;
+}

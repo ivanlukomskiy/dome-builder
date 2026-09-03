@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -10,7 +10,7 @@ import {
   computeVisibleVertexEdges,
   resolveVertexPosition,
 } from '../lib/polyhedra'
-import { DomeMesh } from './DomeMesh'
+import { DomeMesh, type PreviewProgress } from './DomeMesh'
 import { Hud } from './Hud'
 
 interface ViewportProps {
@@ -158,22 +158,10 @@ export function Viewport({
     thickness,
   ])
 
-  // Preview mode builds real solids via replicad/opencascade.js, whose ~20+ MB WASM module is
-  // only fetched the first time it's needed - surface that wait in the HUD rather than leaving
-  // the viewport looking stuck.
-  const [cadReady, setCadReady] = useState(false)
-  useEffect(() => {
-    if (mode !== 'preview' || cadReady) return
-    let cancelled = false
-    import('../lib/replicadCad').then(({ ensureReplicadReady }) =>
-      ensureReplicadReady().then(() => {
-        if (!cancelled) setCadReady(true)
-      }),
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [mode, cadReady])
+  // Preview mode builds every strut/flange solid in a background worker (see DomeMesh.tsx and
+  // previewBuilder.worker.ts) - this just holds whatever progress it last reported, to surface in
+  // the HUD rather than leaving the viewport looking stuck while it works.
+  const [previewProgress, setPreviewProgress] = useState<PreviewProgress | null>(null)
 
   return (
     <div className="viewport">
@@ -186,7 +174,7 @@ export function Viewport({
         selectedFaceCount={selectedFaceIndices.size}
         selectedVertexElevation={selectedVertexElevation}
         selectedVertexHubMetrics={selectedVertexHubMetrics}
-        previewLoading={mode === 'preview' && !cadReady}
+        previewProgress={mode === 'preview' ? previewProgress : null}
       />
       <Canvas
         camera={{ position: [8750, 7000, 10000], fov: 45, near: 10, far: 200000 }}
@@ -247,6 +235,7 @@ export function Viewport({
           onVertexClick={onVertexClick}
           onEdgeClick={onEdgeClick}
           onFaceClick={onFaceClick}
+          onPreviewProgress={setPreviewProgress}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>

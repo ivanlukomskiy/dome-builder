@@ -1,4 +1,5 @@
 import type { EditTarget, ViewMode } from '../App'
+import type { PreviewProgress } from './DomeMesh'
 import type { HubEdgeMetric, ModelStats } from '../lib/polyhedra'
 
 interface HudProps {
@@ -10,11 +11,33 @@ interface HudProps {
   selectedFaceCount: number
   selectedVertexElevation: number | null
   selectedVertexHubMetrics: HubEdgeMetric[]
-  previewLoading: boolean
+  previewProgress: PreviewProgress | null
 }
 
 function formatMm(value: number): string {
   return `${Math.round(value)} mm`
+}
+
+const PREVIEW_PHASE_LABEL: Record<PreviewProgress['phase'], string> = {
+  loading: 'Loading CAD engine…',
+  struts: 'Building struts',
+  flanges: 'Building flanges',
+}
+
+function PreviewProgressBar({ progress }: { progress: PreviewProgress }) {
+  const label = PREVIEW_PHASE_LABEL[progress.phase]
+  if (progress.total === 0) {
+    return <div className="hud-progress-label">{label}</div>
+  }
+  const percent = Math.round((progress.done / progress.total) * 100)
+  return (
+    <div className="hud-progress">
+      <div className="hud-progress-label">{`${label} — ${progress.done} / ${progress.total}`}</div>
+      <div className="hud-progress-track">
+        <div className="hud-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  )
 }
 
 export function Hud({
@@ -26,7 +49,7 @@ export function Hud({
   selectedFaceCount,
   selectedVertexElevation,
   selectedVertexHubMetrics,
-  previewLoading,
+  previewProgress,
 }: HudProps) {
   let selectionLine: string | null = null
   if (mode === 'edit') {
@@ -65,7 +88,7 @@ export function Hud({
 
   return (
     <div className="hud">
-      {previewLoading && <div>Loading CAD engine…</div>}
+      {previewProgress && <PreviewProgressBar progress={previewProgress} />}
       <div>{`${formatMm(width)} × ${formatMm(depth)} × ${formatMm(height)}`}</div>
       <div>{`${stats.faceCount} faces, ${stats.edgeCount} edges`}</div>
     </div>

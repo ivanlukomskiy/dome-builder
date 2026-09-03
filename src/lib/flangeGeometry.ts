@@ -516,7 +516,6 @@ export function computeFlangeBoundary2D(
 
   const negativeShapes: Drawing[] = [];
   const addNegative = (drawing: Drawing, name: string) => {
-    console.log(`negativeShapes[${negativeShapes.length}] -> ${name}`);
     negativeShapes.push(drawing);
   };
 
