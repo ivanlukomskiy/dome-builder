@@ -49,20 +49,26 @@ interface Params {
   flange: FlangeParams
 }
 
-// A real vertex pulled from a "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - the
-// dome's apex, where 4 struts meet evenly spaced 90 degrees apart with a face in every gap.
+// Vertex 21 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - the specific
+// hub that crashes computeFlangeBoundary2D's replicad calls with a "memory access out of bounds"
+// opencascade error (found via the one-vertex-per-worker debug logging in DomeMesh.tsx's preview
+// build effect). `shared` is back-derived from this vertex's own `strutEnd` values (same
+// cornerLength/halfWidth/groove/chamfer/milling numbers precalculateStrutEnd was given to produce
+// them) - `flange`'s own tolerance/hole params aren't part of that export, so those are still
+// just DEFAULT_FLANGE_SHAPE_PARAMS's values; tweak the Flange section below to match whatever
+// they were actually set to when this crashed.
 const DEFAULT_PARAMS: Params = {
-  vertexId: 0,
+  vertexId: 21,
   edges: [
-    { edgeId: 19, neighborId: 10, thicknessMm: 12, offsetMm: 9, projectedAngleDeg: 0, hasFaceToNextEdge: true, faceIdToNextEdge: 18 },
-    { edgeId: 34, neighborId: 16, thicknessMm: 12, offsetMm: 9, projectedAngleDeg: 90, hasFaceToNextEdge: true, faceIdToNextEdge: 27 },
-    { edgeId: 0, neighborId: 4, thicknessMm: 12, offsetMm: 9, projectedAngleDeg: 180, hasFaceToNextEdge: true, faceIdToNextEdge: 0 },
-    { edgeId: 2, neighborId: 1, thicknessMm: 12, offsetMm: 9, projectedAngleDeg: 270, hasFaceToNextEdge: true, faceIdToNextEdge: 9 },
+    { edgeId: 44, neighborId: 11, thicknessMm: 75, offsetMm: 62.49210233276298, projectedAngleDeg: 39.310516226973846, hasFaceToNextEdge: false, faceIdToNextEdge: null },
+    { edgeId: -5, neighborId: -3, thicknessMm: 75, offsetMm: 77.0553351884945, projectedAngleDeg: 224.540815554821, hasFaceToNextEdge: true, faceIdToNextEdge: -3 },
+    { edgeId: 46, neighborId: 20, thicknessMm: 75, offsetMm: 77.0553351884945, projectedAngleDeg: 276.44178473718836, hasFaceToNextEdge: true, faceIdToNextEdge: 25 },
+    { edgeId: 45, neighborId: 19, thicknessMm: 75, offsetMm: 63.74523960811312, projectedAngleDeg: 337.3766142915629, hasFaceToNextEdge: true, faceIdToNextEdge: 24 },
   ],
   shared: {
-    cornerLength: 273,
+    cornerLength: 375,
     halfWidth: 62.5,
-    endGrooveLengthPercent: 12,
+    endGrooveLengthPercent: 25,
     midGrooveLengthPercent: 35,
     grooveDepth: 20,
     millingDiameter: 8,
