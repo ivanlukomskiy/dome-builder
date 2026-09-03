@@ -1,5 +1,6 @@
 import { Plane, Sketcher, setOC } from 'replicad'
 import type { Drawing } from 'replicad'
+import type * as THREE from 'three'
 import type { StrutSketch } from './strutGeometry'
 
 // The only module that touches replicad/opencascade.js. Callers reach it via a dynamic
@@ -64,6 +65,51 @@ export function buildStrutMesh(sketch: StrutSketch, thicknessMm: number): StrutM
   const { x: nx, y: ny, z: nz } = sketch.planeNormal
   // `.translate()` deletes `solid` itself and returns a distinct object, so there's nothing to
   // separately dispose of here - only `centered` (below) is still alive afterward.
+  const centered = solid.translate([(-nx * thicknessMm) / 2, (-ny * thicknessMm) / 2, (-nz * thicknessMm) / 2])
+
+  const mesh = centered.mesh({ tolerance: MESH_TOLERANCE, angularTolerance: MESH_ANGULAR_TOLERANCE })
+  centered.delete()
+
+  return {
+    positions: Float32Array.from(mesh.vertices),
+    normals: Float32Array.from(mesh.normals),
+    indices: Uint32Array.from(mesh.triangles),
+  }
+}
+
+export interface StrutPlane {
+  origin: THREE.Vector3
+  normal: THREE.Vector3
+  xDir: THREE.Vector3
+}
+
+// Builds one strut's solid from a flat `Drawing` already in the strut's own 2D coordinates (see
+// strutGeometryManual.ts's `computeStrutBoundaryManual`) - sketches it onto the actual meridian
+// plane (rather than the default XY plane `meshDrawing` below uses), extrudes by the sheet
+// thickness, centers the material on that plane, and tessellates. Returns null for an empty
+// drawing. `ensureReplicadReady` must have resolved before calling this.
+export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): StrutMesh | null {
+  const ocPlane = new Plane(
+    [plane.origin.x, plane.origin.y, plane.origin.z],
+    [plane.xDir.x, plane.xDir.y, plane.xDir.z],
+    [plane.normal.x, plane.normal.y, plane.normal.z],
+  )
+
+  let sketched
+  try {
+    sketched = drawing.sketchOnPlane(ocPlane)
+  } catch {
+    ocPlane.delete()
+    return null
+  }
+  ocPlane.delete()
+
+  // `.extrude()` consumes `sketched`'s own wire to build the solid, so - like `buildStrutMesh`'s
+  // Sketch from `Sketcher.close()` - there's nothing left on it to separately dispose of.
+  const solid = sketched.extrude(thicknessMm)
+
+  const { x: nx, y: ny, z: nz } = plane.normal
+  // `.translate()` deletes `solid` itself and returns a distinct object, mirroring buildStrutMesh.
   const centered = solid.translate([(-nx * thicknessMm) / 2, (-ny * thicknessMm) / 2, (-nz * thicknessMm) / 2])
 
   const mesh = centered.mesh({ tolerance: MESH_TOLERANCE, angularTolerance: MESH_ANGULAR_TOLERANCE })

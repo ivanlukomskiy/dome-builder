@@ -7,7 +7,7 @@ import { computeLayers } from './polyhedra'
 // not capture the shape/axis/subdivisions recipe (that's only meaningful while still choosing
 // a shape), which tab is active, or the redo stack (session-only, not worth persisting).
 export interface DomeConfig {
-  version: 9
+  version: 10
   vertices: [number, number, number][]
   faces: Face[]
   edges: Edge[]
@@ -22,12 +22,13 @@ export interface DomeConfig {
   // (positive) or closer to (negative) its vertex than the raw miter math calls for. 0 means no
   // change.
   offsetModifier: number
-  // Interlocking tooth cut into each strut end's lead-in, mirrored on both boundary sides (see
-  // computeStrutBoundary's `tooth` param / buildToothedRun). 0 height means no tooth.
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  // Shouldered tenon cut into each strut end (see computeStrutBoundaryManual's groove/mill
+  // params in strutGeometryManual.ts).
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
   deletedGroups: number[][]
   vertexTransforms: [number, VertexTransform][]
   addedVertices: [number, [number, number, number]][]
@@ -57,10 +58,11 @@ export interface DomeState {
   thickness: number
   cornerLength: number
   offsetModifier: number
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
   deletedGroups: number[][]
   vertexTransforms: ReadonlyMap<number, VertexTransform>
   addedVertices: ReadonlyMap<number, THREE.Vector3>
@@ -74,7 +76,7 @@ export interface DomeState {
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 9,
+    version: 10,
     vertices: state.baseData.vertices.map((v) => [v.x, v.y, v.z]),
     faces: state.baseData.faces,
     edges: state.baseData.edges,
@@ -85,10 +87,11 @@ export function serializeConfig(state: DomeState): DomeConfig {
     thickness: state.thickness,
     cornerLength: state.cornerLength,
     offsetModifier: state.offsetModifier,
-    toothHeight: state.toothHeight,
-    toothLength: state.toothLength,
-    toothChamfer: state.toothChamfer,
-    millRadius: state.millRadius,
+    endGrooveLengthPercent: state.endGrooveLengthPercent,
+    midGrooveLengthPercent: state.midGrooveLengthPercent,
+    grooveDepth: state.grooveDepth,
+    millingDiameter: state.millingDiameter,
+    chamferLength: state.chamferLength,
     deletedGroups: state.deletedGroups,
     vertexTransforms: Array.from(state.vertexTransforms.entries()),
     addedVertices: Array.from(state.addedVertices.entries()).map(([id, v]) => [
@@ -120,10 +123,11 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     thickness: config.thickness,
     cornerLength: config.cornerLength,
     offsetModifier: config.offsetModifier,
-    toothHeight: config.toothHeight,
-    toothLength: config.toothLength,
-    toothChamfer: config.toothChamfer,
-    millRadius: config.millRadius,
+    endGrooveLengthPercent: config.endGrooveLengthPercent,
+    midGrooveLengthPercent: config.midGrooveLengthPercent,
+    grooveDepth: config.grooveDepth,
+    millingDiameter: config.millingDiameter,
+    chamferLength: config.chamferLength,
     deletedGroups: config.deletedGroups,
     vertexTransforms: new Map(config.vertexTransforms),
     addedVertices: new Map(
@@ -149,7 +153,7 @@ export function loadConfigFromLocalStorage(): DomeConfig | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as DomeConfig
-    return parsed.version === 9 ? parsed : null
+    return parsed.version === 10 ? parsed : null
   } catch {
     return null
   }

@@ -5,8 +5,8 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
 import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
-import type { ToothParams } from '../lib/strutGeometry'
-import { computeEdgeEndOffsets, computeStrutBoundary } from '../lib/strutGeometry'
+import { computeEdgeEndOffsets, computeStrutPlane } from '../lib/strutGeometry'
+import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
 
 // Vertex/center marker sizes, in mm - purely visual, sized to stay visible without dwarfing a
 // typical (few-meter) dome.
@@ -74,10 +74,11 @@ interface DomeMeshProps {
   thickness: number
   cornerLength: number
   offsetModifier: number
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -104,10 +105,11 @@ export function DomeMesh({
   thickness,
   cornerLength,
   offsetModifier,
-  toothHeight,
-  toothLength,
-  toothChamfer,
-  millRadius,
+  endGrooveLengthPercent,
+  midGrooveLengthPercent,
+  grooveDepth,
+  millingDiameter,
+  chamferLength,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -280,7 +282,7 @@ export function DomeMesh({
     ]
 
     ;(async () => {
-      const { ensureReplicadReady, buildStrutMesh } = await import('../lib/replicadCad')
+      const { ensureReplicadReady, buildStrutMeshFromDrawing } = await import('../lib/replicadCad')
       await ensureReplicadReady()
       if (cancelled) return
 
@@ -298,7 +300,6 @@ export function DomeMesh({
       )
       const center = new THREE.Vector3(0, centerY, 0)
       const halfWidth = extrudeDistance / 2
-      const tooth: ToothParams = { height: toothHeight, length: toothLength, chamfer: toothChamfer, millRadius }
 
       // Colored the same way the clickable edge markers are in Edit mode, so a strut's color
       // means the same thing (thickness override, and by how much) in both places.
@@ -308,11 +309,26 @@ export function DomeMesh({
         const beamThickness = override ?? thickness
         const offsetA = (offsets.get(index)?.get(a) ?? 0) + offsetModifier
         const offsetB = (offsets.get(index)?.get(b) ?? 0) + offsetModifier
-        const boundary = computeStrutBoundary(posA, posB, center, offsetA, offsetB, cornerLength, halfWidth, tooth)
-        if (!boundary) continue
+        const boundary = computeStrutBoundaryManual(
+          posA,
+          posB,
+          center,
+          offsetA,
+          offsetB,
+          cornerLength,
+          halfWidth,
+          endGrooveLengthPercent,
+          midGrooveLengthPercent,
+          grooveDepth,
+          millingDiameter,
+          chamferLength,
+        )
+        if (!boundary.main) continue
 
         try {
-          const strut = buildStrutMesh(boundary, beamThickness)
+          const plane = computeStrutPlane(posA, posB, center)
+          const strut = buildStrutMeshFromDrawing(boundary.main, plane, beamThickness)
+          if (!strut) continue
           const geom = new THREE.BufferGeometry()
           geom.setAttribute('position', new THREE.Float32BufferAttribute(strut.positions, 3))
           geom.setAttribute('normal', new THREE.Float32BufferAttribute(strut.normals, 3))
@@ -366,10 +382,11 @@ export function DomeMesh({
     extrudeDistance,
     cornerLength,
     offsetModifier,
-    toothHeight,
-    toothLength,
-    toothChamfer,
-    millRadius,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
     visibleEdgeEntries,
     visibleAddedEdgeEntries,
     sliced.vertices,

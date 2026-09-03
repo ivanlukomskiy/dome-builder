@@ -87,12 +87,12 @@ const DEFAULT_EXTRUDE_DISTANCE = 125
 const DEFAULT_THICKNESS = 75
 const DEFAULT_CORNER_LENGTH = 375
 const DEFAULT_OFFSET_MODIFIER = 0
-// Off by default (0 height) so existing domes don't suddenly grow teeth - see the "Corner Teeth"
-// section in Sidebar and computeStrutBoundary's `tooth` param.
-const DEFAULT_TOOTH_HEIGHT = 0
-const DEFAULT_TOOTH_LENGTH = 60
-const DEFAULT_TOOTH_CHAMFER = 8
-const DEFAULT_MILL_RADIUS = 6
+// See the "Grooves" section in Sidebar and computeStrutBoundaryManual's shoulder/tenon params.
+const DEFAULT_END_GROOVE_LENGTH_PERCENT = 25
+const DEFAULT_MID_GROOVE_LENGTH_PERCENT = 35
+const DEFAULT_GROOVE_DEPTH = 20
+const DEFAULT_MILLING_DIAMETER = 8
+const DEFAULT_CHAMFER_LENGTH = 6
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
@@ -198,10 +198,17 @@ function App() {
   const [offsetModifier, setOffsetModifier] = useState(
     initial?.offsetModifier ?? DEFAULT_OFFSET_MODIFIER,
   )
-  const [toothHeight, setToothHeight] = useState(initial?.toothHeight ?? DEFAULT_TOOTH_HEIGHT)
-  const [toothLength, setToothLength] = useState(initial?.toothLength ?? DEFAULT_TOOTH_LENGTH)
-  const [toothChamfer, setToothChamfer] = useState(initial?.toothChamfer ?? DEFAULT_TOOTH_CHAMFER)
-  const [millRadius, setMillRadius] = useState(initial?.millRadius ?? DEFAULT_MILL_RADIUS)
+  const [endGrooveLengthPercent, setEndGrooveLengthPercent] = useState(
+    initial?.endGrooveLengthPercent ?? DEFAULT_END_GROOVE_LENGTH_PERCENT,
+  )
+  const [midGrooveLengthPercent, setMidGrooveLengthPercent] = useState(
+    initial?.midGrooveLengthPercent ?? DEFAULT_MID_GROOVE_LENGTH_PERCENT,
+  )
+  const [grooveDepth, setGrooveDepth] = useState(initial?.grooveDepth ?? DEFAULT_GROOVE_DEPTH)
+  const [millingDiameter, setMillingDiameter] = useState(
+    initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
+  )
+  const [chamferLength, setChamferLength] = useState(initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH)
 
   const data = baseData
 
@@ -614,10 +621,11 @@ function App() {
     setThickness(DEFAULT_THICKNESS)
     setCornerLength(DEFAULT_CORNER_LENGTH)
     setOffsetModifier(DEFAULT_OFFSET_MODIFIER)
-    setToothHeight(DEFAULT_TOOTH_HEIGHT)
-    setToothLength(DEFAULT_TOOTH_LENGTH)
-    setToothChamfer(DEFAULT_TOOTH_CHAMFER)
-    setMillRadius(DEFAULT_MILL_RADIUS)
+    setEndGrooveLengthPercent(DEFAULT_END_GROOVE_LENGTH_PERCENT)
+    setMidGrooveLengthPercent(DEFAULT_MID_GROOVE_LENGTH_PERCENT)
+    setGrooveDepth(DEFAULT_GROOVE_DEPTH)
+    setMillingDiameter(DEFAULT_MILLING_DIAMETER)
+    setChamferLength(DEFAULT_CHAMFER_LENGTH)
     setMode(preNewMode)
   }
 
@@ -635,10 +643,11 @@ function App() {
     setThickness(state.thickness)
     setCornerLength(state.cornerLength)
     setOffsetModifier(state.offsetModifier)
-    setToothHeight(state.toothHeight)
-    setToothLength(state.toothLength)
-    setToothChamfer(state.toothChamfer)
-    setMillRadius(state.millRadius)
+    setEndGrooveLengthPercent(state.endGrooveLengthPercent)
+    setMidGrooveLengthPercent(state.midGrooveLengthPercent)
+    setGrooveDepth(state.grooveDepth)
+    setMillingDiameter(state.millingDiameter)
+    setChamferLength(state.chamferLength)
     setDeletedGroups(state.deletedGroups)
     setRedoStack([])
     setVertexTransforms(new Map(state.vertexTransforms))
@@ -666,10 +675,11 @@ function App() {
       thickness,
       cornerLength,
       offsetModifier,
-      toothHeight,
-      toothLength,
-      toothChamfer,
-      millRadius,
+      endGrooveLengthPercent,
+      midGrooveLengthPercent,
+      grooveDepth,
+      millingDiameter,
+      chamferLength,
       deletedGroups,
       vertexTransforms,
       addedVertices,
@@ -693,10 +703,11 @@ function App() {
     thickness,
     cornerLength,
     offsetModifier,
-    toothHeight,
-    toothLength,
-    toothChamfer,
-    millRadius,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
     deletedGroups,
     vertexTransforms,
     addedVertices,
@@ -774,14 +785,16 @@ function App() {
         onCornerLengthChange={setCornerLength}
         offsetModifier={offsetModifier}
         onOffsetModifierChange={setOffsetModifier}
-        toothHeight={toothHeight}
-        onToothHeightChange={setToothHeight}
-        toothLength={toothLength}
-        onToothLengthChange={setToothLength}
-        toothChamfer={toothChamfer}
-        onToothChamferChange={setToothChamfer}
-        millRadius={millRadius}
-        onMillRadiusChange={setMillRadius}
+        endGrooveLengthPercent={endGrooveLengthPercent}
+        onEndGrooveLengthPercentChange={setEndGrooveLengthPercent}
+        midGrooveLengthPercent={midGrooveLengthPercent}
+        onMidGrooveLengthPercentChange={setMidGrooveLengthPercent}
+        grooveDepth={grooveDepth}
+        onGrooveDepthChange={setGrooveDepth}
+        millingDiameter={millingDiameter}
+        onMillingDiameterChange={setMillingDiameter}
+        chamferLength={chamferLength}
+        onChamferLengthChange={setChamferLength}
         canUndo={deletedGroups.length > 0}
         canRedo={redoStack.length > 0}
         onDeleteSelected={handleDeleteSelected}
@@ -810,10 +823,11 @@ function App() {
         thickness={thickness}
         cornerLength={cornerLength}
         offsetModifier={offsetModifier}
-        toothHeight={toothHeight}
-        toothLength={toothLength}
-        toothChamfer={toothChamfer}
-        millRadius={millRadius}
+        endGrooveLengthPercent={endGrooveLengthPercent}
+        midGrooveLengthPercent={midGrooveLengthPercent}
+        grooveDepth={grooveDepth}
+        millingDiameter={millingDiameter}
+        chamferLength={chamferLength}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}

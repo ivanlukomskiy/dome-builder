@@ -34,10 +34,11 @@ interface ViewportProps {
   thickness: number
   cornerLength: number
   offsetModifier: number
-  toothHeight: number
-  toothLength: number
-  toothChamfer: number
-  millRadius: number
+  endGrooveLengthPercent: number
+  midGrooveLengthPercent: number
+  grooveDepth: number
+  millingDiameter: number
+  chamferLength: number
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -65,10 +66,11 @@ export function Viewport({
   thickness,
   cornerLength,
   offsetModifier,
-  toothHeight,
-  toothLength,
-  toothChamfer,
-  millRadius,
+  endGrooveLengthPercent,
+  midGrooveLengthPercent,
+  grooveDepth,
+  millingDiameter,
+  chamferLength,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -213,10 +215,11 @@ export function Viewport({
           thickness={thickness}
           cornerLength={cornerLength}
           offsetModifier={offsetModifier}
-          toothHeight={toothHeight}
-          toothLength={toothLength}
-          toothChamfer={toothChamfer}
-          millRadius={millRadius}
+          endGrooveLengthPercent={endGrooveLengthPercent}
+          midGrooveLengthPercent={midGrooveLengthPercent}
+          grooveDepth={grooveDepth}
+          millingDiameter={millingDiameter}
+          chamferLength={chamferLength}
           onVertexClick={onVertexClick}
           onEdgeClick={onEdgeClick}
           onFaceClick={onFaceClick}

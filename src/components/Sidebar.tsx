@@ -81,14 +81,16 @@ interface SidebarProps {
   onCornerLengthChange: (value: number) => void
   offsetModifier: number
   onOffsetModifierChange: (value: number) => void
-  toothHeight: number
-  onToothHeightChange: (value: number) => void
-  toothLength: number
-  onToothLengthChange: (value: number) => void
-  toothChamfer: number
-  onToothChamferChange: (value: number) => void
-  millRadius: number
-  onMillRadiusChange: (value: number) => void
+  endGrooveLengthPercent: number
+  onEndGrooveLengthPercentChange: (value: number) => void
+  midGrooveLengthPercent: number
+  onMidGrooveLengthPercentChange: (value: number) => void
+  grooveDepth: number
+  onGrooveDepthChange: (value: number) => void
+  millingDiameter: number
+  onMillingDiameterChange: (value: number) => void
+  chamferLength: number
+  onChamferLengthChange: (value: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -232,14 +234,16 @@ export function Sidebar({
   onCornerLengthChange,
   offsetModifier,
   onOffsetModifierChange,
-  toothHeight,
-  onToothHeightChange,
-  toothLength,
-  onToothLengthChange,
-  toothChamfer,
-  onToothChamferChange,
-  millRadius,
-  onMillRadiusChange,
+  endGrooveLengthPercent,
+  onEndGrooveLengthPercentChange,
+  midGrooveLengthPercent,
+  onMidGrooveLengthPercentChange,
+  grooveDepth,
+  onGrooveDepthChange,
+  millingDiameter,
+  onMillingDiameterChange,
+  chamferLength,
+  onChamferLengthChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -467,30 +471,43 @@ export function Sidebar({
 
       {mode === 'preview' && (
         <section className="control-group">
-          <h2>Corner Teeth</h2>
+          <h2>Grooves</h2>
           <div className="transform-field">
-            <label>Tooth height (mm)</label>
-            <NumberField value={toothHeight} step={5} min={0} onCommit={onToothHeightChange} />
+            <label>End groove length (%)</label>
+            <NumberField
+              value={endGrooveLengthPercent}
+              step={5}
+              min={0}
+              onCommit={onEndGrooveLengthPercentChange}
+            />
           </div>
           <div className="transform-field">
-            <label>Tooth length (mm)</label>
-            <NumberField value={toothLength} step={5} min={0} onCommit={onToothLengthChange} />
+            <label>Mid groove length (%)</label>
+            <NumberField
+              value={midGrooveLengthPercent}
+              step={5}
+              min={0}
+              onCommit={onMidGrooveLengthPercentChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Groove depth (mm)</label>
+            <NumberField value={grooveDepth} step={1} min={0} onCommit={onGrooveDepthChange} />
+          </div>
+          <div className="transform-field">
+            <label>Milling diameter (mm)</label>
+            <NumberField value={millingDiameter} step={1} min={0} onCommit={onMillingDiameterChange} />
           </div>
           <div className="transform-field">
             <label>Chamfer length (mm)</label>
-            <NumberField value={toothChamfer} step={1} min={0} onCommit={onToothChamferChange} />
-          </div>
-          <div className="transform-field">
-            <label>Mill radius (mm)</label>
-            <NumberField value={millRadius} step={1} min={0} onCommit={onMillRadiusChange} />
+            <NumberField value={chamferLength} step={1} min={0} onCommit={onChamferLengthChange} />
           </div>
           <p className="hint">
-            An interlocking tooth cut into each strut end's lead-in, mirrored on both the outer
-            and inner boundary. 0 height turns it off. Mill radius sets a dogbone relief cut into
-            the main line at each of the tooth's two concave base corners - the corner itself
-            stays sharp, but a real round cutting bit can't reach all the way into it, so a
-            semicircle is cut in just before, leaving room for a square mating part to seat
-            flush.
+            Each strut end forms a shouldered tenon: the end and mid groove percentages split the
+            workable length (past the offset) into the shoulder, tenon, and far shoulder, cut back
+            by groove depth. Chamfer length bevels the tenon's top corners; milling diameter sets
+            a relief circle tucked into each of its concave base corners, clearing room for a
+            square mating part to seat flush against a round cutting bit.
           </p>
         </section>
       )}

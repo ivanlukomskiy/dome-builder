@@ -435,8 +435,10 @@ function createStrutEnd(p: StrutEndMeasurements): Drawing {
   const half2 = half1.main.mirror([1, 0], [0, 0], "plane");
   let main = half1.main.fuse(half2);
   half1.negativeShapes.forEach((s) => {
-    main = main.cut(s);
+    // Mirror before cutting - `.cut()` consumes (deletes) its operand, so `s` is no longer valid
+    // afterward.
     const mirrored = s.mirror([1, 0], [0, 0], "plane");
+    main = main.cut(s);
     main = main.cut(mirrored);
   });
   return main;
