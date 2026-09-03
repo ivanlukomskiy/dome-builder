@@ -498,11 +498,23 @@ export function DomeMesh({
         }
 
         onPreviewProgress({ phase: 'flanges', done: 0, total: edgesInfo.vertices.length })
-        const vertexBatches = chunk(edgesInfo.vertices, BATCH_SIZE)
-        for (let i = 0; i < vertexBatches.length; i++) {
+        // DEBUG: one vertex per worker, with its own console line before and after, to pin down
+        // exactly which vertex's flange geometry trips the "memory access out of bounds" crash -
+        // logging and skipping past a bad one rather than aborting, so every bad vertex in the
+        // model surfaces in a single run instead of just the first.
+        for (let i = 0; i < edgesInfo.vertices.length; i++) {
           if (cancelled) return
-          const pieces = await runBatch([], vertexBatches[i], 'flanges', i * BATCH_SIZE, edgesInfo.vertices.length)
-          allPieces.push(...pieces)
+          const vertex = edgesInfo.vertices[i]
+          console.log(
+            `[flange debug] building vertex ${vertex.vertexId} (${i + 1}/${edgesInfo.vertices.length}), edges: ${vertex.edges.map((e) => e.edgeId).join(', ')}`,
+          )
+          try {
+            const pieces = await runBatch([], [vertex], 'flanges', i, edgesInfo.vertices.length)
+            allPieces.push(...pieces)
+            console.log(`[flange debug] vertex ${vertex.vertexId} OK`)
+          } catch (err) {
+            console.error(`[flange debug] vertex ${vertex.vertexId} CRASHED`, vertex, err)
+          }
         }
 
         if (cancelled) return
