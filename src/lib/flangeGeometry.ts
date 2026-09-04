@@ -425,7 +425,21 @@ function computeConnectionSectorShape(
     SEGMENTS_COUNT,
     "ccw",
   );
-  return closedFanFromOrigin(points);
+
+  const bisect = edge.projectedAngleDeg + (next.projectedAngleDeg - edge.projectedAngleDeg) / 2
+  const perpendicular = polar(bisect + 90, params.minSide)
+
+  let pen = draw();
+  points.forEach((p, i) => {
+    if (i === 0) {
+      pen = pen.movePointerTo(p);
+    } else {
+      pen = pen.lineTo(p);
+    }
+  });
+  pen = pen.lineTo(perpendicular);
+  pen = pen.lineTo([-perpendicular[0], -perpendicular[1]])
+  return pen.close();
 }
 
 // The main rectangular plate patch running along this strut's own centerline, from the vertex
@@ -524,11 +538,13 @@ export function computeFlangeBoundary2D(
   vertex.edges.forEach((edge, i) => {
     const next = vertex.edges[(i + 1) % vertex.edges.length];
 
-    const { holeA, holeB } = computeSideHoles(edge, params);
-    helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
-    addNegative(holeA, `side hole (edge ${edge.edgeId}, +)`);
-    helpers.push({ drawing: holeB, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, -)` });
-    addNegative(holeB, `side hole (edge ${edge.edgeId}, -)`);
+    if (params.sideHoleDiameter > 0) {
+      const { holeA, holeB } = computeSideHoles(edge, params);
+      helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
+      addNegative(holeA, `side hole (edge ${edge.edgeId}, +)`);
+      helpers.push({ drawing: holeB, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, -)` });
+      addNegative(holeB, `side hole (edge ${edge.edgeId}, -)`);
+    }
 
     const { start, end, nextLocalStart } = computeWedgeBoundary(edge, next, params);
 
@@ -588,9 +604,11 @@ export function computeFlangeBoundary2D(
   });
 
   // Center bolt hole, shared by every strut arm at the vertex itself.
-  const centerHoleDrawing = drawCircle(params.centerHoleDiameter / 2);
-  helpers.push({ drawing: centerHoleDrawing, color: HOLE_COLOR, name: "center hole" });
-  addNegative(centerHoleDrawing, "center hole");
+  if (params.centerHoleDiameter > 0) {
+    const centerHoleDrawing = drawCircle(params.centerHoleDiameter / 2);
+    helpers.push({ drawing: centerHoleDrawing, color: HOLE_COLOR, name: "center hole" });
+    addNegative(centerHoleDrawing, "center hole");
+  }
   // Drawn last so it stays on top of everything else instead of getting z-fought away.
   helpers.push({ drawing: drawCircle(5), color: "#f5e050", name: `vertex ${vertex.vertexId}` });
 
