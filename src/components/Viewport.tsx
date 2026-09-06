@@ -8,6 +8,7 @@ import {
   computeModelStats,
   computeVertexHubMetrics,
   computeVisibleVertexEdges,
+  computeVisibleVertexIds,
   edgeKey,
   resolveVertexPosition,
 } from '../lib/polyhedra'
@@ -162,7 +163,11 @@ export function Viewport({
       positionOf,
       (edgeId) => edgeThickness.get(edgeId) ?? thickness,
     )
-    const facePairs = buildFaceNeighborPairs(data, addedFaces, deletedFaceIndices, new Set([id])).get(id) ?? new Map()
+    const visibleVertexSet = new Set(
+      computeVisibleVertexIds(data, transformedVertices, layerCount, deletedVertexIndices, addedFaces),
+    )
+    const facePairs =
+      buildFaceNeighborPairs(data, addedFaces, deletedFaceIndices, visibleVertexSet).get(id) ?? new Map()
     const n = metrics.length
     return metrics.map((m, i) => {
       const nextNeighborId = metrics[(i + 1) % n].neighborId
