@@ -49,27 +49,29 @@ interface Params {
   flange: FlangeParams
 }
 
-// Vertex 4 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - only two struts
-// at this vertex, with a face spanning the wedge from edge 5 to edge 8 (angular order) but not
-// the wedge back from edge 8 to edge 5 - the degree-2 case hasFaceToNextEdge needs to tell apart
-// (see computeEdgesInfo in edgesInfo.ts). `shared` is back-derived from this vertex's own
-// `strutEnd` values (same cornerLength/halfWidth/groove/chamfer/milling numbers
+// Vertex 4 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - five struts at
+// this vertex, with a face spanning every angular wedge except the one from edge 8 to edge 11 -
+// the reflex-wedge case computeFlangeBoundary2D has to handle. `shared` is back-derived from this
+// vertex's own `strutEnd` values (same cornerLength/halfWidth/groove/chamfer/milling numbers
 // precalculateStrutEnd was given to produce them) - `flange`'s own tolerance/hole params aren't
 // part of that export, so those are still just DEFAULT_FLANGE_SHAPE_PARAMS's values; tweak the
 // Flange section below to match whatever they were actually set to for this vertex.
 const DEFAULT_PARAMS: Params = {
   vertexId: 4,
   edges: [
-    { edgeId: 5, neighborId: 1, thicknessMm: 75, offsetMm: 57.849701644135905, projectedAngleDeg: 48.189685104221425, hasFaceToNextEdge: true, faceIdToNextEdge: 3 },
-    { edgeId: 8, neighborId: 5, thicknessMm: 75, offsetMm: 57.849701644135905, projectedAngleDeg: 114.09484255211072, hasFaceToNextEdge: false, faceIdToNextEdge: null },
+    { edgeId: 6, neighborId: 0, thicknessMm: 30, offsetMm: 33.54101966249683, projectedAngleDeg: 0, hasFaceToNextEdge: true, faceIdToNextEdge: 2 },
+    { edgeId: 5, neighborId: 1, thicknessMm: 30, offsetMm: 33.54101966249683, projectedAngleDeg: 48.189685104221425, hasFaceToNextEdge: true, faceIdToNextEdge: 3 },
+    { edgeId: 8, neighborId: 5, thicknessMm: 30, offsetMm: 23.139880657654363, projectedAngleDeg: 114.09484255211072, hasFaceToNextEdge: false, faceIdToNextEdge: null },
+    { edgeId: 11, neighborId: 7, thicknessMm: 30, offsetMm: 23.139880657654373, projectedAngleDeg: 245.9051574478893, hasFaceToNextEdge: true, faceIdToNextEdge: 5 },
+    { edgeId: 9, neighborId: 6, thicknessMm: 30, offsetMm: 33.541019662496815, projectedAngleDeg: 311.81031489577856, hasFaceToNextEdge: true, faceIdToNextEdge: 4 },
   ],
   shared: {
-    cornerLength: 375,
+    cornerLength: 200,
     halfWidth: 62.5,
     endGrooveLengthPercent: 25,
     midGrooveLengthPercent: 35,
-    grooveDepth: 20,
-    millingDiameter: 8,
+    grooveDepth: 30,
+    millingDiameter: 5,
     chamferLength: 6,
   },
   flange: {

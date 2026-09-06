@@ -140,11 +140,8 @@ function calculateArcPoints(
   const a = sub2(start, center);
   const b = sub2(end, center);
 
-  const radius = length2(a);
-
-  if (Math.abs(radius - length2(b)) > 1e-6) {
-    throw new Error("Start and end must lie on the same circle");
-  }
+  const rA = length2(a);
+  const rB = length2(b);
 
   const angleA = Math.atan2(a[1], a[0]);
   const angleB = Math.atan2(b[1], b[0]);
@@ -158,11 +155,13 @@ function calculateArcPoints(
   }
 
   return Array.from({ length: steps + 1 }, (_, i) => {
-    const angle = angleA + (delta * i) / steps;
+    const phase = i / steps
+    const angle = angleA + delta * phase;
+    const r = rA + (rB - rA) * phase
 
     return [
-      center[0] + Math.cos(angle) * radius,
-      center[1] + Math.sin(angle) * radius,
+      center[0] + Math.cos(angle) * r,
+      center[1] + Math.sin(angle) * r,
     ];
   });
 }
@@ -295,7 +294,7 @@ function computeWedgeCornerMillingCuts(
   next: FlangeEdgeInput,
   params: FlangeShapeParams,
 ): { millingCutA: Drawing; millingCutB: Drawing } | null {
-  if (!(params.toleranceLongitudinal > 0 || params.overshoot > 0)) return null;
+  if (params.overshoot == 0) return null;
 
   const millingCutA = drawMillingCircle(
     [
@@ -324,8 +323,66 @@ function computeConnectionEdgeShape(
   start: Point2D,
   end: Point2D,
   edge: FlangeEdgeInput,
+  params: FlangeShapeParams,
 ): Drawing {
-  const points = calculateArcPoints(start, end, [0, 0], SEGMENTS_COUNT, "ccw");
+  // const points = calculateArcPoints(start, end, [0, 0], SEGMENTS_COUNT, "ccw");
+
+  const rStart = length2(start);
+  const rEnd = length2(end)
+
+  const angleA = Math.atan2(start[1], start[0]);
+  const angleB = Math.atan2(end[1],end[0]);
+
+  let delta = angleB - angleA;
+
+  while (delta < 0) delta += 2 * Math.PI;
+
+  // here come some obscure curve calculations
+  // the goal is to achieve a nice smooth transition between the edges connected via a face
+  // and shortcut to an arc when the angle is small
+
+  let midR = (rStart + rEnd) / 2 * 0.75
+
+  const minStraight = Math.atan2(edge.thicknessMm / 2 + params.toleranceTransverse, (rStart + rEnd) / 2)
+
+  const hit0Angle = Math.PI * 0.75
+  const a0 = 1 / (minStraight * 3 - hit0Angle)
+  const b0 = - hit0Angle * a0
+  const minRadius = (rStart + rEnd) / 2 * Math.min(a0 * delta + b0, 1)
+
+  midR = Math.max(midR, minRadius)
+
+  const phaseOffset = minStraight / delta
+
+  const a = 1 / (1 - 2 * phaseOffset)
+  const b = - phaseOffset * a
+
+  const points = Array.from({ length: SEGMENTS_COUNT + 1 }, (_, i) => {
+    const phase = i / SEGMENTS_COUNT
+    const angle = angleA + delta * phase;
+
+    let phaseCorrected = 0
+    if (phase < phaseOffset) {
+      phaseCorrected = 0
+    } else if (phase > 1 - phaseOffset) {
+      phaseCorrected =  1
+    } else {
+      phaseCorrected = a * phase + b
+    }
+
+    let radiusI = 0
+    if (phase < 0.5) {
+      radiusI = rStart + (midR - rStart) * Math.sin(phaseCorrected * Math.PI)
+    } else {
+      radiusI = rEnd + (midR - rEnd) * Math.sin(phaseCorrected * Math.PI)
+    }
+
+    return [
+      Math.cos(angle) * radiusI,
+      Math.sin(angle) * radiusI,
+    ] as Point2D;
+  });
+
   return closedFanFromOrigin(points).rotate(edge.projectedAngleDeg);
 }
 
@@ -443,7 +500,7 @@ function computeConnectionSectorShape(
 function computeRectPatch(edge: FlangeEdgeInput, params: FlangeShapeParams): Drawing {
   return draw()
     .movePointerTo([0, edge.thicknessMm / 2 + params.toleranceTransverse])
-    .hLineTo(edge.strutEnd.cornerLength - params.toleranceLongitudinal)
+    .hLineTo(edge.strutEnd.cornerLength - (params.overshoot > 0 ? params.toleranceLongitudinal : 0))
     .vLineTo(-edge.thicknessMm / 2 - params.toleranceTransverse)
     .hLineTo(0)
     .close()
@@ -554,7 +611,7 @@ export function computeFlangeBoundary2D(
     }
 
     if (edge.hasFaceToNextEdge) {
-      const connectionEdge = computeConnectionEdgeShape(start, end, edge);
+      const connectionEdge = computeConnectionEdgeShape(start, end, edge, params);
       helpers.push({
         drawing: connectionEdge,
         color: "purple",
