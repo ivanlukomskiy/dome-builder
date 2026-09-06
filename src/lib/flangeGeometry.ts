@@ -386,6 +386,75 @@ function computeConnectionEdgeShape(
   return closedFanFromOrigin(points).rotate(edge.projectedAngleDeg);
 }
 
+// The wedge between `edge` and `next` when a face already fills it - a pie slice from the
+// origin out to `start` and `end`, arcing between them.
+function computeConnectionEdgeShapeNoFace(
+  start: Point2D,
+  end: Point2D,
+  edge: FlangeEdgeInput,
+  params: FlangeShapeParams,
+): Drawing {
+  // const points = calculateArcPoints(start, end, [0, 0], SEGMENTS_COUNT, "ccw");
+
+  const rStart = length2(start);
+  const rEnd = length2(end)
+
+  const angleA = Math.atan2(start[1], start[0]);
+  const angleB = Math.atan2(end[1],end[0]);
+
+  let delta = angleB - angleA;
+
+  while (delta < 0) delta += 2 * Math.PI;
+
+  // here come some obscure curve calculations
+  // the goal is to achieve a nice smooth transition between the edges connected via a face
+  // and shortcut to an arc when the angle is small
+
+  let midR = (rStart + rEnd) / 2 * 0.5
+
+  const minStraight = Math.atan2(edge.thicknessMm / 2 + params.toleranceTransverse, (rStart + rEnd) / 2)
+
+  const hit0Angle = Math.PI * 0.75
+  const a0 = 1 / (minStraight * 3 - hit0Angle)
+  const b0 = - hit0Angle * a0
+  const minRadius = (rStart + rEnd) / 2 * Math.min(a0 * delta + b0, 1)
+
+  midR = Math.max(midR, minRadius)
+
+  const phaseOffset = minStraight / delta
+
+  const a = 1 / (1 - 2 * phaseOffset)
+  const b = - phaseOffset * a
+
+  const points = Array.from({ length: SEGMENTS_COUNT + 1 }, (_, i) => {
+    const phase = i / SEGMENTS_COUNT
+    const angle = angleA + delta * phase;
+
+    let phaseCorrected = 0
+    if (phase < phaseOffset) {
+      phaseCorrected = 0
+    } else if (phase > 1 - phaseOffset) {
+      phaseCorrected =  1
+    } else {
+      phaseCorrected = a * phase + b
+    }
+
+    let radiusI = 0
+    if (phase < 0.5) {
+      radiusI = rStart + (midR - rStart) * Math.sin(phaseCorrected * Math.PI)
+    } else {
+      radiusI = rEnd + (midR - rEnd) * Math.sin(phaseCorrected * Math.PI)
+    }
+
+    return [
+      Math.cos(angle) * radiusI,
+      Math.sin(angle) * radiusI,
+    ] as Point2D;
+  });
+
+  return closedFanFromOrigin(points).rotate(edge.projectedAngleDeg);
+}
+
 // The two straight plate edges running along each side of the open wedge between `edge` and
 // `next` (used when no face already fills it), each with a quarter-circle relief bulging into
 // the plate at its outer corner.
@@ -436,27 +505,32 @@ function computeWedgeRoundingShape(
   const intersection = lineIntersection(edge1p1, edge1p2, edge2p1, edge2p2);
   if (intersection == null) return null;
 
-  const roundingCenter = moveAwayFromOrigin(intersection, params.minSide);
-  const projection1 = perpendicularFoot(roundingCenter, edge1p1, edge1p2);
-  const projection2 = perpendicularFoot(roundingCenter, edge2p1, edge2p2);
+  const start = rotate2D([edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1], edge.projectedAngleDeg);
+  const end = rotate2D([edge.strutEnd.cornerLength + params.overshoot  - params.minSide, -h2], edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
 
-  const roundingPoints = calculateArcPoints(
-    projection1,
-    projection2,
-    roundingCenter,
-    SEGMENTS_COUNT,
-    "cw",
-  );
-  let rounding = draw();
-  roundingPoints.forEach((p, i) => {
-    if (i == 0) {
-      rounding = rounding.movePointerTo(p);
-    } else {
-      rounding = rounding.lineTo(p);
-    }
-  });
-  rounding.lineTo(intersection);
-  return rounding.close();
+  return draw().movePointerTo(start).bezierCurveTo(end, intersection).lineTo([0,0]).close()
+
+  // const roundingCenter = moveAwayFromOrigin(intersection, params.minSide);
+  // const projection1 = perpendicularFoot(roundingCenter, edge1p1, edge1p2);
+  // const projection2 = perpendicularFoot(roundingCenter, edge2p1, edge2p2);
+
+  // const roundingPoints = calculateArcPoints(
+  //   projection1,
+  //   projection2,
+  //   roundingCenter,
+  //   SEGMENTS_COUNT,
+  //   "cw",
+  // );
+  // let rounding = draw();
+  // roundingPoints.forEach((p, i) => {
+  //   if (i == 0) {
+  //     rounding = rounding.movePointerTo(p);
+  //   } else {
+  //     rounding = rounding.lineTo(p);
+  //   }
+  // });
+  // rounding.lineTo(intersection);
+  // return rounding.close();
 }
 
 // Fills the reflex (> 180 deg) open wedge between `edge` and `next`'s own plate sides with a
@@ -466,6 +540,17 @@ function computeConnectionSectorShape(
   next: FlangeEdgeInput,
   params: FlangeShapeParams,
 ): Drawing {
+
+
+  const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+  const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+
+  const start = rotate2D([edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1], edge.projectedAngleDeg);
+  const end = rotate2D([edge.strutEnd.cornerLength + params.overshoot  - params.minSide, -h2], edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
+
+  // return draw().movePointerTo(start).bezierCurveTo(end, intersection).lineTo([0,0]).close()
+
+
   const connPoint1 = rotate2D(
     [0, params.minSide + edge.thicknessMm / 2],
     edge.projectedAngleDeg,
