@@ -33,14 +33,6 @@ export interface PreviewProgress {
   total: number
 }
 
-// Vertex/center marker sizes, in mm - purely visual, sized to stay visible without dwarfing a
-// typical (few-meter) dome.
-const VERTEX_MARKER_RADIUS = 80
-const SELECTED_VERTEX_MARKER_RADIUS = 115
-
-// Clickable-edge cylinder radius while editing edges - deliberately thicker than the plain
-// wireframe line so edges read as the interactive element in that mode.
-const EDGE_MARKER_RADIUS = 40
 const SELECTED_COLOR = '#f5a623'
 const EDGE_DEFAULT_COLOR = new THREE.Color('#3a5a7a')
 const EDGE_OVERRIDE_MIN_COLOR = new THREE.Color('#4fd97e')
@@ -106,6 +98,7 @@ function buildFanGeometry(positions: THREE.Vector3[]): THREE.BufferGeometry {
 interface DomeMeshProps {
   mode: ViewMode
   editTarget: EditTarget
+  diameter: number
   data: SceneData
   transformedVertices: ReadonlyMap<number, THREE.Vector3>
   selectedVertexIndices: ReadonlySet<number>
@@ -139,6 +132,7 @@ interface DomeMeshProps {
 export function DomeMesh({
   mode,
   editTarget,
+  diameter,
   data,
   transformedVertices,
   selectedVertexIndices,
@@ -169,6 +163,13 @@ export function DomeMesh({
   onPreviewProgress,
 }: DomeMeshProps) {
   const resolvePosition = useCallback((idx: number) => transformedVertices.get(idx)!, [transformedVertices])
+
+  // Vertex/center/edge marker sizes, in mm - purely visual, scaled to the dome's own diameter so
+  // they stay proportionate (rather than dwarfing or disappearing into) domes of very different
+  // sizes.
+  const vertexMarkerRadius = diameter / 100
+  const selectedVertexMarkerRadius = vertexMarkerRadius * 1.2
+  const edgeMarkerRadius = diameter / 150
 
   const faceGeometry = useMemo(() => {
     const positions: number[] = []
@@ -453,7 +454,7 @@ export function DomeMesh({
               onPointerOut={handlePointerOut}
             >
               <sphereGeometry
-                args={[isSelected ? SELECTED_VERTEX_MARKER_RADIUS : VERTEX_MARKER_RADIUS, 16, 16]}
+                args={[isSelected ? selectedVertexMarkerRadius : vertexMarkerRadius, 16, 16]}
               />
               <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
             </mesh>
@@ -483,7 +484,7 @@ export function DomeMesh({
               onPointerOver={handlePointerOver}
               onPointerOut={handlePointerOut}
             >
-              <cylinderGeometry args={[EDGE_MARKER_RADIUS, EDGE_MARKER_RADIUS, length, 8]} />
+              <cylinderGeometry args={[edgeMarkerRadius, edgeMarkerRadius, length, 8]} />
               <meshStandardMaterial
                 color={edgeMarkerColor(edgeThickness.get(index), isSelected)}
               />
@@ -513,7 +514,7 @@ export function DomeMesh({
           )
         })}
       <mesh position={[0, centerY, 0]}>
-        <sphereGeometry args={[VERTEX_MARKER_RADIUS, 16, 16]} />
+        <sphereGeometry args={[vertexMarkerRadius, 16, 16]} />
         <meshStandardMaterial color="#f5e050" />
       </mesh>
     </group>

@@ -845,6 +845,7 @@ function App() {
       <Viewport
         mode={mode}
         editTarget={editTarget}
+        diameter={diameter}
         data={isNew ? previewSceneData : sceneData}
         transformedVertices={isNew ? previewSceneData.vertices : transformedVertices}
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}

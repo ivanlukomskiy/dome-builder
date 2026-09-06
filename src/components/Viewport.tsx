@@ -12,6 +12,7 @@ import { Hud, type HudHubEdgeMetric } from './Hud'
 interface ViewportProps {
   mode: ViewMode
   editTarget: EditTarget
+  diameter: number
   data: SceneData
   transformedVertices: ReadonlyMap<number, THREE.Vector3>
   selectedVertexIndices: ReadonlySet<number>
@@ -45,6 +46,7 @@ interface ViewportProps {
 export function Viewport({
   mode,
   editTarget,
+  diameter,
   data,
   transformedVertices,
   selectedVertexIndices,
@@ -169,6 +171,7 @@ export function Viewport({
         <DomeMesh
           mode={mode}
           editTarget={editTarget}
+          diameter={diameter}
           data={data}
           transformedVertices={transformedVertices}
           selectedVertexIndices={selectedVertexIndices}
