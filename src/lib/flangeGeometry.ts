@@ -279,7 +279,7 @@ function computeWedgeBoundary(
   ];
   const nextLocalStart: Point2D = [
     next.strutEnd.cornerLength + params.overshoot,
-    -edge.thicknessMm / 2 - params.toleranceTransverse,
+    -next.thicknessMm / 2 - params.toleranceTransverse,
   ];
   const end = rotate2D(nextLocalStart, edge.angleToNextEdgeDeg);
 
@@ -307,8 +307,8 @@ function computeWedgeCornerMillingCuts(
 
   const millingCutB = drawMillingCircle(
     [
-      edge.strutEnd.cornerLength - params.toleranceLongitudinal,
-      -edge.thicknessMm / 2 - params.toleranceTransverse,
+      next.strutEnd.cornerLength - params.toleranceLongitudinal,
+      -next.thicknessMm / 2 - params.toleranceTransverse,
     ],
     "top-right",
     params.millingDiameter,
