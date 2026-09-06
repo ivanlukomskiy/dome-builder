@@ -1,11 +1,6 @@
 import * as THREE from 'three'
 import type { Face, SceneData } from './polyhedra'
-import {
-  buildVertexAdjacency,
-  computeVertexHubMetrics,
-  computeVertexTangentPlane,
-  edgeKey,
-} from './polyhedra'
+import { buildVertexAdjacency, computeVertexHubMetrics, computeVertexTangentPlane } from './polyhedra'
 import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometryManual'
 
 type Vec3Tuple = [number, number, number]
@@ -72,10 +67,14 @@ export interface ComputeEdgesInfoParams {
   chamferLength: number
 }
 
-// Every face registers - for each of its vertices - the unordered pair of ring-neighbors it
-// connects to on either side. A face incident to vertex v always occupies exactly the angular
-// wedge between v's edges to those two neighbors, so this is what "is there a face between these
-// two adjacent edges" reduces to.
+// Every face registers - for each of its vertices - the directed pair of ring-neighbors that
+// marks the wedge it fills. Face rings wind outward-CCW (three.js convention, see Face), and the
+// tangent-plane angle sort is CCW-from-outside too, so at vertex v the face's wedge sweeps in
+// increasing angular order from the edge toward `next` to the edge toward `prev` - i.e. the
+// directed pair is (next, prev), not (prev, next). Direction matters: with an unordered pair, a
+// degree-2 vertex (e.g. a single lone triangle) has both of its edges resolve to the same pair,
+// so both would wrongly claim the face; keying on direction means only the edge whose
+// next-in-angular-order neighbor is the ring's `prev` claims it.
 export function buildFaceNeighborPairs(faces: ReadonlyMap<number, Face>): Map<number, Map<string, number>> {
   const byVertex = new Map<number, Map<string, number>>()
 
@@ -90,11 +89,16 @@ export function buildFaceNeighborPairs(faces: ReadonlyMap<number, Face>): Map<nu
         pairs = new Map()
         byVertex.set(v, pairs)
       }
-      pairs.set(edgeKey(prev, next), faceId)
+      pairs.set(directedEdgeKey(next, prev), faceId)
     }
   }
 
   return byVertex
+}
+
+// a->b, direction-sensitive counterpart to edgeKey - see buildFaceNeighborPairs.
+function directedEdgeKey(a: number, b: number): string {
+  return `${a}->${b}`
 }
 
 // Everything about each vertex's edges: which struts go into it, their precalculated strut-end
@@ -117,11 +121,14 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
     chamferLength,
   } = params
 
+  console.log('data', data)
+
   const center = new THREE.Vector3(0, centerY, 0)
   const positionOf = (id: number) => transformedVertices.get(id)!
 
   const adjacency = buildVertexAdjacency(data.edges)
   const faceNeighborPairs = buildFaceNeighborPairs(data.faces)
+  console.log('faceNeighborPairs', faceNeighborPairs)
 
   const vertices: VertexEdgesInfo[] = []
 
@@ -158,7 +165,7 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
         halfWidth,
       )
       const nextNeighborId = metrics[(i + 1) % n].neighborId
-      const faceId = facePairs.get(edgeKey(m.neighborId, nextNeighborId))
+      const faceId = facePairs.get(directedEdgeKey(m.neighborId, nextNeighborId))
 
       return {
         edgeId: m.edgeId,
