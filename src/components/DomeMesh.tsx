@@ -438,7 +438,8 @@ export function DomeMesh({
         </mesh>
       )}
       {editingVertices &&
-        Array.from(data.vertices.entries()).map(([idx, v]) => {
+        Array.from(data.vertices.keys()).map((idx) => {
+          const v = resolvePosition(idx)
           const isSelected = selectedVertexIndices.has(idx)
           return (
             <mesh
