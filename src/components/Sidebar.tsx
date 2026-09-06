@@ -697,6 +697,20 @@ export function Sidebar({
         </section>
       )}
 
+      {mode === 'edit' && (
+        <section className="control-group">
+          <div className="button-row">
+            <button onClick={onGetEdgesInfo}>Get Edges Info</button>
+          </div>
+          <p className="hint">
+            Downloads a JSON file with, for every visible vertex: each edge going into it, its
+            precalculated strut-end measurements (offset, tenon, chamfer, milling), which
+            neighboring edges have a face between them and which don&rsquo;t, and the tangent
+            plane those edges were projected onto to work that out.
+          </p>
+        </section>
+      )}
+
       {mode === 'edit' && editTarget === 'vertices' && (
         <section className="control-group">
           <h2>Edit vertices</h2>
