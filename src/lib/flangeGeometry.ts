@@ -74,14 +74,14 @@ export interface FlangeShapeParams {
 }
 
 export const DEFAULT_FLANGE_SHAPE_PARAMS: FlangeShapeParams = {
-  toleranceLongitudinal: 0,
-  toleranceTransverse: 0,
+  toleranceLongitudinal: 2,
+  toleranceTransverse: 1,
   centerHoleDiameter: 8,
-  sideHoleDiameter: 4,
+  sideHoleDiameter: 6,
   sideHoleDiameterOffset: 6,
-  overshoot: 2,
-  minSide: 6,
-  millingDiameter: 8,
+  overshoot: 0,
+  minSide: 20,
+  millingDiameter: 5,
 };
 
 export interface FlangeBoundaryResult {
@@ -426,9 +426,6 @@ function computeConnectionSectorShape(
     "ccw",
   );
 
-  const bisect = edge.projectedAngleDeg + (next.projectedAngleDeg - edge.projectedAngleDeg) / 2
-  const perpendicular = polar(bisect + 90, params.minSide)
-
   let pen = draw();
   points.forEach((p, i) => {
     if (i === 0) {
@@ -437,8 +434,7 @@ function computeConnectionSectorShape(
       pen = pen.lineTo(p);
     }
   });
-  pen = pen.lineTo(perpendicular);
-  pen = pen.lineTo([-perpendicular[0], -perpendicular[1]])
+  pen = pen.lineTo([0,0])
   return pen.close();
 }
 
@@ -516,7 +512,7 @@ export function computeFlangeBoundary2D(
   vertex: FlangeVertexInput,
   params: FlangeShapeParams,
 ): FlangeBoundaryResult {
-  const helpers: HelperDrawing[] = [];
+  let helpers: HelperDrawing[] = [];
 
   // Shapes fused into `main`, kept in separate buckets so the final assembly below can fuse them
   // in a fixed order - fusing in a different order sometimes trips up opencascade's boolean ops,

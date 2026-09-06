@@ -49,23 +49,19 @@ interface Params {
   flange: FlangeParams
 }
 
-// Vertex 0 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - the dome's apex,
-// four struts evenly spaced 90 degrees apart with a face in every gap (no reflex wedge at all),
-// yet still crashes computeFlangeBoundary2D's replicad calls with a "memory access out of bounds"
-// opencascade error - a different failure than vertex 21's (see flangeGeometry.test.ts), since
-// this topology never touches the reflex-wedge branch that vertex 21's bug was in. `shared` is
-// back-derived from this vertex's own `strutEnd` values (same cornerLength/halfWidth/groove/
-// chamfer/milling numbers precalculateStrutEnd was given to produce them) - `flange`'s own
-// tolerance/hole params aren't part of that export, so those are still just
-// DEFAULT_FLANGE_SHAPE_PARAMS's values; tweak the Flange section below to match whatever they
-// were actually set to when this crashed.
+// Vertex 4 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - only two struts
+// at this vertex, with a face spanning the wedge from edge 5 to edge 8 (angular order) but not
+// the wedge back from edge 8 to edge 5 - the degree-2 case hasFaceToNextEdge needs to tell apart
+// (see computeEdgesInfo in edgesInfo.ts). `shared` is back-derived from this vertex's own
+// `strutEnd` values (same cornerLength/halfWidth/groove/chamfer/milling numbers
+// precalculateStrutEnd was given to produce them) - `flange`'s own tolerance/hole params aren't
+// part of that export, so those are still just DEFAULT_FLANGE_SHAPE_PARAMS's values; tweak the
+// Flange section below to match whatever they were actually set to for this vertex.
 const DEFAULT_PARAMS: Params = {
-  vertexId: 0,
+  vertexId: 4,
   edges: [
-    { edgeId: 19, neighborId: 10, thicknessMm: 25, offsetMm: 12.5, projectedAngleDeg: 0, hasFaceToNextEdge: true, faceIdToNextEdge: 18 },
-    { edgeId: 34, neighborId: 16, thicknessMm: 25, offsetMm: 12.5, projectedAngleDeg: 90, hasFaceToNextEdge: true, faceIdToNextEdge: 27 },
-    { edgeId: 0, neighborId: 4, thicknessMm: 25, offsetMm: 12.5, projectedAngleDeg: 180, hasFaceToNextEdge: true, faceIdToNextEdge: 0 },
-    { edgeId: 2, neighborId: 1, thicknessMm: 25, offsetMm: 12.5, projectedAngleDeg: 270, hasFaceToNextEdge: true, faceIdToNextEdge: 9 },
+    { edgeId: 5, neighborId: 1, thicknessMm: 75, offsetMm: 57.849701644135905, projectedAngleDeg: 48.189685104221425, hasFaceToNextEdge: true, faceIdToNextEdge: 3 },
+    { edgeId: 8, neighborId: 5, thicknessMm: 75, offsetMm: 57.849701644135905, projectedAngleDeg: 114.09484255211072, hasFaceToNextEdge: false, faceIdToNextEdge: null },
   ],
   shared: {
     cornerLength: 375,
