@@ -1,11 +1,6 @@
 import * as THREE from 'three'
-import type { Edge, Face, PolyhedronData } from './polyhedra'
-import {
-  computeVertexHubMetrics,
-  computeVisibleVertexEdges,
-  computeVisibleVertexIds,
-  resolveVertexPosition,
-} from './polyhedra'
+import type { SceneData } from './polyhedra'
+import { buildVertexAdjacency, computeVertexHubMetrics } from './polyhedra'
 import { add2, sub2, scale2, dot2, cross2, length2, normalize2 } from './vec2'
 
 // Pure 2D math for a single flat "meridian" plane - the plane through an edge's two vertices
@@ -364,43 +359,23 @@ export function computeStrutBoundary(
   }
 }
 
-// minOffset for every edge-end in the currently visible model, keyed by edge id then by the
-// vertex id at that end - built by running the same per-vertex hub-metric computation the HUD
-// uses (computeVertexHubMetrics/computeVisibleVertexEdges) for every visible vertex, so struts
-// get the exact miter offsets the HUD already shows for each hub.
+// minOffset for every edge-end in the model, keyed by edge id then by the vertex id at that
+// end - built by running the same per-vertex hub-metric computation the HUD uses
+// (computeVertexHubMetrics) for every vertex, so struts get the exact miter offsets the HUD
+// already shows for each hub.
 export function computeEdgeEndOffsets(
-  data: PolyhedronData,
-  transformedVertices: THREE.Vector3[],
-  addedVertices: ReadonlyMap<number, THREE.Vector3>,
-  layerCount: number,
-  deletedVertexIndices: ReadonlySet<number>,
-  deletedEdgeIndices: ReadonlySet<number>,
-  addedFaces: Face[],
-  addedEdges: Edge[],
+  data: SceneData,
+  transformedVertices: ReadonlyMap<number, THREE.Vector3>,
   centerY: number,
   edgeThicknessOf: (edgeId: number) => number,
 ): Map<number, Map<number, number>> {
-  const visibleVertexIds = computeVisibleVertexIds(
-    data,
-    transformedVertices,
-    layerCount,
-    deletedVertexIndices,
-    addedFaces,
-  )
   const center = new THREE.Vector3(0, centerY, 0)
-  const positionOf = (id: number) => resolveVertexPosition(id, transformedVertices, addedVertices)
+  const positionOf = (id: number) => transformedVertices.get(id)!
+  const adjacency = buildVertexAdjacency(data.edges)
 
   const result = new Map<number, Map<number, number>>()
-  for (const vertexId of visibleVertexIds) {
-    const edges = computeVisibleVertexEdges(
-      data,
-      transformedVertices,
-      layerCount,
-      deletedVertexIndices,
-      deletedEdgeIndices,
-      addedEdges,
-      vertexId,
-    )
+  for (const vertexId of transformedVertices.keys()) {
+    const edges = adjacency.get(vertexId) ?? []
     const metrics = computeVertexHubMetrics(positionOf(vertexId), center, edges, positionOf, edgeThicknessOf)
     for (const m of metrics) {
       let byVertex = result.get(m.edgeId)

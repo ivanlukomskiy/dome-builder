@@ -349,25 +349,57 @@ export function computePolyhedron(
   return { vertices, faces, edges, layers: computeLayers(vertices) }
 }
 
-export interface SlicedPolyhedron {
-  vertices: THREE.Vector3[]
-  keptVertexIndices: number[]
-  keptEdges: Edge[]
-  keptFaces: Face[]
+// The committed, currently-editable geometry: every vertex/edge/face in here is real and
+// visible - there is no "hidden but remembered" data, and no separate scheme for user-added
+// geometry. Ids are stable and never reused within one editing session (the three counters only
+// ever increase, and only reset on a fresh Create/Import), which is what lets vertexTransforms/
+// edgeThickness/selection (all keyed by id, and deliberately outside the undo snapshot - see
+// useHistory) survive undo/redo without any remapping.
+export interface SceneData {
+  vertices: Map<number, THREE.Vector3>
+  edges: Map<number, Edge>
+  faces: Map<number, Face>
+  nextVertexId: number
+  nextEdgeId: number
+  nextFaceId: number
 }
 
-export function sliceLayers(data: PolyhedronData, layerCount: number): SlicedPolyhedron {
+// Bakes a layer-count cutoff into a concrete SceneData: keeps only the vertices in
+// data.layers[0..layerCount-1] (and the edges/faces whose every endpoint survives), and assigns
+// them fresh, dense ids starting at 0. Used both by the "New" tab's live preview (re-run on every
+// layer-slider drag) and by Create to bake the committed shape - the same function call, so
+// "what you see in preview" and "what Create commits" are identical by construction.
+export function pruneToLayerCount(data: PolyhedronData, layerCount: number): SceneData {
   const count = Math.min(Math.max(layerCount, 1), data.layers.length)
   const kept = new Set<number>()
   for (let i = 0; i < count; i++) {
     for (const idx of data.layers[i].vertexIndices) kept.add(idx)
   }
-  return {
-    vertices: data.vertices,
-    keptVertexIndices: Array.from(kept),
-    keptEdges: data.edges.filter(([a, b]) => kept.has(a) && kept.has(b)),
-    keptFaces: data.faces.filter((f) => f.every((i) => kept.has(i))),
+
+  const idMap = new Map<number, number>()
+  const vertices = new Map<number, THREE.Vector3>()
+  let nextVertexId = 0
+  for (const oldIdx of Array.from(kept).sort((a, b) => a - b)) {
+    const id = nextVertexId++
+    idMap.set(oldIdx, id)
+    vertices.set(id, data.vertices[oldIdx])
   }
+
+  const edges = new Map<number, Edge>()
+  let nextEdgeId = 0
+  for (const [a, b] of data.edges) {
+    if (!kept.has(a) || !kept.has(b)) continue
+    edges.set(nextEdgeId++, [idMap.get(a)!, idMap.get(b)!])
+  }
+
+  const faces = new Map<number, Face>()
+  let nextFaceId = 0
+  for (const face of data.faces) {
+    if (!face.every((i) => kept.has(i))) continue
+    faces.set(nextFaceId++, face.map((i) => idMap.get(i)!))
+  }
+
+  return { vertices, edges, faces, nextVertexId, nextEdgeId, nextFaceId }
 }
 
 // Every vertex among `candidateIds` on the same layer (same height) as the given vertex.
@@ -454,75 +486,16 @@ export function applyVertexTransform(v: THREE.Vector3, t: VertexTransform): THRE
 }
 
 export function applyVertexTransforms(
-  vertices: THREE.Vector3[],
+  vertices: ReadonlyMap<number, THREE.Vector3>,
   transforms: ReadonlyMap<number, VertexTransform>,
-): THREE.Vector3[] {
+): ReadonlyMap<number, THREE.Vector3> {
   if (transforms.size === 0) return vertices
-  return vertices.map((v, idx) => {
-    const t = transforms.get(idx)
-    return t ? applyVertexTransform(v, t) : v
-  })
-}
-
-// Same idea for added vertices: their default (untransformed) position is wherever they were
-// created.
-export function applyAddedVertexTransforms(
-  baseAddedVertices: ReadonlyMap<number, THREE.Vector3>,
-  transforms: ReadonlyMap<number, VertexTransform>,
-): Map<number, THREE.Vector3> {
   const result = new Map<number, THREE.Vector3>()
-  for (const [id, pos] of baseAddedVertices) {
+  for (const [id, v] of vertices) {
     const t = transforms.get(id)
-    result.set(id, t ? applyVertexTransform(pos, t) : pos)
+    result.set(id, t ? applyVertexTransform(v, t) : v)
   }
   return result
-}
-
-export function removeVertices(
-  sliced: SlicedPolyhedron,
-  removed: ReadonlySet<number>,
-): SlicedPolyhedron {
-  if (removed.size === 0) return sliced
-  return {
-    vertices: sliced.vertices,
-    keptVertexIndices: sliced.keptVertexIndices.filter((i) => !removed.has(i)),
-    keptEdges: sliced.keptEdges.filter(([a, b]) => !removed.has(a) && !removed.has(b)),
-    keptFaces: sliced.keptFaces.filter((f) => f.every((i) => !removed.has(i))),
-  }
-}
-
-// Every vertex id currently visible in the model: canonical vertices kept by the layer slice
-// and not deleted, plus added vertices whose whole triangle (all three anchors) is still
-// visible too - the same rule DomeMesh uses to decide what to render.
-export function computeVisibleVertexIds(
-  data: PolyhedronData,
-  transformedVertices: THREE.Vector3[],
-  layerCount: number,
-  deletedVertexIndices: ReadonlySet<number>,
-  addedFaces: Face[],
-): number[] {
-  const sliced = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
-  const kept = removeVertices(sliced, deletedVertexIndices)
-  const keptSet = new Set(kept.keptVertexIndices)
-
-  const ids = new Set(kept.keptVertexIndices)
-  for (const face of addedFaces) {
-    const visible = face.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx)))
-    if (!visible) continue
-    for (const idx of face) if (idx < 0) ids.add(idx)
-  }
-  return Array.from(ids)
-}
-
-// Vertex indices are non-negative for the shape's own (canonical) vertices, looked up in
-// `canonicalVertices`. A user-added vertex instead gets a negative id, looked up in `added` -
-// this keeps the two spaces collision-free without needing a combined array.
-export function resolveVertexPosition(
-  index: number,
-  canonicalVertices: THREE.Vector3[],
-  added: ReadonlyMap<number, THREE.Vector3>,
-): THREE.Vector3 {
-  return index >= 0 ? canonicalVertices[index] : added.get(index)!
 }
 
 // An edge's own "position", for grouping purposes (layer/symmetric selection work the same way
@@ -538,14 +511,11 @@ export function edgeKey(a: number, b: number): string {
   return a < b ? `${a}_${b}` : `${b}_${a}`
 }
 
-// Every edge that already exists between two vertices, canonical or added, keyed the same
-// order-independent way - so a new edge only gets created when one is genuinely missing.
-// Signed the same way added vertices/faces are: non-negative indexes into `canonicalEdges`,
-// negative into `addedEdges` via -(index + 1).
-export function buildEdgeIndex(canonicalEdges: Edge[], addedEdges: Edge[]): Map<string, number> {
+// Every edge that already exists between two vertices, keyed the same order-independent way -
+// so a new edge only gets created when one is genuinely missing.
+export function buildEdgeIndex(edges: ReadonlyMap<number, Edge>): Map<string, number> {
   const index = new Map<string, number>()
-  canonicalEdges.forEach(([a, b], i) => index.set(edgeKey(a, b), i))
-  addedEdges.forEach(([a, b], i) => index.set(edgeKey(a, b), -(i + 1)))
+  for (const [id, [a, b]] of edges) index.set(edgeKey(a, b), id)
   return index
 }
 
@@ -617,38 +587,23 @@ export interface VertexEdgeRef {
   neighborId: number
 }
 
-// Every edge - canonical or added - currently connecting to the given vertex: kept by the
-// layer slice, not deleted, with its other endpoint likewise kept/not deleted. Mirrors the
-// same visibility rules DomeMesh renders edges by, so this matches what's actually on screen.
-export function computeVisibleVertexEdges(
-  data: PolyhedronData,
-  transformedVertices: THREE.Vector3[],
-  layerCount: number,
-  deletedVertexIndices: ReadonlySet<number>,
-  deletedEdgeIndices: ReadonlySet<number>,
-  addedEdges: Edge[],
-  vertexId: number,
-): VertexEdgeRef[] {
-  const sliced = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
-  const kept = removeVertices(sliced, deletedVertexIndices)
-  const keptSet = new Set(kept.keptVertexIndices)
-
-  const refs: VertexEdgeRef[] = []
-  data.edges.forEach(([a, b], i) => {
-    if (deletedEdgeIndices.has(i) || !keptSet.has(a) || !keptSet.has(b)) return
-    if (a === vertexId) refs.push({ edgeId: i, neighborId: b })
-    else if (b === vertexId) refs.push({ edgeId: i, neighborId: a })
-  })
-  addedEdges.forEach(([a, b], i) => {
-    const id = -(i + 1)
-    if (deletedEdgeIndices.has(id)) return
-    const aOk = a < 0 ? !deletedVertexIndices.has(a) : keptSet.has(a)
-    const bOk = b < 0 ? !deletedVertexIndices.has(b) : keptSet.has(b)
-    if (!aOk || !bOk) return
-    if (a === vertexId) refs.push({ edgeId: id, neighborId: b })
-    else if (b === vertexId) refs.push({ edgeId: id, neighborId: a })
-  })
-  return refs
+// Every vertex's edges, in one O(V+E) pass: since a SceneData has no hidden/deleted geometry
+// left to filter, this is just each edge registered under both of its endpoints.
+export function buildVertexAdjacency(edges: ReadonlyMap<number, Edge>): Map<number, VertexEdgeRef[]> {
+  const adjacency = new Map<number, VertexEdgeRef[]>()
+  const add = (vertexId: number, ref: VertexEdgeRef) => {
+    let list = adjacency.get(vertexId)
+    if (!list) {
+      list = []
+      adjacency.set(vertexId, list)
+    }
+    list.push(ref)
+  }
+  for (const [edgeId, [a, b]] of edges) {
+    add(a, { edgeId, neighborId: b })
+    add(b, { edgeId, neighborId: a })
+  }
+  return adjacency
 }
 
 export interface HubEdgeMetric {
@@ -755,55 +710,15 @@ export interface ModelStats {
   bounds: ModelBounds | null
 }
 
-// Everything the HUD needs to know about the model currently on screen: how many
-// vertices/edges/faces are actually visible (kept by the layer slice, not individually
-// deleted - canonical and added alike, the same rules DomeMesh itself renders by) and the
-// bounding box those visible vertices span, in mm.
+// Everything the HUD needs to know about the model currently on screen: the vertex/edge/face
+// counts and the bounding box the vertices span, in mm.
 export function computeModelStats(
-  data: PolyhedronData,
-  transformedVertices: THREE.Vector3[],
-  addedVertices: ReadonlyMap<number, THREE.Vector3>,
-  layerCount: number,
-  deletedVertexIndices: ReadonlySet<number>,
-  deletedEdgeIndices: ReadonlySet<number>,
-  deletedFaceIndices: ReadonlySet<number>,
-  addedFaces: Face[],
-  addedEdges: Edge[],
+  vertices: ReadonlyMap<number, THREE.Vector3>,
+  edgeCount: number,
+  faceCount: number,
 ): ModelStats {
-  const sliced = sliceLayers({ ...data, vertices: transformedVertices }, layerCount)
-  const kept = removeVertices(sliced, deletedVertexIndices)
-  const keptSet = new Set(kept.keptVertexIndices)
-
-  const visibleVertexIds = new Set(kept.keptVertexIndices)
-
-  let faceCount = 0
-  data.faces.forEach((f, i) => {
-    if (!deletedFaceIndices.has(i) && f.every((idx) => keptSet.has(idx))) faceCount++
-  })
-  addedFaces.forEach((f, i) => {
-    const id = -(i + 1)
-    if (deletedFaceIndices.has(id)) return
-    if (f.every((idx) => (idx < 0 ? !deletedVertexIndices.has(idx) : keptSet.has(idx)))) {
-      faceCount++
-      for (const idx of f) if (idx < 0) visibleVertexIds.add(idx)
-    }
-  })
-
-  let edgeCount = 0
-  data.edges.forEach(([a, b], i) => {
-    if (!deletedEdgeIndices.has(i) && keptSet.has(a) && keptSet.has(b)) edgeCount++
-  })
-  addedEdges.forEach(([a, b], i) => {
-    const id = -(i + 1)
-    if (deletedEdgeIndices.has(id)) return
-    const aOk = a < 0 ? !deletedVertexIndices.has(a) : keptSet.has(a)
-    const bOk = b < 0 ? !deletedVertexIndices.has(b) : keptSet.has(b)
-    if (aOk && bOk) edgeCount++
-  })
-
   let bounds: ModelBounds | null = null
-  for (const id of visibleVertexIds) {
-    const p = resolveVertexPosition(id, transformedVertices, addedVertices)
+  for (const p of vertices.values()) {
     if (!bounds) {
       bounds = { minX: p.x, maxX: p.x, minY: p.y, maxY: p.y, minZ: p.z, maxZ: p.z }
     } else {
@@ -816,34 +731,118 @@ export function computeModelStats(
     }
   }
 
-  return { vertexCount: visibleVertexIds.size, edgeCount, faceCount, bounds }
+  return { vertexCount: vertices.size, edgeCount, faceCount, bounds }
 }
 
-export interface AddedGeometry {
-  vertices: Map<number, THREE.Vector3>
-  faces: Face[]
-  nextId: number
+// Removes the given vertices, cascading: any edge touching one of them, and any face touching
+// one of them, is removed too (today's soft-delete got this "for free" from read-time
+// filtering; hard delete has to do it explicitly).
+export function deleteVertices(scene: SceneData, ids: ReadonlySet<number>): SceneData {
+  if (ids.size === 0) return scene
+  const vertices = new Map(Array.from(scene.vertices).filter(([id]) => !ids.has(id)))
+  const edges = new Map(Array.from(scene.edges).filter(([, [a, b]]) => !ids.has(a) && !ids.has(b)))
+  const faces = new Map(Array.from(scene.faces).filter(([, face]) => face.every((v) => !ids.has(v))))
+  return { ...scene, vertices, edges, faces }
 }
 
-// Pairs up the given vertices by nearest neighbor, adding a new vertex at each pair's midpoint
-// and connecting all three into a triangular face.
-export function buildAddedGeometry(
-  selectedIndices: number[],
-  positionOf: (index: number) => THREE.Vector3,
-  startId: number,
-): AddedGeometry {
-  const vertices = new Map<number, THREE.Vector3>()
-  const faces: Face[] = []
-  let nextId = startId
+// Removes the given edges, cascading: any face that had one of them as a side is removed too,
+// and any vertex touched by a deleted edge that's left with no surviving edge is a stray point,
+// removed as well.
+export function deleteEdges(scene: SceneData, ids: ReadonlySet<number>): SceneData {
+  if (ids.size === 0) return scene
 
-  for (const [a, b] of pairByNearestNeighbor(selectedIndices, positionOf)) {
-    const midpoint = positionOf(a).clone().add(positionOf(b)).multiplyScalar(0.5)
-    vertices.set(nextId, midpoint)
-    faces.push([a, b, nextId])
-    nextId -= 1
+  const deletedEdgeKeys = new Set<string>()
+  const touchedVertices = new Set<number>()
+  for (const id of ids) {
+    const edge = scene.edges.get(id)
+    if (!edge) continue
+    deletedEdgeKeys.add(edgeKey(edge[0], edge[1]))
+    touchedVertices.add(edge[0])
+    touchedVertices.add(edge[1])
   }
 
-  return { vertices, faces, nextId }
+  const faceUsesADeletedEdge = (face: Face) =>
+    face.some((v, i) => deletedEdgeKeys.has(edgeKey(v, face[(i + 1) % face.length])))
+  const faces = new Map(Array.from(scene.faces).filter(([, face]) => !faceUsesADeletedEdge(face)))
+
+  const edges = new Map<number, Edge>()
+  const remainingDegree = new Set<number>()
+  for (const [id, edge] of scene.edges) {
+    if (ids.has(id)) continue
+    edges.set(id, edge)
+    remainingDegree.add(edge[0])
+    remainingDegree.add(edge[1])
+  }
+
+  const strayVertices = new Set(Array.from(touchedVertices).filter((v) => !remainingDegree.has(v)))
+  const vertices =
+    strayVertices.size === 0
+      ? scene.vertices
+      : new Map(Array.from(scene.vertices).filter(([id]) => !strayVertices.has(id)))
+
+  return { ...scene, vertices, edges, faces }
+}
+
+// Removes the given faces. No cascade - deleting a face never affects its vertices or edges.
+export function deleteFaces(scene: SceneData, ids: ReadonlySet<number>): SceneData {
+  if (ids.size === 0) return scene
+  const faces = new Map(Array.from(scene.faces).filter(([id]) => !ids.has(id)))
+  return { ...scene, faces }
+}
+
+// "Add Points": pairs the given vertices by nearest neighbor, adding one new vertex at each
+// pair's midpoint, one triangular face per pair, and the (up to 3) edges needed to complete
+// each triangle, skipping any base edge that already exists.
+export function addMidpointsBetween(
+  scene: SceneData,
+  selectedIds: number[],
+  positionOf: (id: number) => THREE.Vector3,
+): SceneData {
+  const edgeIndex = buildEdgeIndex(scene.edges)
+  const vertices = new Map(scene.vertices)
+  const edges = new Map(scene.edges)
+  const faces = new Map(scene.faces)
+  let nextVertexId = scene.nextVertexId
+  let nextEdgeId = scene.nextEdgeId
+  let nextFaceId = scene.nextFaceId
+
+  for (const [a, b] of pairByNearestNeighbor(selectedIds, positionOf)) {
+    const mid = positionOf(a).clone().add(positionOf(b)).multiplyScalar(0.5)
+    const midId = nextVertexId++
+    vertices.set(midId, mid)
+    faces.set(nextFaceId++, [a, b, midId])
+    edges.set(nextEdgeId++, [a, midId])
+    edges.set(nextEdgeId++, [midId, b])
+    if (!edgeIndex.has(edgeKey(a, b))) edges.set(nextEdgeId++, [a, b])
+  }
+
+  return { vertices, edges, faces, nextVertexId, nextEdgeId, nextFaceId }
+}
+
+// "Connect Vertices": pairs the given vertices by nearest neighbor and adds a direct edge for
+// each pair not already connected.
+export function connectVertexPairs(
+  scene: SceneData,
+  selectedIds: number[],
+  positionOf: (id: number) => THREE.Vector3,
+): SceneData {
+  const edgeIndex = buildEdgeIndex(scene.edges)
+  const edges = new Map(scene.edges)
+  let nextEdgeId = scene.nextEdgeId
+  for (const [a, b] of pairByNearestNeighbor(selectedIds, positionOf)) {
+    if (!edgeIndex.has(edgeKey(a, b))) edges.set(nextEdgeId++, [a, b])
+  }
+  if (nextEdgeId === scene.nextEdgeId) return scene
+  return { ...scene, edges, nextEdgeId }
+}
+
+// "Create Face": adds one new face per given vertex-triple.
+export function addFaces(scene: SceneData, triangles: [number, number, number][]): SceneData {
+  if (triangles.length === 0) return scene
+  const faces = new Map(scene.faces)
+  let nextFaceId = scene.nextFaceId
+  for (const t of triangles) faces.set(nextFaceId++, t)
+  return { ...scene, faces, nextFaceId }
 }
 
 const RADIAL_EPS = 1e-9

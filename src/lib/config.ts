@@ -1,18 +1,20 @@
 import * as THREE from 'three'
-import type { Edge, Face, PolyhedronData, SelectionMode, VertexTransform } from './polyhedra'
-import { computeLayers } from './polyhedra'
+import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { downloadJson } from './download'
 
-// A saved config captures the *result* of picking a shape in the "New" tab - the concrete
-// vertex/face/edge data - plus every edit and view/preview setting made on top of it. It does
-// not capture the shape/axis/subdivisions recipe (that's only meaningful while still choosing
-// a shape), which tab is active, or the redo stack (session-only, not worth persisting).
+// A saved config captures the *result* of picking a shape in the "New" tab - the concrete,
+// already-pruned vertex/face/edge data - plus every edit and view/preview setting made on top of
+// it. It does not capture the shape/axis/subdivisions/layers recipe (that's only meaningful
+// while still choosing a shape), which tab is active, or the undo history (session-only, not
+// worth persisting).
 export interface DomeConfig {
-  version: 11
-  vertices: [number, number, number][]
-  faces: Face[]
-  edges: Edge[]
-  layerCount: number
+  version: 12
+  vertices: [number, [number, number, number]][]
+  edges: [number, Edge][]
+  faces: [number, Face][]
+  nextVertexId: number
+  nextEdgeId: number
+  nextFaceId: number
   selectionMode: SelectionMode
   centerZ: number
   extrudeDistance: number
@@ -41,29 +43,16 @@ export interface DomeConfig {
   overshoot: number
   minSide: number
   flangeMillingDiameter: number
-  deletedGroups: number[][]
   vertexTransforms: [number, VertexTransform][]
-  addedVertices: [number, [number, number, number]][]
-  addedFaces: Face[]
-  nextAddedVertexId: number
-  // Extra edges beyond the canonical `edges` - e.g. the sides "Add Points" creates that didn't
-  // already exist. Selectable/deletable/overridable just like canonical edges, signed the same
-  // way added vertices/faces are: referenced elsewhere as -(index here) - 1.
-  addedEdges: Edge[]
-  // Per-edge thickness override, in mm, keyed by index into `edges` (canonical) or the signed
-  // id of an entry in `addedEdges`; absent means "use the global `thickness` above".
+  // Per-edge thickness override, in mm, keyed by edge id; absent means "use the global
+  // `thickness` above".
   edgeThickness: [number, number][]
-  // Deleted faces - indices into `faces` (canonical) or -(index into addedFaces + 1) (added).
-  deletedFaceIndices: number[]
-  // Deleted edges - indices into `edges` (canonical) or -(index into addedEdges + 1) (added).
-  deletedEdgeIndices: number[]
 }
 
 // The subset of App's state a config captures - plain data in, plain data out, so App can
 // build one straight from its own state variables and apply one straight back onto them.
 export interface DomeState {
-  baseData: PolyhedronData
-  layerCount: number
+  sceneData: SceneData
   selectionMode: SelectionMode
   centerZ: number
   extrudeDistance: number
@@ -83,24 +72,22 @@ export interface DomeState {
   overshoot: number
   minSide: number
   flangeMillingDiameter: number
-  deletedGroups: number[][]
   vertexTransforms: ReadonlyMap<number, VertexTransform>
-  addedVertices: ReadonlyMap<number, THREE.Vector3>
-  addedFaces: Face[]
-  nextAddedVertexId: number
-  addedEdges: Edge[]
   edgeThickness: ReadonlyMap<number, number>
-  deletedFaceIndices: ReadonlySet<number>
-  deletedEdgeIndices: ReadonlySet<number>
 }
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 11,
-    vertices: state.baseData.vertices.map((v) => [v.x, v.y, v.z]),
-    faces: state.baseData.faces,
-    edges: state.baseData.edges,
-    layerCount: state.layerCount,
+    version: 12,
+    vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
+      id,
+      [v.x, v.y, v.z],
+    ]),
+    edges: Array.from(state.sceneData.edges.entries()),
+    faces: Array.from(state.sceneData.faces.entries()),
+    nextVertexId: state.sceneData.nextVertexId,
+    nextEdgeId: state.sceneData.nextEdgeId,
+    nextFaceId: state.sceneData.nextFaceId,
     selectionMode: state.selectionMode,
     centerZ: state.centerZ,
     extrudeDistance: state.extrudeDistance,
@@ -120,31 +107,21 @@ export function serializeConfig(state: DomeState): DomeConfig {
     overshoot: state.overshoot,
     minSide: state.minSide,
     flangeMillingDiameter: state.flangeMillingDiameter,
-    deletedGroups: state.deletedGroups,
     vertexTransforms: Array.from(state.vertexTransforms.entries()),
-    addedVertices: Array.from(state.addedVertices.entries()).map(([id, v]) => [
-      id,
-      [v.x, v.y, v.z],
-    ]),
-    addedFaces: state.addedFaces,
-    nextAddedVertexId: state.nextAddedVertexId,
-    addedEdges: state.addedEdges,
     edgeThickness: Array.from(state.edgeThickness.entries()),
-    deletedFaceIndices: Array.from(state.deletedFaceIndices),
-    deletedEdgeIndices: Array.from(state.deletedEdgeIndices),
   }
 }
 
 export function deserializeConfig(config: DomeConfig): DomeState {
-  const vertices = config.vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z))
   return {
-    baseData: {
-      vertices,
-      faces: config.faces,
-      edges: config.edges,
-      layers: computeLayers(vertices),
+    sceneData: {
+      vertices: new Map(config.vertices.map(([id, [x, y, z]]) => [id, new THREE.Vector3(x, y, z)])),
+      edges: new Map(config.edges),
+      faces: new Map(config.faces),
+      nextVertexId: config.nextVertexId,
+      nextEdgeId: config.nextEdgeId,
+      nextFaceId: config.nextFaceId,
     },
-    layerCount: config.layerCount,
     selectionMode: config.selectionMode,
     centerZ: config.centerZ,
     extrudeDistance: config.extrudeDistance,
@@ -164,17 +141,8 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     overshoot: config.overshoot,
     minSide: config.minSide,
     flangeMillingDiameter: config.flangeMillingDiameter,
-    deletedGroups: config.deletedGroups,
     vertexTransforms: new Map(config.vertexTransforms),
-    addedVertices: new Map(
-      config.addedVertices.map(([id, [x, y, z]]) => [id, new THREE.Vector3(x, y, z)]),
-    ),
-    addedFaces: config.addedFaces,
-    nextAddedVertexId: config.nextAddedVertexId,
-    addedEdges: config.addedEdges,
     edgeThickness: new Map(config.edgeThickness),
-    deletedFaceIndices: new Set(config.deletedFaceIndices),
-    deletedEdgeIndices: new Set(config.deletedEdgeIndices),
   }
 }
 
@@ -189,7 +157,7 @@ export function loadConfigFromLocalStorage(): DomeConfig | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as DomeConfig
-    return parsed.version === 11 ? parsed : null
+    return parsed.version === 12 ? parsed : null
   } catch {
     return null
   }

@@ -3,15 +3,8 @@ import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { EditTarget, ViewMode } from '../App'
-import type { Edge, Face, HubEdgeMetric, PolyhedronData } from '../lib/polyhedra'
-import {
-  computeModelStats,
-  computeVertexHubMetrics,
-  computeVisibleVertexEdges,
-  computeVisibleVertexIds,
-  edgeKey,
-  resolveVertexPosition,
-} from '../lib/polyhedra'
+import type { HubEdgeMetric, SceneData } from '../lib/polyhedra'
+import { buildVertexAdjacency, computeModelStats, computeVertexHubMetrics, edgeKey } from '../lib/polyhedra'
 import { buildFaceNeighborPairs } from '../lib/edgesInfo'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
 import { Hud, type HudHubEdgeMetric } from './Hud'
@@ -19,19 +12,12 @@ import { Hud, type HudHubEdgeMetric } from './Hud'
 interface ViewportProps {
   mode: ViewMode
   editTarget: EditTarget
-  data: PolyhedronData
-  layerCount: number
-  transformedVertices: THREE.Vector3[]
-  deletedVertexIndices: ReadonlySet<number>
+  data: SceneData
+  transformedVertices: ReadonlyMap<number, THREE.Vector3>
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
-  deletedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
   selectedFaceIndices: ReadonlySet<number>
-  deletedFaceIndices: ReadonlySet<number>
-  addedVertices: ReadonlyMap<number, THREE.Vector3>
-  addedFaces: Face[]
-  addedEdges: Edge[]
   centerY: number
   extrudeDistance: number
   thickness: number
@@ -60,18 +46,11 @@ export function Viewport({
   mode,
   editTarget,
   data,
-  layerCount,
   transformedVertices,
-  deletedVertexIndices,
   selectedVertexIndices,
   selectedEdgeIndices,
-  deletedEdgeIndices,
   edgeThickness,
   selectedFaceIndices,
-  deletedFaceIndices,
-  addedVertices,
-  addedFaces,
-  addedEdges,
   centerY,
   extrudeDistance,
   thickness,
@@ -96,29 +75,8 @@ export function Viewport({
   onDeselectAll,
 }: ViewportProps) {
   const stats = useMemo(
-    () =>
-      computeModelStats(
-        data,
-        transformedVertices,
-        addedVertices,
-        layerCount,
-        deletedVertexIndices,
-        deletedEdgeIndices,
-        deletedFaceIndices,
-        addedFaces,
-        addedEdges,
-      ),
-    [
-      data,
-      transformedVertices,
-      addedVertices,
-      layerCount,
-      deletedVertexIndices,
-      deletedEdgeIndices,
-      deletedFaceIndices,
-      addedFaces,
-      addedEdges,
-    ],
+    () => computeModelStats(transformedVertices, data.edges.size, data.faces.size),
+    [transformedVertices, data.edges.size, data.faces.size],
   )
 
   const selectedVertexElevation = useMemo(() => {
@@ -126,9 +84,9 @@ export function Viewport({
       return null
     }
     const [id] = selectedVertexIndices
-    const pos = resolveVertexPosition(id, transformedVertices, addedVertices)
+    const pos = transformedVertices.get(id)!
     return pos.y - stats.bounds.minY
-  }, [mode, editTarget, selectedVertexIndices, transformedVertices, addedVertices, stats.bounds])
+  }, [mode, editTarget, selectedVertexIndices, transformedVertices, stats.bounds])
 
   const selectedVertexId = useMemo(() => {
     if (mode !== 'edit' || editTarget !== 'vertices' || selectedVertexIndices.size !== 1) return null
@@ -145,16 +103,8 @@ export function Viewport({
   const selectedVertexHubMetrics = useMemo<HudHubEdgeMetric[]>(() => {
     if (selectedVertexId === null) return []
     const id = selectedVertexId
-    const positionOf = (vid: number) => resolveVertexPosition(vid, transformedVertices, addedVertices)
-    const edges = computeVisibleVertexEdges(
-      data,
-      transformedVertices,
-      layerCount,
-      deletedVertexIndices,
-      deletedEdgeIndices,
-      addedEdges,
-      id,
-    )
+    const positionOf = (vid: number) => transformedVertices.get(vid)!
+    const edges = buildVertexAdjacency(data.edges).get(id) ?? []
     const center = new THREE.Vector3(0, centerY, 0)
     const metrics: HubEdgeMetric[] = computeVertexHubMetrics(
       positionOf(id),
@@ -163,11 +113,7 @@ export function Viewport({
       positionOf,
       (edgeId) => edgeThickness.get(edgeId) ?? thickness,
     )
-    const visibleVertexSet = new Set(
-      computeVisibleVertexIds(data, transformedVertices, layerCount, deletedVertexIndices, addedFaces),
-    )
-    const facePairs =
-      buildFaceNeighborPairs(data, addedFaces, deletedFaceIndices, visibleVertexSet).get(id) ?? new Map()
+    const facePairs = buildFaceNeighborPairs(data.faces).get(id) ?? new Map()
     const n = metrics.length
     return metrics.map((m, i) => {
       const nextNeighborId = metrics[(i + 1) % n].neighborId
@@ -176,21 +122,7 @@ export function Viewport({
         hasFaceToNextEdge: facePairs.has(edgeKey(m.neighborId, nextNeighborId)),
       }
     })
-  }, [
-    selectedVertexId,
-    transformedVertices,
-    addedVertices,
-    data,
-    layerCount,
-    deletedVertexIndices,
-    deletedEdgeIndices,
-    addedEdges,
-    addedFaces,
-    deletedFaceIndices,
-    centerY,
-    edgeThickness,
-    thickness,
-  ])
+  }, [selectedVertexId, transformedVertices, data.edges, data.faces, centerY, edgeThickness, thickness])
 
   // Preview mode builds every strut/flange solid in a background worker (see DomeMesh.tsx and
   // previewBuilder.worker.ts) - this just holds whatever progress it last reported, to surface in
@@ -238,18 +170,11 @@ export function Viewport({
           mode={mode}
           editTarget={editTarget}
           data={data}
-          layerCount={layerCount}
           transformedVertices={transformedVertices}
-          deletedVertexIndices={deletedVertexIndices}
           selectedVertexIndices={selectedVertexIndices}
           selectedEdgeIndices={selectedEdgeIndices}
-          deletedEdgeIndices={deletedEdgeIndices}
           edgeThickness={edgeThickness}
           selectedFaceIndices={selectedFaceIndices}
-          deletedFaceIndices={deletedFaceIndices}
-          addedVertices={addedVertices}
-          addedFaces={addedFaces}
-          addedEdges={addedEdges}
           centerY={centerY}
           extrudeDistance={extrudeDistance}
           thickness={thickness}

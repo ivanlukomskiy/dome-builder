@@ -118,7 +118,6 @@ interface SidebarProps {
   onDeleteSelected: () => void
   onUndo: () => void
   onRedo: () => void
-  onCancelAll: () => void
 }
 
 // null return means the selected vertices don't all share the same value for this field.
@@ -292,7 +291,6 @@ export function Sidebar({
   onDeleteSelected,
   onUndo,
   onRedo,
-  onCancelAll,
 }: SidebarProps) {
   const axisOptions = SHAPE_AXES[shape]
   const maxLayers = data.layers.length
@@ -739,12 +737,6 @@ export function Sidebar({
             </button>
             <button disabled={!canRedo} onClick={onRedo}>
               Redo
-            </button>
-            <button
-              disabled={!canUndo && !canRedo && selectedCount === 0}
-              onClick={onCancelAll}
-            >
-              Cancel All
             </button>
           </div>
           <div className="button-row">

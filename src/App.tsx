@@ -1,33 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
-import * as THREE from 'three'
-import type {
-  AxisType,
-  Edge,
-  Face,
-  PolyhedronData,
-  SelectionMode,
-  ShapeType,
-  VertexTransform,
-} from './lib/polyhedra'
+import type { AxisType, Edge, Face, SceneData, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
 import {
-  applyAddedVertexTransforms,
+  addFaces,
+  addMidpointsBetween,
   applyVertexTransforms,
-  buildAddedGeometry,
-  buildEdgeIndex,
   computePolyhedron,
   computeTransformToPosition,
-  computeVisibleVertexIds,
+  connectVertexPairs,
   DEFAULT_DIAMETER_MM,
   DEFAULT_VERTEX_TRANSFORM,
-  edgeKey,
+  deleteEdges,
+  deleteFaces,
+  deleteVertices,
   edgeMidpoint,
   faceCentroid,
   findEdgeTriangles,
   findLayerGroup,
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
-  pairByNearestNeighbor,
-  resolveVertexPosition,
+  pruneToLayerCount,
   scaleToRadius,
   SHAPE_AXES,
 } from './lib/polyhedra'
@@ -46,6 +37,7 @@ import { downloadBlob, downloadJson } from './lib/download'
 import { computeEdgesInfo } from './lib/edgesInfo'
 import { DEFAULT_FLANGE_SHAPE_PARAMS } from './lib/flangeGeometry'
 import { runStepExport, type StepExportProgress } from './lib/stepExportRunner'
+import { useHistory } from './lib/useHistory'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
 export type EditOrPreviewMode = 'edit' | 'preview'
@@ -75,18 +67,6 @@ export interface PreviewShapeParams {
   flangeMillingDiameter: number
 }
 
-// Face ids are signed like added-vertex ids: non-negative indexes into `data.faces`
-// (canonical), negative into `addedFaces` via -(index + 1).
-function faceIdToAddedIndex(id: number): number {
-  return -id - 1
-}
-
-// Same signed scheme for edge ids: non-negative indexes into `data.edges` (canonical),
-// negative into `addedEdges` via -(index + 1).
-function edgeIdToAddedIndex(id: number): number {
-  return -id - 1
-}
-
 // Shared by both vertex and edge selection: toggles a whole group (an individual pick, a
 // layer, or a symmetric orbit) on or off together, based on whether it was already fully
 // selected.
@@ -103,12 +83,14 @@ function toggleGroupSelection(prev: ReadonlySet<number>, group: number[]): Set<n
 const DEFAULT_SHAPE: ShapeType = 'octahedron'
 const DEFAULT_AXIS: AxisType = 'vertex'
 const DEFAULT_SUBDIVISIONS = 3
-const DEFAULT_BASE_DATA = computePolyhedron(
+const DEFAULT_SHAPE_DATA = computePolyhedron(
   DEFAULT_SHAPE,
   DEFAULT_AXIS,
   DEFAULT_SUBDIVISIONS,
   DEFAULT_DIAMETER_MM,
 )
+const DEFAULT_LAYER_COUNT = Math.ceil(DEFAULT_SHAPE_DATA.layers.length / 2)
+const DEFAULT_SCENE_DATA = pruneToLayerCount(DEFAULT_SHAPE_DATA, DEFAULT_LAYER_COUNT)
 
 const DEFAULT_CENTER_Z = 0
 const DEFAULT_EXTRUDE_DISTANCE = 125
@@ -123,9 +105,6 @@ const DEFAULT_MILLING_DIAMETER = 8
 const DEFAULT_CHAMFER_LENGTH = 6
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
-const EMPTY_VERTEX_MAP: ReadonlyMap<number, THREE.Vector3> = new Map()
-const EMPTY_FACES: Face[] = []
-const EMPTY_EDGES: Edge[] = []
 const EMPTY_EDGE_THICKNESS: ReadonlyMap<number, number> = new Map()
 
 function App() {
@@ -150,6 +129,16 @@ function App() {
   const previewData = useMemo(
     () => computePolyhedron(shape, axis, subdivisions, diameter),
     [shape, axis, subdivisions, diameter],
+  )
+
+  const [layerCount, setLayerCount] = useState(DEFAULT_LAYER_COUNT)
+
+  // What the "New" tab's live 3D preview renders - the exact same pruning function Create uses
+  // to bake the committed shape, so "what you see in preview" and "what Create commits" are
+  // identical by construction.
+  const previewSceneData = useMemo(
+    () => pruneToLayerCount(previewData, layerCount),
+    [previewData, layerCount],
   )
 
   // Applies a "New" panel pick and keeps the layer count defaulted to half the resulting
@@ -178,13 +167,12 @@ function App() {
     else setDiameter(d)
   }
 
-  // The committed geometry actually being edited/previewed - vertices, faces, and edges, plain
-  // and concrete. Only changes when a "New" tab pick is committed (or a config is loaded).
-  const [baseData, setBaseData] = useState<PolyhedronData>(initial?.baseData ?? DEFAULT_BASE_DATA)
+  // The committed geometry actually being edited/previewed - vertices, edges, and faces, plain
+  // and concrete, with bounded undo/redo over every structural edit (delete/add). Only reset
+  // (wiping undo history) when a "New" tab pick is committed or a config is loaded.
+  const sceneHistory = useHistory<SceneData>(initial?.sceneData ?? DEFAULT_SCENE_DATA, 50)
+  const sceneData = sceneHistory.value
 
-  const [layerCount, setLayerCount] = useState(
-    initial?.layerCount ?? Math.ceil(DEFAULT_BASE_DATA.layers.length / 2),
-  )
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(
     initial?.selectionMode ?? 'symmetric',
   )
@@ -198,23 +186,9 @@ function App() {
   const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
     new Map(initial?.edgeThickness ?? []),
   )
-  const [deletedFaceIndices, setDeletedFaceIndices] = useState<Set<number>>(
-    new Set(initial?.deletedFaceIndices ?? []),
-  )
-  const [deletedEdgeIndices, setDeletedEdgeIndices] = useState<Set<number>>(
-    new Set(initial?.deletedEdgeIndices ?? []),
-  )
-  const [deletedGroups, setDeletedGroups] = useState<number[][]>(initial?.deletedGroups ?? [])
-  const [redoStack, setRedoStack] = useState<number[][]>([])
   const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
     new Map(initial?.vertexTransforms ?? []),
   )
-  const [addedVertices, setAddedVertices] = useState<Map<number, THREE.Vector3>>(
-    new Map(initial?.addedVertices ?? []),
-  )
-  const [addedFaces, setAddedFaces] = useState<Face[]>(initial?.addedFaces ?? [])
-  const [addedEdges, setAddedEdges] = useState<Edge[]>(initial?.addedEdges ?? [])
-  const [nextAddedVertexId, setNextAddedVertexId] = useState(initial?.nextAddedVertexId ?? -1)
 
   // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at this height in mm.
   const [centerZ, setCenterZ] = useState(initial?.centerZ ?? DEFAULT_CENTER_Z)
@@ -309,38 +283,24 @@ function App() {
   )
   const handleApplyPreview = () => setAppliedPreviewParams(draftPreviewParams)
 
-  const data = baseData
-
   const transformedVertices = useMemo(
-    () => applyVertexTransforms(data.vertices, vertexTransforms),
-    [data.vertices, vertexTransforms],
-  )
-
-  // addedVertices holds each added point's default (as-created) position; transforms are
-  // layered on top the same way they are for canonical vertices.
-  const transformedAddedVertices = useMemo(
-    () => applyAddedVertexTransforms(addedVertices, vertexTransforms),
-    [addedVertices, vertexTransforms],
+    () => applyVertexTransforms(sceneData.vertices, vertexTransforms),
+    [sceneData.vertices, vertexTransforms],
   )
 
   const centerY = centerZ
-
-  const deletedVertexIndices = useMemo(() => new Set(deletedGroups.flat()), [deletedGroups])
 
   // The "New" tab's shape/axis choice no longer describes committed geometry after edits, but
   // it's still the best guess we have for the model's rotational symmetry.
   const symmetryFold = () => SHAPE_AXES[shape].find((opt) => opt.value === axis)!.fold
 
   const handleVertexClick = (index: number) => {
-    if (mode !== 'edit' || editTarget !== 'vertices' || deletedVertexIndices.has(index)) return
+    if (mode !== 'edit' || editTarget !== 'vertices') return
 
-    // Grouping is always done against base (untransformed) positions, canonical vertices
-    // and added ones alike, so it stays stable regardless of any transform edits.
-    const positionOf = (id: number) => resolveVertexPosition(id, data.vertices, addedVertices)
-    const candidateIds = [
-      ...data.vertices.map((_, i) => i),
-      ...Array.from(addedVertices.keys()),
-    ]
+    // Grouping is always done against base (untransformed) positions, so it stays stable
+    // regardless of any transform edits.
+    const positionOf = (id: number) => sceneData.vertices.get(id)!
+    const candidateIds = Array.from(sceneData.vertices.keys())
 
     let group: number[]
     if (selectionMode === 'layer') {
@@ -357,13 +317,10 @@ function App() {
   const handleEdgeClick = (index: number) => {
     if (mode !== 'edit' || editTarget !== 'edges') return
 
-    const edgeById = (eid: number): Edge => (eid >= 0 ? data.edges[eid] : addedEdges[edgeIdToAddedIndex(eid)])
-    const positionOf = (vid: number) => resolveVertexPosition(vid, data.vertices, addedVertices)
+    const edgeById = (eid: number): Edge => sceneData.edges.get(eid)!
+    const positionOf = (vid: number) => sceneData.vertices.get(vid)!
     const midpointOf = (eid: number) => edgeMidpoint(edgeById(eid), positionOf)
-    const candidateIds = [
-      ...data.edges.map((_, i) => i),
-      ...addedEdges.map((_, i) => -(i + 1)),
-    ]
+    const candidateIds = Array.from(sceneData.edges.keys())
 
     let group: number[]
     if (selectionMode === 'layer') {
@@ -380,13 +337,10 @@ function App() {
   const handleFaceClick = (id: number) => {
     if (mode !== 'edit' || editTarget !== 'faces') return
 
-    const faceById = (fid: number): Face => (fid >= 0 ? data.faces[fid] : addedFaces[faceIdToAddedIndex(fid)])
-    const positionOf = (vid: number) => resolveVertexPosition(vid, data.vertices, addedVertices)
+    const faceById = (fid: number): Face => sceneData.faces.get(fid)!
+    const positionOf = (vid: number) => sceneData.vertices.get(vid)!
     const centroidOf = (fid: number) => faceCentroid(faceById(fid), positionOf)
-    const candidateIds = [
-      ...data.faces.map((_, i) => i),
-      ...addedFaces.map((_, i) => -(i + 1)),
-    ]
+    const candidateIds = Array.from(sceneData.faces.keys())
 
     let group: number[]
     if (selectionMode === 'layer') {
@@ -409,104 +363,36 @@ function App() {
 
   const handleDeleteSelectedFaces = () => {
     if (selectedFaceIndices.size === 0) return
-    setDeletedFaceIndices((prev) => new Set([...prev, ...selectedFaceIndices]))
+    sceneHistory.commit(deleteFaces(sceneData, selectedFaceIndices))
     setSelectedFaceIndices(new Set())
   }
 
-  // Any triangle hiding among the selected edges becomes a new face - added the same way "Add
-  // Points" adds one, just built from existing vertices instead of a fresh midpoint. Skips any
-  // triangle that already exists as a currently-visible face (canonical or already-added) to
-  // avoid a coincident duplicate - a *deleted* canonical face no longer counts, so recreating
-  // one from its own (still-present) border edges works. Selected edges can be canonical or
-  // added (e.g. a border edge re-created after a delete), so triangles are found across both.
+  // Any triangle hiding among the selected edges becomes a new face - skips any triangle that
+  // already exists as a face, to avoid a coincident duplicate.
   const creatableFaces = useMemo(() => {
     if (mode !== 'edit' || editTarget !== 'edges') return []
-    const edgeById = (eid: number): Edge => (eid >= 0 ? data.edges[eid] : addedEdges[edgeIdToAddedIndex(eid)])
+    const edgeById = (eid: number): Edge => sceneData.edges.get(eid)!
     const triangles = findEdgeTriangles(Array.from(selectedEdgeIndices), edgeById)
     const key = (f: number[]) => [...f].sort((a, b) => a - b).join(',')
     const existing = new Set<string>()
-    data.faces.forEach((f, i) => {
-      if (f.length === 3 && !deletedFaceIndices.has(i)) existing.add(key(f))
-    })
-    addedFaces.forEach((f, i) => {
-      if (!deletedFaceIndices.has(-(i + 1))) existing.add(key(f))
-    })
+    for (const f of sceneData.faces.values()) {
+      if (f.length === 3) existing.add(key(f))
+    }
     return triangles.filter((t) => !existing.has(key(t)))
-  }, [
-    mode,
-    editTarget,
-    selectedEdgeIndices,
-    data.edges,
-    data.faces,
-    addedEdges,
-    addedFaces,
-    deletedFaceIndices,
-  ])
+  }, [mode, editTarget, selectedEdgeIndices, sceneData.edges, sceneData.faces])
 
   const handleCreateFacesFromEdges = () => {
     if (creatableFaces.length === 0) return
-    setAddedFaces((prev) => [...prev, ...creatableFaces])
+    sceneHistory.commit(addFaces(sceneData, creatableFaces))
     setSelectedEdgeIndices(new Set())
   }
 
-  // Deleting an edge (canonical or added) cascades: any face (canonical or added) that has it
-  // as one of its own sides can no longer stand, and a canonical vertex it touched that's left
-  // with no other surviving edge (canonical or added) is a stray point, not worth keeping
-  // either. An added vertex left in the same situation needs no special handling - it already
-  // disappears on its own once the face it was built for is gone.
+  // Deleting an edge cascades: any face that had it as one of its own sides can no longer
+  // stand, and a vertex it touched that's left with no other surviving edge is a stray point,
+  // not worth keeping either (see deleteEdges in polyhedra.ts).
   const handleDeleteSelectedEdges = () => {
     if (selectedEdgeIndices.size === 0) return
-
-    const edgeById = (eid: number): Edge => (eid >= 0 ? data.edges[eid] : addedEdges[edgeIdToAddedIndex(eid)])
-
-    const deletedEdgeKeys = new Set(
-      Array.from(selectedEdgeIndices).map((i) => {
-        const [a, b] = edgeById(i)
-        return edgeKey(a, b)
-      }),
-    )
-    const faceUsesADeletedEdge = (face: Face) =>
-      face.some((v, i) => deletedEdgeKeys.has(edgeKey(v, face[(i + 1) % face.length])))
-
-    const nextDeletedFaceIndices = new Set(deletedFaceIndices)
-    data.faces.forEach((f, i) => {
-      if (!nextDeletedFaceIndices.has(i) && faceUsesADeletedEdge(f)) nextDeletedFaceIndices.add(i)
-    })
-    addedFaces.forEach((f, i) => {
-      const id = -(i + 1)
-      if (!nextDeletedFaceIndices.has(id) && faceUsesADeletedEdge(f)) nextDeletedFaceIndices.add(id)
-    })
-
-    // A canonical vertex touched by a deleted edge, left with no other surviving edge, is stray.
-    const remainingDegree = new Map<number, number>()
-    const countEdge = (e: Edge) => {
-      remainingDegree.set(e[0], (remainingDegree.get(e[0]) ?? 0) + 1)
-      remainingDegree.set(e[1], (remainingDegree.get(e[1]) ?? 0) + 1)
-    }
-    data.edges.forEach((e, i) => {
-      if (!selectedEdgeIndices.has(i) && !deletedEdgeIndices.has(i)) countEdge(e)
-    })
-    addedEdges.forEach((e, i) => {
-      const id = -(i + 1)
-      if (!selectedEdgeIndices.has(id) && !deletedEdgeIndices.has(id)) countEdge(e)
-    })
-
-    const touchedVertices = new Set<number>()
-    for (const i of selectedEdgeIndices) {
-      const [a, b] = edgeById(i)
-      touchedVertices.add(a)
-      touchedVertices.add(b)
-    }
-    const strayVertices = Array.from(touchedVertices).filter(
-      (v) => v >= 0 && !remainingDegree.has(v) && !deletedVertexIndices.has(v),
-    )
-
-    setDeletedEdgeIndices((prev) => new Set([...prev, ...selectedEdgeIndices]))
-    setDeletedFaceIndices(nextDeletedFaceIndices)
-    if (strayVertices.length > 0) {
-      setDeletedGroups((prev) => [...prev, strayVertices])
-      setRedoStack([])
-    }
+    sceneHistory.commit(deleteEdges(sceneData, selectedEdgeIndices))
     setSelectedEdgeIndices(new Set())
   }
 
@@ -533,35 +419,17 @@ function App() {
 
   const handleDeleteSelected = () => {
     if (selectedVertexIndices.size === 0) return
-    setDeletedGroups([...deletedGroups, Array.from(selectedVertexIndices)])
-    setRedoStack([])
+    sceneHistory.commit(deleteVertices(sceneData, selectedVertexIndices))
     setSelectedVertexIndices(new Set())
   }
 
-  const handleUndo = () => {
-    if (deletedGroups.length === 0) return
-    const last = deletedGroups[deletedGroups.length - 1]
-    setDeletedGroups(deletedGroups.slice(0, -1))
-    setRedoStack([...redoStack, last])
-  }
-
-  const handleRedo = () => {
-    if (redoStack.length === 0) return
-    const last = redoStack[redoStack.length - 1]
-    setRedoStack(redoStack.slice(0, -1))
-    setDeletedGroups([...deletedGroups, last])
-  }
+  const handleUndo = () => sceneHistory.undo()
+  const handleRedo = () => sceneHistory.redo()
 
   const handleDeselectAll = () => {
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
-  }
-
-  const handleCancelAll = () => {
-    setDeletedGroups([])
-    setRedoStack([])
-    setSelectedVertexIndices(new Set())
   }
 
   const handleTransformChange = (field: keyof VertexTransform, value: number) => {
@@ -588,38 +456,10 @@ function App() {
 
   const canPairVertices = selectedVertexIndices.size > 0 && selectedVertexIndices.size % 2 === 0
 
-  // The connections that currently, actually exist between vertices - canonical or added,
-  // excluding any that have been deleted. A deleted edge's data is still sitting in `data.edges`
-  // (only its id is in `deletedEdgeIndices`), so without filtering it out here, "is this pair
-  // already connected" would say yes for a connection the user just removed.
-  const buildLiveEdgeIndex = () =>
-    buildEdgeIndex(
-      data.edges.filter((_, i) => !deletedEdgeIndices.has(i)),
-      addedEdges.filter((_, i) => !deletedEdgeIndices.has(-(i + 1))),
-    )
-
   const handleAddPoints = () => {
     if (!canPairVertices) return
-    const positionOf = (index: number) =>
-      resolveVertexPosition(index, transformedVertices, transformedAddedVertices)
-    const { vertices, faces, nextId } = buildAddedGeometry(
-      Array.from(selectedVertexIndices),
-      positionOf,
-      nextAddedVertexId,
-    )
-    // Each new triangle's 2 sides to its fresh midpoint are always missing edges (the midpoint
-    // never existed before); its "base" side (the original pair) only needs one if that pair
-    // wasn't already connected.
-    const edgeIndex = buildLiveEdgeIndex()
-    const newEdges: Edge[] = []
-    for (const [a, b, mid] of faces) {
-      newEdges.push([a, mid], [mid, b])
-      if (!edgeIndex.has(edgeKey(a, b))) newEdges.push([a, b])
-    }
-    setAddedVertices((prev) => new Map([...prev, ...vertices]))
-    setAddedFaces((prev) => [...prev, ...faces])
-    setAddedEdges((prev) => [...prev, ...newEdges])
-    setNextAddedVertexId(nextId)
+    const positionOf = (id: number) => transformedVertices.get(id)!
+    sceneHistory.commit(addMidpointsBetween(sceneData, Array.from(selectedVertexIndices), positionOf))
     setSelectedVertexIndices(new Set())
   }
 
@@ -628,31 +468,20 @@ function App() {
   // midpoint, no face, just the strut.
   const handleConnectVertices = () => {
     if (!canPairVertices) return
-    const positionOf = (index: number) =>
-      resolveVertexPosition(index, transformedVertices, transformedAddedVertices)
-    const pairs = pairByNearestNeighbor(Array.from(selectedVertexIndices), positionOf)
-    const edgeIndex = buildLiveEdgeIndex()
-    const newEdges: Edge[] = []
-    for (const [a, b] of pairs) {
-      if (!edgeIndex.has(edgeKey(a, b))) newEdges.push([a, b])
-    }
-    if (newEdges.length > 0) setAddedEdges((prev) => [...prev, ...newEdges])
+    const positionOf = (id: number) => transformedVertices.get(id)!
+    sceneHistory.commit(connectVertexPairs(sceneData, Array.from(selectedVertexIndices), positionOf))
     setSelectedVertexIndices(new Set())
   }
 
-  // Snaps every (non-deleted) vertex onto the sphere of the given diameter around the gravity
-  // center, moving each vertex along its own ray from that center out to that fixed radius,
-  // replacing any transform it already had.
+  // Snaps every vertex onto the sphere of the given diameter around the gravity center, moving
+  // each vertex along its own ray from that center out to that fixed radius, replacing any
+  // transform it already had.
   const handleAdjustToSphere = () => {
-    const canonicalIds = data.vertices.map((_, i) => i).filter((i) => !deletedVertexIndices.has(i))
-    const addedIds = Array.from(addedVertices.keys()).filter((id) => !deletedVertexIndices.has(id))
-    const allIds = [...canonicalIds, ...addedIds]
+    const allIds = Array.from(sceneData.vertices.keys())
     if (allIds.length === 0) return
 
-    const currentPositionOf = (id: number) =>
-      resolveVertexPosition(id, transformedVertices, transformedAddedVertices)
-    const canonicalPositionOf = (id: number) =>
-      id >= 0 ? data.vertices[id] : addedVertices.get(id)!
+    const currentPositionOf = (id: number) => transformedVertices.get(id)!
+    const canonicalPositionOf = (id: number) => sceneData.vertices.get(id)!
 
     const targetRadius = diameter / 2
 
@@ -669,22 +498,12 @@ function App() {
     })
   }
 
-  // Lowers (or raises) the gravity center so it sits at the same height as the currently
-  // visible model's lowest vertex - i.e. the dome's base rests exactly on the center's plane.
+  // Lowers (or raises) the gravity center so it sits at the same height as the model's lowest
+  // vertex - i.e. the dome's base rests exactly on the center's plane.
   const handleGroundCenter = () => {
-    const visibleIds = computeVisibleVertexIds(
-      data,
-      transformedVertices,
-      layerCount,
-      deletedVertexIndices,
-      addedFaces,
-    )
-    if (visibleIds.length === 0) return
-    const positionOf = (id: number) => resolveVertexPosition(id, transformedVertices, transformedAddedVertices)
-    const minY = visibleIds.reduce(
-      (min, id) => Math.min(min, positionOf(id).y),
-      Infinity,
-    )
+    if (transformedVertices.size === 0) return
+    let minY = Infinity
+    for (const p of transformedVertices.values()) minY = Math.min(minY, p.y)
     setCenterZ(minY)
   }
 
@@ -696,24 +515,16 @@ function App() {
   }
 
   // Create commits whatever's configured in "New" as the geometry to edit, discarding whatever
-  // was being edited before (its vertex indices no longer mean anything against the new shape)
-  // and resetting every other tab's settings (center, edge curvature, ...) back to their
-  // defaults, since they were tuned for a dome that no longer exists.
+  // was being edited before (its vertex ids no longer mean anything against the new shape) and
+  // resetting every other tab's settings (center, edge curvature, ...) back to their defaults,
+  // since they were tuned for a dome that no longer exists.
   const handleCreateNew = () => {
-    setBaseData(previewData)
-    setDeletedGroups([])
-    setRedoStack([])
+    sceneHistory.reset(pruneToLayerCount(previewData, layerCount))
     setVertexTransforms(new Map())
-    setAddedVertices(new Map())
-    setAddedFaces([])
-    setAddedEdges([])
-    setNextAddedVertexId(-1)
+    setEdgeThickness(new Map())
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
-    setEdgeThickness(new Map())
-    setDeletedFaceIndices(new Set())
-    setDeletedEdgeIndices(new Set())
     setEditTarget('vertices')
     setCenterZ(DEFAULT_CENTER_Z)
     setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
@@ -761,8 +572,7 @@ function App() {
   }
 
   const applyConfig = (state: DomeState) => {
-    setBaseData(state.baseData)
-    setLayerCount(state.layerCount)
+    sceneHistory.reset(state.sceneData)
     setSelectionMode(state.selectionMode)
     setCenterZ(state.centerZ)
     setExtrudeDistance(state.extrudeDistance)
@@ -801,16 +611,8 @@ function App() {
       minSide: state.minSide,
       flangeMillingDiameter: state.flangeMillingDiameter,
     })
-    setDeletedGroups(state.deletedGroups)
-    setRedoStack([])
     setVertexTransforms(new Map(state.vertexTransforms))
-    setAddedVertices(new Map(state.addedVertices))
-    setAddedFaces(state.addedFaces)
-    setAddedEdges(state.addedEdges)
-    setNextAddedVertexId(state.nextAddedVertexId)
     setEdgeThickness(new Map(state.edgeThickness))
-    setDeletedFaceIndices(new Set(state.deletedFaceIndices))
-    setDeletedEdgeIndices(new Set(state.deletedEdgeIndices))
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
@@ -820,8 +622,7 @@ function App() {
 
   const buildConfig = (): DomeConfig =>
     serializeConfig({
-      baseData,
-      layerCount,
+      sceneData,
       selectionMode,
       centerZ,
       extrudeDistance,
@@ -841,23 +642,15 @@ function App() {
       overshoot,
       minSide,
       flangeMillingDiameter,
-      deletedGroups,
       vertexTransforms,
-      addedVertices,
-      addedFaces,
-      nextAddedVertexId,
-      addedEdges,
       edgeThickness,
-      deletedFaceIndices,
-      deletedEdgeIndices,
     })
 
   // Auto-save on every change to any config field, so the next page load can restore it.
   useEffect(() => {
     saveConfigToLocalStorage(buildConfig())
   }, [
-    baseData,
-    layerCount,
+    sceneData,
     selectionMode,
     centerZ,
     extrudeDistance,
@@ -877,15 +670,8 @@ function App() {
     overshoot,
     minSide,
     flangeMillingDiameter,
-    deletedGroups,
     vertexTransforms,
-    addedVertices,
-    addedFaces,
-    nextAddedVertexId,
-    addedEdges,
     edgeThickness,
-    deletedFaceIndices,
-    deletedEdgeIndices,
   ])
 
   const handleExportConfig = () => {
@@ -905,15 +691,8 @@ function App() {
 
   const handleGetEdgesInfo = () => {
     const edgesInfo = computeEdgesInfo({
-      data,
+      data: sceneData,
       transformedVertices,
-      addedVertices: transformedAddedVertices,
-      layerCount,
-      deletedVertexIndices,
-      deletedEdgeIndices,
-      deletedFaceIndices,
-      addedFaces,
-      addedEdges,
       centerY,
       edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? appliedPreviewParams.thickness,
       cornerLength: appliedPreviewParams.cornerLength,
@@ -934,15 +713,8 @@ function App() {
     try {
       const zipBlob = await runStepExport(
         {
-          data,
+          data: sceneData,
           transformedVertices,
-          addedVertices: transformedAddedVertices,
-          layerCount,
-          deletedVertexIndices,
-          deletedEdgeIndices,
-          deletedFaceIndices,
-          addedFaces,
-          addedEdges,
           centerY,
           edgeThickness,
           thickness: appliedPreviewParams.thickness,
@@ -1064,29 +836,21 @@ function App() {
         onFlangeMillingDiameterChange={setFlangeMillingDiameter}
         previewParamsDirty={previewParamsDirty}
         onApplyPreview={handleApplyPreview}
-        canUndo={deletedGroups.length > 0}
-        canRedo={redoStack.length > 0}
+        canUndo={sceneHistory.canUndo}
+        canRedo={sceneHistory.canRedo}
         onDeleteSelected={handleDeleteSelected}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onCancelAll={handleCancelAll}
       />
       <Viewport
         mode={mode}
         editTarget={editTarget}
-        data={isNew ? previewData : data}
-        layerCount={layerCount}
-        transformedVertices={isNew ? previewData.vertices : transformedVertices}
-        deletedVertexIndices={isNew ? EMPTY_INDEX_SET : deletedVertexIndices}
+        data={isNew ? previewSceneData : sceneData}
+        transformedVertices={isNew ? previewSceneData.vertices : transformedVertices}
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
         selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
-        deletedEdgeIndices={isNew ? EMPTY_INDEX_SET : deletedEdgeIndices}
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
         selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
-        deletedFaceIndices={isNew ? EMPTY_INDEX_SET : deletedFaceIndices}
-        addedVertices={isNew ? EMPTY_VERTEX_MAP : transformedAddedVertices}
-        addedFaces={isNew ? EMPTY_FACES : addedFaces}
-        addedEdges={isNew ? EMPTY_EDGES : addedEdges}
         centerY={centerY}
         extrudeDistance={appliedPreviewParams.extrudeDistance}
         thickness={appliedPreviewParams.thickness}

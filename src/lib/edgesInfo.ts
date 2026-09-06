@@ -1,12 +1,10 @@
 import * as THREE from 'three'
-import type { Edge, Face, PolyhedronData } from './polyhedra'
+import type { Face, SceneData } from './polyhedra'
 import {
+  buildVertexAdjacency,
   computeVertexHubMetrics,
   computeVertexTangentPlane,
-  computeVisibleVertexEdges,
-  computeVisibleVertexIds,
   edgeKey,
-  resolveVertexPosition,
 } from './polyhedra'
 import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometryManual'
 
@@ -33,9 +31,8 @@ export interface EdgeInfo {
   // Angle (degrees), going around the tangent plane, from this edge to the next one in angular
   // order (wrapping back to the first edge after the last).
   angleToNextEdgeDeg: number
-  // Whether a (visible) face fills the wedge between this edge and the next one in angular
-  // order, and which face it is if so - the same signed id scheme used everywhere else
-  // (non-negative = index into data.faces, negative = -(index in addedFaces) - 1).
+  // Whether a face fills the wedge between this edge and the next one in angular order, and
+  // which face it is if so.
   hasFaceToNextEdge: boolean
   faceIdToNextEdge: number | null
 }
@@ -60,15 +57,8 @@ export interface EdgesInfoResult {
 }
 
 export interface ComputeEdgesInfoParams {
-  data: PolyhedronData
-  transformedVertices: THREE.Vector3[]
-  addedVertices: ReadonlyMap<number, THREE.Vector3>
-  layerCount: number
-  deletedVertexIndices: ReadonlySet<number>
-  deletedEdgeIndices: ReadonlySet<number>
-  deletedFaceIndices: ReadonlySet<number>
-  addedFaces: Face[]
-  addedEdges: Edge[]
+  data: SceneData
+  transformedVertices: ReadonlyMap<number, THREE.Vector3>
   centerY: number
   edgeThicknessOf: (edgeId: number) => number
   // Strut-end params - see precalculateStrutEnd in strutGeometryManual.ts.
@@ -82,23 +72,17 @@ export interface ComputeEdgesInfoParams {
   chamferLength: number
 }
 
-// Every visible face (canonical or added), registers - for each of its vertices - the unordered
-// pair of ring-neighbors it connects to on either side. A face incident to vertex v always
-// occupies exactly the angular wedge between v's edges to those two neighbors, so this is what
-// "is there a face between these two adjacent edges" reduces to.
-export function buildFaceNeighborPairs(
-  data: PolyhedronData,
-  addedFaces: Face[],
-  deletedFaceIndices: ReadonlySet<number>,
-  visibleVertexSet: ReadonlySet<number>,
-): Map<number, Map<string, number>> {
+// Every face registers - for each of its vertices - the unordered pair of ring-neighbors it
+// connects to on either side. A face incident to vertex v always occupies exactly the angular
+// wedge between v's edges to those two neighbors, so this is what "is there a face between these
+// two adjacent edges" reduces to.
+export function buildFaceNeighborPairs(faces: ReadonlyMap<number, Face>): Map<number, Map<string, number>> {
   const byVertex = new Map<number, Map<string, number>>()
 
-  const register = (ring: Face, faceId: number) => {
+  for (const [faceId, ring] of faces) {
     const n = ring.length
     for (let i = 0; i < n; i++) {
       const v = ring[i]
-      if (!visibleVertexSet.has(v)) continue
       const prev = ring[(i - 1 + n) % n]
       const next = ring[(i + 1) % n]
       let pairs = byVertex.get(v)
@@ -110,36 +94,17 @@ export function buildFaceNeighborPairs(
     }
   }
 
-  data.faces.forEach((face, i) => {
-    if (deletedFaceIndices.has(i)) return
-    if (!face.every((idx) => visibleVertexSet.has(idx))) return
-    register(face, i)
-  })
-  addedFaces.forEach((face, i) => {
-    const id = -(i + 1)
-    if (deletedFaceIndices.has(id)) return
-    if (!face.every((idx) => visibleVertexSet.has(idx))) return
-    register(face, id)
-  })
-
   return byVertex
 }
 
-// Everything about each visible vertex's edges: which struts go into it, their precalculated
-// strut-end measurements (the same shouldered-tenon layout the live Preview builds each solid
-// strut from), which adjacent pairs of edges have a face spanning them (and which don't - a
-// missing panel), and the tangent plane those edges were projected onto to work that out.
+// Everything about each vertex's edges: which struts go into it, their precalculated strut-end
+// measurements (the same shouldered-tenon layout the live Preview builds each solid strut
+// from), which adjacent pairs of edges have a face spanning them (and which don't - a missing
+// panel), and the tangent plane those edges were projected onto to work that out.
 export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResult {
   const {
     data,
     transformedVertices,
-    addedVertices,
-    layerCount,
-    deletedVertexIndices,
-    deletedEdgeIndices,
-    deletedFaceIndices,
-    addedFaces,
-    addedEdges,
     centerY,
     edgeThicknessOf,
     cornerLength,
@@ -153,37 +118,16 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
   } = params
 
   const center = new THREE.Vector3(0, centerY, 0)
-  const positionOf = (id: number) => resolveVertexPosition(id, transformedVertices, addedVertices)
+  const positionOf = (id: number) => transformedVertices.get(id)!
 
-  const visibleVertexIds = computeVisibleVertexIds(
-    data,
-    transformedVertices,
-    layerCount,
-    deletedVertexIndices,
-    addedFaces,
-  )
-  const visibleVertexSet = new Set(visibleVertexIds)
-
-  const faceNeighborPairs = buildFaceNeighborPairs(
-    data,
-    addedFaces,
-    deletedFaceIndices,
-    visibleVertexSet,
-  )
+  const adjacency = buildVertexAdjacency(data.edges)
+  const faceNeighborPairs = buildFaceNeighborPairs(data.faces)
 
   const vertices: VertexEdgesInfo[] = []
 
-  for (const vertexId of visibleVertexIds) {
+  for (const vertexId of transformedVertices.keys()) {
     const vertexPos = positionOf(vertexId)
-    const edgeRefs = computeVisibleVertexEdges(
-      data,
-      transformedVertices,
-      layerCount,
-      deletedVertexIndices,
-      deletedEdgeIndices,
-      addedEdges,
-      vertexId,
-    )
+    const edgeRefs = adjacency.get(vertexId) ?? []
     if (edgeRefs.length === 0) continue
 
     const { normal, e1, e2 } = computeVertexTangentPlane(vertexPos, center)
