@@ -42,9 +42,10 @@ import {
   saveConfigToLocalStorage,
   serializeConfig,
 } from './lib/config'
-import { downloadJson } from './lib/download'
+import { downloadBlob, downloadJson } from './lib/download'
 import { computeEdgesInfo } from './lib/edgesInfo'
 import { DEFAULT_FLANGE_SHAPE_PARAMS } from './lib/flangeGeometry'
+import { runStepExport, type StepExportProgress } from './lib/stepExportRunner'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
 export type EditOrPreviewMode = 'edit' | 'preview'
@@ -900,6 +901,8 @@ function App() {
   // miter offsets the live Preview solids are built from (see DomeMesh's preview effect), plus
   // - per vertex - which adjacent edges have a face between them and which don't, and the
   // tangent plane those edges were projected onto to work that out.
+  const [stepExportProgress, setStepExportProgress] = useState<StepExportProgress | null>(null)
+
   const handleGetEdgesInfo = () => {
     const edgesInfo = computeEdgesInfo({
       data,
@@ -925,6 +928,54 @@ function App() {
     downloadJson(edgesInfo, 'edges-info.json')
   }
 
+  const handleDownloadSteps = async () => {
+    if (stepExportProgress) return
+    setStepExportProgress({ phase: 'struts', done: 0, total: 0 })
+    try {
+      const zipBlob = await runStepExport(
+        {
+          data,
+          transformedVertices,
+          addedVertices: transformedAddedVertices,
+          layerCount,
+          deletedVertexIndices,
+          deletedEdgeIndices,
+          deletedFaceIndices,
+          addedFaces,
+          addedEdges,
+          centerY,
+          edgeThickness,
+          thickness: appliedPreviewParams.thickness,
+          extrudeDistance: appliedPreviewParams.extrudeDistance,
+          cornerLength: appliedPreviewParams.cornerLength,
+          offsetModifier: appliedPreviewParams.offsetModifier,
+          endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
+          midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
+          grooveDepth: appliedPreviewParams.grooveDepth,
+          millingDiameter: appliedPreviewParams.millingDiameter,
+          chamferLength: appliedPreviewParams.chamferLength,
+          flangeParams: {
+            toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
+            toleranceTransverse: appliedPreviewParams.toleranceTransverse,
+            centerHoleDiameter: appliedPreviewParams.centerHoleDiameter,
+            sideHoleDiameter: appliedPreviewParams.sideHoleDiameter,
+            sideHoleDiameterOffset: appliedPreviewParams.sideHoleDiameterOffset,
+            overshoot: appliedPreviewParams.overshoot,
+            minSide: appliedPreviewParams.minSide,
+            millingDiameter: appliedPreviewParams.flangeMillingDiameter,
+          },
+        },
+        setStepExportProgress,
+        () => false,
+      )
+      if (zipBlob) downloadBlob(zipBlob, 'dome-parts.zip')
+    } catch (err) {
+      console.error('Failed to export STEP archive', err)
+    } finally {
+      setStepExportProgress(null)
+    }
+  }
+
   const isNew = mode === 'new'
 
   return (
@@ -933,6 +984,8 @@ function App() {
         onExportConfig={handleExportConfig}
         onImportConfig={handleImportConfig}
         onGetEdgesInfo={handleGetEdgesInfo}
+        onDownloadSteps={handleDownloadSteps}
+        stepExportProgress={stepExportProgress}
         mode={mode}
         onOpenNew={handleOpenNew}
         onCreateNew={handleCreateNew}

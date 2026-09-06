@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
+import type { StepExportProgress } from '../lib/stepExportRunner'
 import type {
   AxisType,
   PolyhedronData,
@@ -32,6 +33,8 @@ interface SidebarProps {
   onExportConfig: () => void
   onImportConfig: (file: File) => void
   onGetEdgesInfo: () => void
+  onDownloadSteps: () => void
+  stepExportProgress: StepExportProgress | null
   mode: ViewMode
   onOpenNew: () => void
   onCreateNew: () => void
@@ -204,6 +207,8 @@ export function Sidebar({
   onExportConfig,
   onImportConfig,
   onGetEdgesInfo,
+  onDownloadSteps,
+  stepExportProgress,
   mode,
   onOpenNew,
   onCreateNew,
@@ -654,6 +659,23 @@ export function Sidebar({
             precalculated strut-end measurements (offset, tenon, chamfer, milling), which
             neighboring edges have a face between them and which don&rsquo;t, and the tangent
             plane those edges were projected onto to work that out.
+          </p>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <div className="button-row">
+            <button onClick={onDownloadSteps} disabled={stepExportProgress !== null}>
+              Download STEP Archive
+            </button>
+          </div>
+          <p className="hint">
+            {stepExportProgress
+              ? stepExportProgress.phase === 'zipping'
+                ? 'Zipping…'
+                : `Building ${stepExportProgress.phase} — ${stepExportProgress.done} / ${stepExportProgress.total}`
+              : "Exports every visible strut and flange plate as its own STEP file (same shapes as this Preview), zipped into one archive."}
           </p>
         </section>
       )}

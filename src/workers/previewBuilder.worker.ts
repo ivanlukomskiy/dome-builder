@@ -4,6 +4,7 @@ import { computeStrutPlane } from '../lib/strutGeometry'
 import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
 import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
+import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 
 // Owns every heavy, WASM-backed step of building the Preview solids: the 2D shoulder-tenon and
 // flange-plate drawings (computeStrutBoundaryManual/computeFlangeBoundary2D - both build their
@@ -21,13 +22,7 @@ import type { VertexEdgesInfo } from '../lib/edgesInfo'
 
 declare const self: DedicatedWorkerGlobalScope
 
-export interface StrutBuildJob {
-  index: number
-  posA: [number, number, number]
-  posB: [number, number, number]
-  offsetA: number
-  offsetB: number
-  beamThickness: number
+export interface StrutBuildJob extends StrutGeometryEntry {
   color: [number, number, number]
 }
 

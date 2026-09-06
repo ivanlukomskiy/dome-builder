@@ -5,8 +5,8 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { Edge, Face, PolyhedronData } from '../lib/polyhedra'
 import { removeVertices, resolveVertexPosition, sliceLayers } from '../lib/polyhedra'
-import { computeEdgeEndOffsets } from '../lib/strutGeometry'
-import { computeEdgesInfo, type VertexEdgesInfo } from '../lib/edgesInfo'
+import type { VertexEdgesInfo } from '../lib/edgesInfo'
+import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
 import type { FlangeShapeParams } from '../lib/flangeGeometry'
 import type {
   PreviewBuildPhase,
@@ -342,59 +342,9 @@ export function DomeMesh({
     const requestId = ++nextRequestIdRef.current
     onPreviewProgress({ phase: 'loading', done: 0, total: 0 })
 
-    const offsets = computeEdgeEndOffsets(
-      data,
-      transformedVertices,
-      addedVertices,
-      layerCount,
-      deletedVertexIndices,
-      deletedEdgeIndices,
-      addedFaces,
-      addedEdges,
-      centerY,
-      (edgeId) => edgeThickness.get(edgeId) ?? thickness,
-    )
-    const halfWidth = extrudeDistance / 2
-
-    const strutEntries = [
-      ...visibleEdgeEntries.map(({ edge: [a, b], index }) => ({
-        a,
-        b,
-        index,
-        posA: sliced.vertices[a],
-        posB: sliced.vertices[b],
-      })),
-      ...visibleAddedEdgeEntries.map(({ edge: [a, b], index }) => ({
-        a,
-        b,
-        index,
-        posA: resolvePosition(a),
-        posB: resolvePosition(b),
-      })),
-    ]
-
-    // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
-    // the same thing (thickness override, and by how much) in both places.
-    const strutJobs: StrutBuildJob[] = strutEntries.map(({ a, b, index, posA, posB }) => {
-      const override = edgeThickness.get(index)
-      const color = edgeThicknessColor(override)
-      return {
-        index,
-        posA: [posA.x, posA.y, posA.z],
-        posB: [posB.x, posB.y, posB.z],
-        offsetA: (offsets.get(index)?.get(a) ?? 0) + offsetModifier,
-        offsetB: (offsets.get(index)?.get(b) ?? 0) + offsetModifier,
-        beamThickness: override ?? thickness,
-        color: [color.r, color.g, color.b],
-      }
-    })
-
-    // One flat connector plate per hub vertex, covering the wedges between struts that have no
-    // face of their own (see flangeGeometry.ts) - built from the exact same per-edge tenon
-    // layout and angular geometry the struts above use, so a flange's arms always land flush
-    // against them. `computeEdgesInfo` is pure JS (no opencascade), so it runs here rather than
-    // in the worker; its result is already plain, structured-clone-friendly data.
-    const edgesInfo = computeEdgesInfo({
+    // Which edges/vertices are visible, their offsets and angular layout - all cheap, pure-JS
+    // work shared with the "Download STEP Archive" export (see previewBuildInputs.ts).
+    const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs({
       data,
       transformedVertices,
       addedVertices,
@@ -405,15 +355,23 @@ export function DomeMesh({
       addedFaces,
       addedEdges,
       centerY,
-      edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? thickness,
+      edgeThickness,
+      thickness,
+      extrudeDistance,
       cornerLength,
-      halfWidth,
       offsetModifier,
       endGrooveLengthPercent,
       midGrooveLengthPercent,
       grooveDepth,
       millingDiameter,
       chamferLength,
+    })
+
+    // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
+    // the same thing (thickness override, and by how much) in both places.
+    const strutJobs: StrutBuildJob[] = strutEntries.map((entry) => {
+      const color = edgeThicknessColor(entry.thicknessOverride)
+      return { ...entry, color: [color.r, color.g, color.b] }
     })
 
     const flangeParams: FlangeShapeParams = {
@@ -497,13 +455,13 @@ export function DomeMesh({
           allPieces.push(...pieces)
         }
 
-        onPreviewProgress({ phase: 'flanges', done: 0, total: edgesInfo.vertices.length })
-        const vertexBatches = chunk(edgesInfo.vertices, BATCH_SIZE)
+        onPreviewProgress({ phase: 'flanges', done: 0, total: vertices.length })
+        const vertexBatches = chunk(vertices, BATCH_SIZE)
         for (let i = 0; i < vertexBatches.length; i++) {
           if (cancelled) return
           const batch = vertexBatches[i]
           try {
-            const pieces = await runBatch([], batch, 'flanges', i * BATCH_SIZE, edgesInfo.vertices.length)
+            const pieces = await runBatch([], batch, 'flanges', i * BATCH_SIZE, vertices.length)
             allPieces.push(...pieces)
           } catch (err) {
             // A single vertex's flange geometry failing (a degenerate wedge angle, an
@@ -563,10 +521,6 @@ export function DomeMesh({
     overshoot,
     minSide,
     flangeMillingDiameter,
-    visibleEdgeEntries,
-    visibleAddedEdgeEntries,
-    sliced.vertices,
-    resolvePosition,
     onPreviewProgress,
   ])
 

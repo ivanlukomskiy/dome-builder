@@ -529,7 +529,7 @@ export function computeFlangeBoundary2D(
   const rectEdgeShapes: Drawing[] = [];
 
   const negativeShapes: Drawing[] = [];
-  const addNegative = (drawing: Drawing, name: string) => {
+  const addNegative = (drawing: Drawing) => {
     negativeShapes.push(drawing);
   };
 
@@ -541,9 +541,9 @@ export function computeFlangeBoundary2D(
     if (params.sideHoleDiameter > 0) {
       const { holeA, holeB } = computeSideHoles(edge, params);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
-      addNegative(holeA, `side hole (edge ${edge.edgeId}, +)`);
+      addNegative(holeA);
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, -)` });
-      addNegative(holeB, `side hole (edge ${edge.edgeId}, -)`);
+      addNegative(holeB);
     }
 
     const { start, end, nextLocalStart } = computeWedgeBoundary(edge, next, params);
@@ -552,9 +552,9 @@ export function computeFlangeBoundary2D(
     if (wedgeCornerMillingCuts) {
       const { millingCutA, millingCutB } = wedgeCornerMillingCuts;
       helpers.push({ drawing: millingCutA, color: "red", name: `milling cut ${edge.edgeId}` });
-      addNegative(millingCutA, `milling cut A (edge ${edge.edgeId})`);
+      addNegative(millingCutA);
       helpers.push({ drawing: millingCutB, color: "red", name: `milling cut ${edge.edgeId}` });
-      addNegative(millingCutB, `milling cut B (edge ${edge.edgeId})`);
+      addNegative(millingCutB);
     }
 
     if (edge.hasFaceToNextEdge) {
@@ -595,11 +595,11 @@ export function computeFlangeBoundary2D(
 
     const rectCut = computeRectCut(edge, params);
     helpers.push({ drawing: rectCut, color: "cyan", name: `rect cut ${edge.edgeId}` });
-    addNegative(rectCut, `rect cut ${edge.edgeId}`);
+    addNegative(rectCut);
 
     computeTenonCornerMillingCuts(edge, params).forEach((cutDrawing) => {
       helpers.push({ drawing: cutDrawing, color: "red", name: `milling cut ${edge.edgeId}` });
-      addNegative(cutDrawing, `milling cut corner (edge ${edge.edgeId})`);
+      addNegative(cutDrawing);
     });
   });
 
@@ -607,7 +607,7 @@ export function computeFlangeBoundary2D(
   if (params.centerHoleDiameter > 0) {
     const centerHoleDrawing = drawCircle(params.centerHoleDiameter / 2);
     helpers.push({ drawing: centerHoleDrawing, color: HOLE_COLOR, name: "center hole" });
-    addNegative(centerHoleDrawing, "center hole");
+    addNegative(centerHoleDrawing);
   }
   // Drawn last so it stays on top of everything else instead of getting z-fought away.
   helpers.push({ drawing: drawCircle(5), color: "#f5e050", name: `vertex ${vertex.vertexId}` });

@@ -83,12 +83,12 @@ export interface StrutPlane {
   xDir: THREE.Vector3
 }
 
-// Builds one strut's solid from a flat `Drawing` already in the strut's own 2D coordinates (see
-// strutGeometryManual.ts's `computeStrutBoundaryManual`) - sketches it onto the actual meridian
-// plane (rather than the default XY plane `meshDrawing` below uses), extrudes by the sheet
-// thickness, centers the material on that plane, and tessellates. Returns null for an empty
-// drawing. `ensureReplicadReady` must have resolved before calling this.
-export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): StrutMesh | null {
+// The shared first half of buildStrutMeshFromDrawing/buildStrutStepFromDrawing: sketches `drawing`
+// (already in the strut/flange's own 2D coordinates) onto the actual meridian/tangent plane
+// (rather than the default XY plane `meshDrawing` below uses), extrudes by the sheet thickness,
+// and centers the material on that plane. Returns null for an empty drawing. Caller owns disposing
+// the returned solid (`.delete()`) once done with it - mirrors every other builder here.
+function buildCenteredSolidFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number) {
   const ocPlane = new Plane(
     [plane.origin.x, plane.origin.y, plane.origin.z],
     [plane.xDir.x, plane.xDir.y, plane.xDir.z],
@@ -110,7 +110,15 @@ export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, t
 
   const { x: nx, y: ny, z: nz } = plane.normal
   // `.translate()` deletes `solid` itself and returns a distinct object, mirroring buildStrutMesh.
-  const centered = solid.translate([(-nx * thicknessMm) / 2, (-ny * thicknessMm) / 2, (-nz * thicknessMm) / 2])
+  return solid.translate([(-nx * thicknessMm) / 2, (-ny * thicknessMm) / 2, (-nz * thicknessMm) / 2])
+}
+
+// Builds one strut's solid from a flat `Drawing` already in the strut's own 2D coordinates (see
+// strutGeometryManual.ts's `computeStrutBoundaryManual`), extruded and tessellated for rendering.
+// `ensureReplicadReady` must have resolved before calling this.
+export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): StrutMesh | null {
+  const centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
+  if (!centered) return null
 
   const mesh = centered.mesh({ tolerance: MESH_TOLERANCE, angularTolerance: MESH_ANGULAR_TOLERANCE })
   centered.delete()
@@ -120,6 +128,18 @@ export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, t
     normals: Float32Array.from(mesh.normals),
     indices: Uint32Array.from(mesh.triangles),
   }
+}
+
+// Same solid as buildStrutMeshFromDrawing, exported as a STEP file Blob instead of a tessellated
+// mesh - used by the "download as STEP" export rather than live Preview rendering.
+// `ensureReplicadReady` must have resolved before calling this.
+export function buildStrutStepFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): Blob | null {
+  const centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
+  if (!centered) return null
+
+  const blob = centered.blobSTEP()
+  centered.delete()
+  return blob
 }
 
 // Meshes an arbitrary flat `Drawing` (e.g. from replicad's own `draw()`/boolean-op primitives -
