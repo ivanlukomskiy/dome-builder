@@ -2,6 +2,12 @@ import type { EditTarget, ViewMode } from '../App'
 import type { PreviewProgress } from './DomeMesh'
 import type { HubEdgeMetric, ModelStats } from '../lib/polyhedra'
 
+export interface HudHubEdgeMetric extends HubEdgeMetric {
+  // Whether a (visible) face fills the wedge between this edge and the next one in angular
+  // order, going around the vertex's tangent plane - see buildFaceNeighborPairs in edgesInfo.ts.
+  hasFaceToNextEdge: boolean
+}
+
 interface HudProps {
   mode: ViewMode
   editTarget: EditTarget
@@ -9,8 +15,10 @@ interface HudProps {
   selectedVertexCount: number
   selectedEdgeCount: number
   selectedFaceCount: number
+  selectedVertexId: number | null
+  selectedEdgeId: number | null
   selectedVertexElevation: number | null
-  selectedVertexHubMetrics: HubEdgeMetric[]
+  selectedVertexHubMetrics: HudHubEdgeMetric[]
   previewProgress: PreviewProgress | null
 }
 
@@ -47,6 +55,8 @@ export function Hud({
   selectedVertexCount,
   selectedEdgeCount,
   selectedFaceCount,
+  selectedVertexId,
+  selectedEdgeId,
   selectedVertexElevation,
   selectedVertexHubMetrics,
   previewProgress,
@@ -56,10 +66,13 @@ export function Hud({
     if (editTarget === 'vertices' && selectedVertexCount > 0) {
       selectionLine =
         selectedVertexCount === 1 && selectedVertexElevation !== null
-          ? `1 vertex selected — elevation ${formatMm(selectedVertexElevation)}`
+          ? `1 vertex selected — id ${selectedVertexId} — elevation ${formatMm(selectedVertexElevation)}`
           : `${selectedVertexCount} vertices selected`
     } else if (editTarget === 'edges' && selectedEdgeCount > 0) {
-      selectionLine = `${selectedEdgeCount} edge${selectedEdgeCount === 1 ? '' : 's'} selected`
+      selectionLine =
+        selectedEdgeCount === 1 && selectedEdgeId !== null
+          ? `1 edge selected — id ${selectedEdgeId}`
+          : `${selectedEdgeCount} edges selected`
     } else if (editTarget === 'faces' && selectedFaceCount > 0) {
       selectionLine = `${selectedFaceCount} face${selectedFaceCount === 1 ? '' : 's'} selected`
     }
@@ -73,7 +86,7 @@ export function Hud({
           <div className="hud-hub">
             <div>{`hub — ${selectedVertexHubMetrics.length} edge${selectedVertexHubMetrics.length === 1 ? '' : 's'}`}</div>
             {selectedVertexHubMetrics.map((m, i) => (
-              <div key={m.edgeId}>{`#${i + 1} ${formatMm(m.thicknessMm)} — ${Math.round(m.angleToNextDeg)}° to next — offset ${formatMm(m.offsetMm)}`}</div>
+              <div key={m.edgeId}>{`#${i + 1} id ${m.edgeId} ${formatMm(m.thicknessMm)} — ${Math.round(m.angleToNextDeg)}° to next (${m.hasFaceToNextEdge ? 'face' : 'no face'}) — offset ${formatMm(m.offsetMm)}`}</div>
             ))}
           </div>
         )}

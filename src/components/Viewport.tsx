@@ -8,10 +8,12 @@ import {
   computeModelStats,
   computeVertexHubMetrics,
   computeVisibleVertexEdges,
+  edgeKey,
   resolveVertexPosition,
 } from '../lib/polyhedra'
+import { buildFaceNeighborPairs } from '../lib/edgesInfo'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
-import { Hud } from './Hud'
+import { Hud, type HudHubEdgeMetric } from './Hud'
 
 interface ViewportProps {
   mode: ViewMode
@@ -127,9 +129,21 @@ export function Viewport({
     return pos.y - stats.bounds.minY
   }, [mode, editTarget, selectedVertexIndices, transformedVertices, addedVertices, stats.bounds])
 
-  const selectedVertexHubMetrics = useMemo<HubEdgeMetric[]>(() => {
-    if (mode !== 'edit' || editTarget !== 'vertices' || selectedVertexIndices.size !== 1) return []
+  const selectedVertexId = useMemo(() => {
+    if (mode !== 'edit' || editTarget !== 'vertices' || selectedVertexIndices.size !== 1) return null
     const [id] = selectedVertexIndices
+    return id
+  }, [mode, editTarget, selectedVertexIndices])
+
+  const selectedEdgeId = useMemo(() => {
+    if (mode !== 'edit' || editTarget !== 'edges' || selectedEdgeIndices.size !== 1) return null
+    const [id] = selectedEdgeIndices
+    return id
+  }, [mode, editTarget, selectedEdgeIndices])
+
+  const selectedVertexHubMetrics = useMemo<HudHubEdgeMetric[]>(() => {
+    if (selectedVertexId === null) return []
+    const id = selectedVertexId
     const positionOf = (vid: number) => resolveVertexPosition(vid, transformedVertices, addedVertices)
     const edges = computeVisibleVertexEdges(
       data,
@@ -141,11 +155,24 @@ export function Viewport({
       id,
     )
     const center = new THREE.Vector3(0, centerY, 0)
-    return computeVertexHubMetrics(positionOf(id), center, edges, positionOf, (edgeId) => edgeThickness.get(edgeId) ?? thickness)
+    const metrics: HubEdgeMetric[] = computeVertexHubMetrics(
+      positionOf(id),
+      center,
+      edges,
+      positionOf,
+      (edgeId) => edgeThickness.get(edgeId) ?? thickness,
+    )
+    const facePairs = buildFaceNeighborPairs(data, addedFaces, deletedFaceIndices, new Set([id])).get(id) ?? new Map()
+    const n = metrics.length
+    return metrics.map((m, i) => {
+      const nextNeighborId = metrics[(i + 1) % n].neighborId
+      return {
+        ...m,
+        hasFaceToNextEdge: facePairs.has(edgeKey(m.neighborId, nextNeighborId)),
+      }
+    })
   }, [
-    mode,
-    editTarget,
-    selectedVertexIndices,
+    selectedVertexId,
     transformedVertices,
     addedVertices,
     data,
@@ -153,6 +180,8 @@ export function Viewport({
     deletedVertexIndices,
     deletedEdgeIndices,
     addedEdges,
+    addedFaces,
+    deletedFaceIndices,
     centerY,
     edgeThickness,
     thickness,
@@ -172,6 +201,8 @@ export function Viewport({
         selectedVertexCount={selectedVertexIndices.size}
         selectedEdgeCount={selectedEdgeIndices.size}
         selectedFaceCount={selectedFaceIndices.size}
+        selectedVertexId={selectedVertexId}
+        selectedEdgeId={selectedEdgeId}
         selectedVertexElevation={selectedVertexElevation}
         selectedVertexHubMetrics={selectedVertexHubMetrics}
         previewProgress={mode === 'preview' ? previewProgress : null}

@@ -86,7 +86,7 @@ export interface ComputeEdgesInfoParams {
 // pair of ring-neighbors it connects to on either side. A face incident to vertex v always
 // occupies exactly the angular wedge between v's edges to those two neighbors, so this is what
 // "is there a face between these two adjacent edges" reduces to.
-function buildFaceNeighborPairs(
+export function buildFaceNeighborPairs(
   data: PolyhedronData,
   addedFaces: Face[],
   deletedFaceIndices: ReadonlySet<number>,
