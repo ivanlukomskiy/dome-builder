@@ -27,6 +27,9 @@ export interface StepExportRequest {
   chamferLength: number
   vertices: VertexEdgesInfo[]
   flangeParams: FlangeShapeParams
+  // Uniform scale factor (1 = no change) applied to every exported solid - see
+  // buildStrutStepFromDrawing in replicadCad.ts.
+  scale: number
 }
 
 export interface StepExportPiece {
@@ -80,7 +83,7 @@ async function buildStepExports(req: StepExportRequest): Promise<StepExportPiece
 
     try {
       const plane = computeStrutPlane(posA, posB, center)
-      const blob = buildStrutStepFromDrawing(boundary.main, plane, job.beamThickness)
+      const blob = buildStrutStepFromDrawing(boundary.main, plane, job.beamThickness, req.scale)
       if (!blob) return
       pieces.push({ name: `strut-${job.index}.step`, blob })
     } catch (err) {
@@ -120,7 +123,7 @@ async function buildStepExports(req: StepExportRequest): Promise<StepExportPiece
           normal,
           xDir,
         }
-        const blob = buildStrutStepFromDrawing(boundary.main, plane, req.grooveDepth)
+        const blob = buildStrutStepFromDrawing(boundary.main, plane, req.grooveDepth, req.scale)
         if (!blob) continue
         pieces.push({ name: `flange-${vertex.vertexId}-${label}.step`, blob })
       }

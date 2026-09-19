@@ -35,6 +35,8 @@ interface SidebarProps {
   onGetEdgesInfo: () => void
   onDownloadSteps: () => void
   stepExportProgress: StepExportProgress | null
+  stepExportScale: number
+  onStepExportScaleChange: (scale: number) => void
   mode: ViewMode
   onOpenNew: () => void
   onCreateNew: () => void
@@ -208,6 +210,8 @@ export function Sidebar({
   onGetEdgesInfo,
   onDownloadSteps,
   stepExportProgress,
+  stepExportScale,
+  onStepExportScaleChange,
   mode,
   onOpenNew,
   onCreateNew,
@@ -663,6 +667,15 @@ export function Sidebar({
 
       {mode === 'preview' && (
         <section className="control-group">
+          <div className="transform-field">
+            <label>Scale</label>
+            <NumberField
+              value={stepExportScale}
+              step={0.1}
+              min={0.01}
+              onCommit={onStepExportScaleChange}
+            />
+          </div>
           <div className="button-row">
             <button onClick={onDownloadSteps} disabled={stepExportProgress !== null}>
               Download STEP Archive
@@ -673,7 +686,7 @@ export function Sidebar({
               ? stepExportProgress.phase === 'zipping'
                 ? 'Zipping…'
                 : `Building ${stepExportProgress.phase} — ${stepExportProgress.done} / ${stepExportProgress.total}`
-              : "Exports every visible strut and flange plate as its own STEP file (same shapes as this Preview), zipped into one archive."}
+              : `Exports every visible strut and flange plate as its own STEP file (same shapes as this Preview${stepExportScale !== 1 ? `, scaled ${stepExportScale}x` : ''}), zipped into one archive.`}
           </p>
         </section>
       )}

@@ -124,7 +124,7 @@ function App() {
   const [shape, setShape] = useState<ShapeType>(DEFAULT_SHAPE)
   const [axis, setAxis] = useState<AxisType>(DEFAULT_AXIS)
   const [subdivisions, setSubdivisions] = useState(DEFAULT_SUBDIVISIONS)
-  const [diameter, setDiameter] = useState(DEFAULT_DIAMETER_MM)
+  const [diameter, setDiameter] = useState(initial?.diameter ?? DEFAULT_DIAMETER_MM)
 
   const previewData = useMemo(
     () => computePolyhedron(shape, axis, subdivisions, diameter),
@@ -572,6 +572,7 @@ function App() {
   }
 
   const applyConfig = (state: DomeState) => {
+    setDiameter(state.diameter)
     sceneHistory.reset(state.sceneData)
     setSelectionMode(state.selectionMode)
     setCenterZ(state.centerZ)
@@ -622,6 +623,7 @@ function App() {
 
   const buildConfig = (): DomeConfig =>
     serializeConfig({
+      diameter,
       sceneData,
       selectionMode,
       centerZ,
@@ -650,6 +652,7 @@ function App() {
   useEffect(() => {
     saveConfigToLocalStorage(buildConfig())
   }, [
+    diameter,
     sceneData,
     selectionMode,
     centerZ,
@@ -688,6 +691,9 @@ function App() {
   // - per vertex - which adjacent edges have a face between them and which don't, and the
   // tangent plane those edges were projected onto to work that out.
   const [stepExportProgress, setStepExportProgress] = useState<StepExportProgress | null>(null)
+  // Uniform scale factor (1 = no change) applied to every solid in the STEP archive - lets the
+  // export double as a scaled-down physical model rather than only the true-size parts.
+  const [stepExportScale, setStepExportScale] = useState(1)
 
   const handleGetEdgesInfo = () => {
     const edgesInfo = computeEdgesInfo({
@@ -736,6 +742,7 @@ function App() {
             minSide: appliedPreviewParams.minSide,
             millingDiameter: appliedPreviewParams.flangeMillingDiameter,
           },
+          scale: stepExportScale,
         },
         setStepExportProgress,
         () => false,
@@ -758,6 +765,8 @@ function App() {
         onGetEdgesInfo={handleGetEdgesInfo}
         onDownloadSteps={handleDownloadSteps}
         stepExportProgress={stepExportProgress}
+        stepExportScale={stepExportScale}
+        onStepExportScaleChange={setStepExportScale}
         mode={mode}
         onOpenNew={handleOpenNew}
         onCreateNew={handleCreateNew}

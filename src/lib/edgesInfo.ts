@@ -67,18 +67,46 @@ export interface ComputeEdgesInfoParams {
   chamferLength: number
 }
 
+// Whether a face ring winds counter-clockwise when seen from outside: its Newell normal (robust
+// for non-planar / non-convex polygons) points the same way as the direction from the gravity
+// center to the face's centroid.
+function isWoundOutward(ring: Face, positionOf: (id: number) => THREE.Vector3, center: THREE.Vector3): boolean {
+  const normal = new THREE.Vector3()
+  const centroid = new THREE.Vector3()
+  for (let i = 0; i < ring.length; i++) {
+    const p = positionOf(ring[i])
+    const q = positionOf(ring[(i + 1) % ring.length])
+    normal.x += (p.y - q.y) * (p.z + q.z)
+    normal.y += (p.z - q.z) * (p.x + q.x)
+    normal.z += (p.x - q.x) * (p.y + q.y)
+    centroid.add(p)
+  }
+  centroid.divideScalar(ring.length).sub(center)
+  return normal.dot(centroid) >= 0
+}
+
 // Every face registers - for each of its vertices - the directed pair of ring-neighbors that
-// marks the wedge it fills. Face rings wind outward-CCW (three.js convention, see Face), and the
+// marks the wedge it fills. Face rings are normalised to outward-CCW first (three.js convention,
+// see Face and isWoundOutward - stored rings aren't guaranteed to be), and the
 // tangent-plane angle sort is CCW-from-outside too, so at vertex v the face's wedge sweeps in
 // increasing angular order from the edge toward `next` to the edge toward `prev` - i.e. the
 // directed pair is (next, prev), not (prev, next). Direction matters: with an unordered pair, a
 // degree-2 vertex (e.g. a single lone triangle) has both of its edges resolve to the same pair,
 // so both would wrongly claim the face; keying on direction means only the edge whose
 // next-in-angular-order neighbor is the ring's `prev` claims it.
-export function buildFaceNeighborPairs(faces: ReadonlyMap<number, Face>): Map<number, Map<string, number>> {
+export function buildFaceNeighborPairs(
+  faces: ReadonlyMap<number, Face>,
+  positionOf: (id: number) => THREE.Vector3,
+  center: THREE.Vector3,
+): Map<number, Map<string, number>> {
   const byVertex = new Map<number, Map<string, number>>()
 
-  for (const [faceId, ring] of faces) {
+  for (const [faceId, storedRing] of faces) {
+    // The stored winding can't be trusted: "Add Points" (addMidpointsBetween) emits [a, b, mid]
+    // in selection order, at a moment when mid still sits on the a-b chord (a degenerate
+    // triangle with no orientation), so whether the ring ends up outward or inward depends on
+    // where the vertex is moved afterwards. Re-orient every ring from the current positions.
+    const ring = isWoundOutward(storedRing, positionOf, center) ? storedRing : [...storedRing].reverse()
     const n = ring.length
     for (let i = 0; i < n; i++) {
       const v = ring[i]
@@ -97,7 +125,7 @@ export function buildFaceNeighborPairs(faces: ReadonlyMap<number, Face>): Map<nu
 }
 
 // a->b, direction-sensitive counterpart to edgeKey - see buildFaceNeighborPairs.
-function directedEdgeKey(a: number, b: number): string {
+export function directedEdgeKey(a: number, b: number): string {
   return `${a}->${b}`
 }
 
@@ -121,14 +149,14 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
     chamferLength,
   } = params
 
-  console.log('data', data)
+  // console.log('data', data)
 
   const center = new THREE.Vector3(0, centerY, 0)
   const positionOf = (id: number) => transformedVertices.get(id)!
 
   const adjacency = buildVertexAdjacency(data.edges)
-  const faceNeighborPairs = buildFaceNeighborPairs(data.faces)
-  console.log('faceNeighborPairs', faceNeighborPairs)
+  const faceNeighborPairs = buildFaceNeighborPairs(data.faces, positionOf, center)
+  // console.log('faceNeighborPairs', faceNeighborPairs)
 
   const vertices: VertexEdgesInfo[] = []
 

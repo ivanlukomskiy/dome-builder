@@ -28,6 +28,9 @@ export interface StepExportProgress {
 
 export interface RunStepExportParams extends PreviewBuildInputParams {
   flangeParams: FlangeShapeParams
+  // Uniform scale factor (1 = no change) applied to every exported solid - see
+  // buildStrutStepFromDrawing in replicadCad.ts.
+  scale: number
 }
 
 // Runs one batch (a handful of struts, or of flange vertices - never both) in its own fresh
@@ -96,6 +99,7 @@ export async function runStepExport(
     millingDiameter: params.millingDiameter,
     chamferLength: params.chamferLength,
     flangeParams: params.flangeParams,
+    scale: params.scale,
   }
 
   let nextRequestId = 0

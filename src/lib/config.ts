@@ -8,7 +8,11 @@ import { downloadJson } from './download'
 // while still choosing a shape), which tab is active, or the undo history (session-only, not
 // worth persisting).
 export interface DomeConfig {
-  version: 12
+  version: 13
+  // The "Adjust to a Sphere" target size in Edit, or the shape recipe's own size while still in
+  // "New" - kept here (rather than left to reset to its hardcoded default) since it's live,
+  // user-facing state either way.
+  diameter: number
   vertices: [number, [number, number, number]][]
   edges: [number, Edge][]
   faces: [number, Face][]
@@ -52,6 +56,7 @@ export interface DomeConfig {
 // The subset of App's state a config captures - plain data in, plain data out, so App can
 // build one straight from its own state variables and apply one straight back onto them.
 export interface DomeState {
+  diameter: number
   sceneData: SceneData
   selectionMode: SelectionMode
   centerZ: number
@@ -78,7 +83,8 @@ export interface DomeState {
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 12,
+    version: 13,
+    diameter: state.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
       id,
       [v.x, v.y, v.z],
@@ -114,6 +120,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
 
 export function deserializeConfig(config: DomeConfig): DomeState {
   return {
+    diameter: config.diameter,
     sceneData: {
       vertices: new Map(config.vertices.map(([id, [x, y, z]]) => [id, new THREE.Vector3(x, y, z)])),
       edges: new Map(config.edges),
@@ -157,7 +164,7 @@ export function loadConfigFromLocalStorage(): DomeConfig | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as DomeConfig
-    return parsed.version === 12 ? parsed : null
+    return parsed.version === 13 ? parsed : null
   } catch {
     return null
   }

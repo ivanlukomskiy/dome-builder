@@ -542,11 +542,11 @@ function computeConnectionSectorShape(
 ): Drawing {
 
 
-  const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
-  const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+  // const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+  // const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
 
-  const start = rotate2D([edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1], edge.projectedAngleDeg);
-  const end = rotate2D([edge.strutEnd.cornerLength + params.overshoot  - params.minSide, -h2], edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
+  // const start = rotate2D([edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1], edge.projectedAngleDeg);
+  // const end = rotate2D([edge.strutEnd.cornerLength + params.overshoot  - params.minSide, -h2], edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
 
   // return draw().movePointerTo(start).bezierCurveTo(end, intersection).lineTo([0,0]).close()
 

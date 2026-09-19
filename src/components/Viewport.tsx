@@ -4,8 +4,8 @@ import { Grid, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { EditTarget, ViewMode } from '../App'
 import type { HubEdgeMetric, SceneData } from '../lib/polyhedra'
-import { buildVertexAdjacency, computeModelStats, computeVertexHubMetrics, edgeKey } from '../lib/polyhedra'
-import { buildFaceNeighborPairs } from '../lib/edgesInfo'
+import { buildVertexAdjacency, computeModelStats, computeVertexHubMetrics } from '../lib/polyhedra'
+import { buildFaceNeighborPairs, directedEdgeKey } from '../lib/edgesInfo'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
 import { Hud, type HudHubEdgeMetric } from './Hud'
 
@@ -115,13 +115,13 @@ export function Viewport({
       positionOf,
       (edgeId) => edgeThickness.get(edgeId) ?? thickness,
     )
-    const facePairs = buildFaceNeighborPairs(data.faces).get(id) ?? new Map()
+    const facePairs = buildFaceNeighborPairs(data.faces, positionOf, center).get(id) ?? new Map()
     const n = metrics.length
     return metrics.map((m, i) => {
       const nextNeighborId = metrics[(i + 1) % n].neighborId
       return {
         ...m,
-        hasFaceToNextEdge: facePairs.has(edgeKey(m.neighborId, nextNeighborId)),
+        hasFaceToNextEdge: facePairs.has(directedEdgeKey(m.neighborId, nextNeighborId)),
       }
     })
   }, [selectedVertexId, transformedVertices, data.edges, data.faces, centerY, edgeThickness, thickness])

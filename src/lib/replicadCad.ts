@@ -131,11 +131,20 @@ export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, t
 }
 
 // Same solid as buildStrutMeshFromDrawing, exported as a STEP file Blob instead of a tessellated
-// mesh - used by the "download as STEP" export rather than live Preview rendering.
+// mesh - used by the "download as STEP" export rather than live Preview rendering. `scale` (1 =
+// no change) uniformly resizes the solid, around the world origin, before export - so every
+// part in the archive scales by the same factor and stays mutually consistent if reassembled.
 // `ensureReplicadReady` must have resolved before calling this.
-export function buildStrutStepFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): Blob | null {
-  const centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
+export function buildStrutStepFromDrawing(
+  drawing: Drawing,
+  plane: StrutPlane,
+  thicknessMm: number,
+  scale = 1,
+): Blob | null {
+  let centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
   if (!centered) return null
+
+  if (scale !== 1) centered = centered.scale(scale)
 
   const blob = centered.blobSTEP()
   centered.delete()
