@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
 import { drawingToDXF } from '../lib/dxfExport'
 import type { StrutMesh } from '../lib/replicadCad'
+import { clampBraceShift, type StrutBraces } from '../lib/braces'
 import { StrutShapeScene, type StrutShapeViewport } from './StrutShapeScene'
 
 const DEG2RAD = Math.PI / 180
@@ -19,7 +20,15 @@ interface Params {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  // A brace at end A / B of the strut (see braces.ts), `shift` being its fraction of the A-B length.
+  braceAEnabled: boolean
+  braceAShift: number
+  braceBEnabled: boolean
+  braceBShift: number
 }
+
+type NumberParamKey = { [K in keyof Params]: Params[K] extends number ? K : never }[keyof Params]
+type BooleanParamKey = { [K in keyof Params]: Params[K] extends boolean ? K : never }[keyof Params]
 
 const DEFAULT_PARAMS: Params = {
   offset1: 100,
@@ -33,6 +42,10 @@ const DEFAULT_PARAMS: Params = {
   grooveDepth: 20,
   millingDiameter: 8,
   chamferLength: 6,
+  braceAEnabled: false,
+  braceAShift: 0.5,
+  braceBEnabled: false,
+  braceBShift: 0.5,
 }
 
 const DEFAULT_SHOW_HELPER_POINTS = true
@@ -89,7 +102,8 @@ type State =
 // while iterating.
 export function StrutShapeDebug() {
   const [params, setParams] = useState<Params>(loadParams)
-  const setParam = (field: keyof Params) => (value: number) => setParams((prev) => ({ ...prev, [field]: value }))
+  const setParam = (field: NumberParamKey) => (value: number) => setParams((prev) => ({ ...prev, [field]: value }))
+  const setFlag = (field: BooleanParamKey) => (value: boolean) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
   const [showHelperPoints, setShowHelperPoints] = useState(DEFAULT_SHOW_HELPER_POINTS)
   const [initialViewport, setInitialViewport] = useState<StrutShapeViewport | null>(loadViewport)
@@ -138,11 +152,25 @@ export function StrutShapeDebug() {
           grooveDepth,
           millingDiameter,
           chamferLength,
+          braceAEnabled,
+          braceAShift,
+          braceBEnabled,
+          braceBShift,
         } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
         const a = new THREE.Vector3(radius * 1.11, 0, 0)
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
+
+        const chord = a.distanceTo(b)
+        const braces: StrutBraces = {
+          a: braceAEnabled
+            ? [{ braceId: 0, shift: braceAShift, distanceFromVertex: braceAShift * chord, otherEdgeId: 0 }]
+            : [],
+          b: braceBEnabled
+            ? [{ braceId: 1, shift: braceBShift, distanceFromVertex: braceBShift * chord, otherEdgeId: 1 }]
+            : [],
+        }
 
         const result = computeStrutBoundaryManual(
           a,
@@ -157,6 +185,7 @@ export function StrutShapeDebug() {
           grooveDepth,
           millingDiameter,
           chamferLength,
+          braces,
         )
         if (cancelled) return
 
@@ -299,6 +328,50 @@ export function StrutShapeDebug() {
             <label>Chamfer length (mm)</label>
             <NumberField value={params.chamferLength} step={1} min={0} onCommit={setParam('chamferLength')} />
           </div>
+        </section>
+
+        <section className="control-group">
+          <h2>Braces</h2>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={params.braceAEnabled}
+              onChange={(e) => setFlag('braceAEnabled')(e.target.checked)}
+            />
+            Brace at end A
+          </label>
+          <div className="transform-field">
+            <label>Shift A (0-1)</label>
+            <NumberField
+              value={params.braceAShift}
+              step={0.05}
+              min={0.01}
+              clamp={clampBraceShift}
+              onCommit={setParam('braceAShift')}
+            />
+          </div>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={params.braceBEnabled}
+              onChange={(e) => setFlag('braceBEnabled')(e.target.checked)}
+            />
+            Brace at end B
+          </label>
+          <div className="transform-field">
+            <label>Shift B (0-1)</label>
+            <NumberField
+              value={params.braceBShift}
+              step={0.05}
+              min={0.01}
+              clamp={clampBraceShift}
+              onCommit={setParam('braceBShift')}
+            />
+          </div>
+          <p className="hint">
+            Each enabled brace adds a <code>braceCenter</code> helper point: from that end toward
+            the other by shift &times; strut length.
+          </p>
         </section>
       </aside>
       <div className="viewport">

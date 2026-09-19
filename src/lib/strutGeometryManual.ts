@@ -38,6 +38,10 @@ export interface StrutBoundaryManualResult {
   // The actual strut sketch outline - what would eventually replace computeStrutBoundary's
   // return value. Null while you don't have one yet (helpers alone still render).
   main: Drawing | null;
+  // The sketch of the brace attached at this strut's A / B end, or null if there's none (or it
+  // isn't built yet - always null for now).
+  braceA: Drawing | null;
+  braceB: Drawing | null;
   // Construction lines, reference points turned into tiny shapes, anything else worth seeing
   // while building `main` up. Purely visual - never fed into the real pipeline.
   helpers: HelperDrawing[];
@@ -486,6 +490,68 @@ function calculateArcPoints(
   });
 }
 
+// Where the strut body's two long sides (the "inn" and "ext" arcs) start and end - the points
+// `arc` draws between.
+interface ArcEndpoints {
+  innA: Point2D;
+  innB: Point2D;
+  extA: Point2D;
+  extB: Point2D;
+}
+
+function arcEndpoints(
+  a: Point2D,
+  b: Point2D,
+  center: Point2D,
+  aMeasurements: StrutEndMeasurements,
+  bMeasurements: StrutEndMeasurements,
+): ArcEndpoints {
+  const tangentA = tangentDirection2D(a, b, center);
+  const tangentB = tangentDirection2D(b, a, center);
+
+  return {
+    innA: arcStart(a, tangentA, 1, aMeasurements),
+    innB: arcStart(b, tangentB, -1, bMeasurements),
+    extA: arcStart(a, tangentA, -1, aMeasurements),
+    extB: arcStart(b, tangentB, 1, bMeasurements),
+  };
+}
+
+// Where the ray from `center` at `angle` (radians) crosses the curve calculateArcPoints
+// approximates between `start` and `end` - i.e. that curve with infinitely many segments: the
+// angle sweeps linearly from start's to end's (the short way around) while the distance from
+// `center` changes linearly from start's to end's. Null if the ray points outside the swept
+// angle range, where the curve doesn't exist.
+function arcPointAtAngle(
+  start: Point2D,
+  end: Point2D,
+  center: Point2D,
+  angle: number,
+): Point2D | null {
+  const startVec = sub2(start, center);
+  const endVec = sub2(end, center);
+  const angleStart = Math.atan2(startVec[1], startVec[0]);
+  const angleEnd = Math.atan2(endVec[1], endVec[0]);
+
+  const wrap = (delta: number) => {
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    return delta;
+  };
+  const sweep = wrap(angleEnd - angleStart);
+  if (Math.abs(sweep) < 1e-9) return null;
+
+  const t = wrap(angle - angleStart) / sweep;
+  if (t < -1e-9 || t > 1 + 1e-9) return null;
+
+  const radius =
+    length2(startVec) + (length2(endVec) - length2(startVec)) * t;
+  return [
+    center[0] + radius * Math.cos(angle),
+    center[1] + radius * Math.sin(angle),
+  ];
+}
+
 function arc(
   a: Point2D,
   b: Point2D,
@@ -493,17 +559,17 @@ function arc(
   aMeasurements: StrutEndMeasurements,
   bMeasurements: StrutEndMeasurements,
 ): Drawing {
-  const tangentA = tangentDirection2D(a, b, center);
-  const tangentB = tangentDirection2D(b, a, center);
-
-  let innA = arcStart(a, tangentA, 1, aMeasurements);
-  let innB = arcStart(b, tangentB, -1, bMeasurements);
-  let extA = arcStart(a, tangentA, -1, aMeasurements);
-  let extB = arcStart(b, tangentB, 1, bMeasurements);
+  const { innA, innB, extA, extB } = arcEndpoints(
+    a,
+    b,
+    center,
+    aMeasurements,
+    bMeasurements,
+  );
 
   let conn = draw();
-  const innArcPoints = calculateArcPoints(innA, innB, center, 5); // fixme parametrize
-  const extArcPoints = calculateArcPoints(extA, extB, center, 5);
+  const innArcPoints = calculateArcPoints(innA, innB, center, 20); // fixme parametrize
+  const extArcPoints = calculateArcPoints(extA, extB, center, 20);
 
   innArcPoints.forEach((p, i) => {
     if (i == 0) {
@@ -532,8 +598,8 @@ export function computeStrutBoundaryManual2D(
   grooveDepth: number,
   millingDiameter: number,
   chamferLength: number,
-  // Braces on the A / B end. `distanceFromVertex` is measured along the A-B chord. Not yet used to
-  // shape the outline - for now each one just shows up as a helper marker (see below).
+  // Braces on the A / B end. Not yet used to shape the outline - for now each one just shows up
+  // as a `braceCenter` helper point (see below), `shift` of the way along the A-B chord.
   braces: StrutBraces = NO_STRUT_BRACES,
 ): StrutBoundaryManualResult {
   // calculate intersection point
@@ -592,28 +658,56 @@ export function computeStrutBoundaryManual2D(
     // ...helpers,
   ];
 
-  // Where each brace meets this strut, `distanceFromVertex` in from the end it belongs to.
-  const chordDir = normalize2(sub2(b, a));
-  const braceMarkers: [string, Point2D, Point2D, StrutBraces["a"]][] = [
+  // braceCenter: for a brace on end A, the point reached by going from A toward B by
+  // shift * |AB|; for a brace on end B, the same going from B toward A.
+  const chord = sub2(b, a);
+  const chordLength = length2(chord);
+  const chordDir = normalize2(chord);
+  const arcEnds = arcEndpoints(a, b, center, endA, endB);
+  const braceEnds: [string, Point2D, Point2D, StrutBraces["a"]][] = [
     ["A", a, chordDir, braces.a],
     ["B", b, scale2(chordDir, -1), braces.b],
   ];
-  for (const [end, origin, dir, endBraces] of braceMarkers) {
+  for (const [end, origin, dir, endBraces] of braceEnds) {
     for (const brace of endBraces) {
+      const braceCenter = add2(origin, scale2(dir, brace.shift * chordLength));
       helpers.push({
-        drawing: drawPointMarker(
-          add2(origin, scale2(dir, brace.distanceFromVertex)),
-          MARKER_RADIUS,
-        ),
+        drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
         color: "orange",
-        name: `brace ${brace.braceId} @ ${end}`,
+        name: `braceCenter ${end} (brace ${brace.braceId})`,
       });
+
+      // braceInn / braceExt: where the ray from the center through braceCenter crosses the
+      // strut body's inn / ext arc (see arcPointAtAngle). Missing when braceCenter lies angularly
+      // outside the arc, e.g. within a shoulder.
+      const rayAngle = Math.atan2(
+        braceCenter[1] - center[1],
+        braceCenter[0] - center[0],
+      );
+      const arcCrossings: [string, Point2D | null][] = [
+        [
+          "Inn",
+          arcPointAtAngle(arcEnds.innA, arcEnds.innB, center, rayAngle),
+        ],
+        [
+          "Ext",
+          arcPointAtAngle(arcEnds.extA, arcEnds.extB, center, rayAngle),
+        ],
+      ];
+      for (const [side, point] of arcCrossings) {
+        if (!point) continue;
+        helpers.push({
+          drawing: drawPointMarker(point, MARKER_RADIUS),
+          color: "cyan",
+          name: `brace${side}${end} (brace ${brace.braceId})`,
+        });
+      }
     }
   }
 
   const main = strutA.fuse(arcBody).fuse(strutB)
 
-  return { main: main, helpers };
+  return { main: main, braceA: null, braceB: null, helpers };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and
