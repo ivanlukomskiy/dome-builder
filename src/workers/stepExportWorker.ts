@@ -71,6 +71,7 @@ async function buildStepExports(req: StepExportRequest): Promise<StepExportPiece
       req.grooveDepth,
       req.millingDiameter,
       req.chamferLength,
+      job.braces,
     )
     self.postMessage({
       type: 'progress',

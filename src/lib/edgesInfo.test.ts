@@ -27,6 +27,8 @@ describe("buildFaceNeighborPairs with Add Points faces", () => {
       nextVertexId: 2,
       nextEdgeId: 0,
       nextFaceId: 0,
+      braces: new Map(),
+      nextBraceId: 0,
     };
     const out = addMidpointsBetween(scene, selection, (id) => vertices.get(id)!);
 

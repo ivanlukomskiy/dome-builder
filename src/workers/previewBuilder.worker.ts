@@ -85,6 +85,7 @@ async function buildPreview(req: PreviewBuildRequest): Promise<PreviewPiece[]> {
       req.grooveDepth,
       req.millingDiameter,
       req.chamferLength,
+      job.braces,
     )
     self.postMessage({
       type: 'progress',

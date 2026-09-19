@@ -19,6 +19,7 @@ interface ViewportProps {
   selectedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
   selectedFaceIndices: ReadonlySet<number>
+  selectedBraceIndices: ReadonlySet<number>
   centerY: number
   extrudeDistance: number
   thickness: number
@@ -40,6 +41,7 @@ interface ViewportProps {
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
+  onBraceClick: (id: number) => void
   onDeselectAll: () => void
 }
 
@@ -53,6 +55,7 @@ export function Viewport({
   selectedEdgeIndices,
   edgeThickness,
   selectedFaceIndices,
+  selectedBraceIndices,
   centerY,
   extrudeDistance,
   thickness,
@@ -74,6 +77,7 @@ export function Viewport({
   onVertexClick,
   onEdgeClick,
   onFaceClick,
+  onBraceClick,
   onDeselectAll,
 }: ViewportProps) {
   const stats = useMemo(
@@ -140,6 +144,7 @@ export function Viewport({
         selectedVertexCount={selectedVertexIndices.size}
         selectedEdgeCount={selectedEdgeIndices.size}
         selectedFaceCount={selectedFaceIndices.size}
+        selectedBraceCount={selectedBraceIndices.size}
         selectedVertexId={selectedVertexId}
         selectedEdgeId={selectedEdgeId}
         selectedVertexElevation={selectedVertexElevation}
@@ -178,6 +183,7 @@ export function Viewport({
           selectedEdgeIndices={selectedEdgeIndices}
           edgeThickness={edgeThickness}
           selectedFaceIndices={selectedFaceIndices}
+          selectedBraceIndices={selectedBraceIndices}
           centerY={centerY}
           extrudeDistance={extrudeDistance}
           thickness={thickness}
@@ -199,6 +205,7 @@ export function Viewport({
           onVertexClick={onVertexClick}
           onEdgeClick={onEdgeClick}
           onFaceClick={onFaceClick}
+          onBraceClick={onBraceClick}
           onPreviewProgress={setPreviewProgress}
         />
         <OrbitControls makeDefault enableDamping dampingFactor={0.08} />

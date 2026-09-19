@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { pruneBraces, type Brace } from './braces'
 
 export type ShapeType = 'octahedron' | 'icosahedron' | 'goldberg'
 export type AxisType = 'vertex' | 'face' | 'edge'
@@ -362,6 +363,10 @@ export interface SceneData {
   nextVertexId: number
   nextEdgeId: number
   nextFaceId: number
+  // Cross-links between two edges that meet at a vertex - see braces.ts. Deleting either edge
+  // deletes the brace too (see deleteEdges/deleteVertices).
+  braces: Map<number, Brace>
+  nextBraceId: number
 }
 
 // Bakes a layer-count cutoff into a concrete SceneData: keeps only the vertices in
@@ -399,7 +404,7 @@ export function pruneToLayerCount(data: PolyhedronData, layerCount: number): Sce
     faces.set(nextFaceId++, face.map((i) => idMap.get(i)!))
   }
 
-  return { vertices, edges, faces, nextVertexId, nextEdgeId, nextFaceId }
+  return { vertices, edges, faces, nextVertexId, nextEdgeId, nextFaceId, braces: new Map(), nextBraceId: 0 }
 }
 
 // Every vertex among `candidateIds` on the same layer (same height) as the given vertex.
@@ -742,11 +747,11 @@ export function deleteVertices(scene: SceneData, ids: ReadonlySet<number>): Scen
   const vertices = new Map(Array.from(scene.vertices).filter(([id]) => !ids.has(id)))
   const edges = new Map(Array.from(scene.edges).filter(([, [a, b]]) => !ids.has(a) && !ids.has(b)))
   const faces = new Map(Array.from(scene.faces).filter(([, face]) => face.every((v) => !ids.has(v))))
-  return { ...scene, vertices, edges, faces }
+  return { ...scene, vertices, edges, faces, braces: pruneBraces(scene.braces, edges) }
 }
 
 // Removes the given edges, cascading: any face that had one of them as a side is removed too,
-// and any vertex touched by a deleted edge that's left with no surviving edge is a stray point,
+// any brace lying on one of them, and any vertex touched by a deleted edge that's left with no surviving edge is a stray point,
 // removed as well.
 export function deleteEdges(scene: SceneData, ids: ReadonlySet<number>): SceneData {
   if (ids.size === 0) return scene
@@ -780,7 +785,7 @@ export function deleteEdges(scene: SceneData, ids: ReadonlySet<number>): SceneDa
       ? scene.vertices
       : new Map(Array.from(scene.vertices).filter(([id]) => !strayVertices.has(id)))
 
-  return { ...scene, vertices, edges, faces }
+  return { ...scene, vertices, edges, faces, braces: pruneBraces(scene.braces, edges) }
 }
 
 // Removes the given faces. No cascade - deleting a face never affects its vertices or edges.
@@ -816,7 +821,16 @@ export function addMidpointsBetween(
     if (!edgeIndex.has(edgeKey(a, b))) edges.set(nextEdgeId++, [a, b])
   }
 
-  return { vertices, edges, faces, nextVertexId, nextEdgeId, nextFaceId }
+  return {
+    vertices,
+    edges,
+    faces,
+    nextVertexId,
+    nextEdgeId,
+    nextFaceId,
+    braces: scene.braces,
+    nextBraceId: scene.nextBraceId,
+  }
 }
 
 // "Connect Vertices": pairs the given vertices by nearest neighbor and adds a direct edge for

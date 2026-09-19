@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { SceneData } from './polyhedra'
 import { computeEdgeEndOffsets } from './strutGeometry'
 import { computeEdgesInfo, type VertexEdgesInfo } from './edgesInfo'
+import { computeStrutBraces, indexBracesByEdge, type StrutBraces } from './braces'
 
 // Everything DomeMesh.tsx's live Preview build and the "Download STEP Archive" export both need
 // before handing off to a worker: each edge's per-edge offsets (computeEdgeEndOffsets) and
@@ -20,6 +21,9 @@ export interface StrutGeometryEntry {
   // This edge's own thickness override, if any - undefined means "uses the model default". Not
   // needed to build the solid itself; DomeMesh uses it to pick the strut's preview color.
   thicknessOverride: number | undefined
+  // Braces lying on this strut's A / B end (empty lists = none) - passed on to
+  // computeStrutBoundaryManual.
+  braces: StrutBraces
 }
 
 export interface PreviewBuildInputs {
@@ -71,6 +75,7 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
 
   const offsets = computeEdgeEndOffsets(data, transformedVertices, centerY, (edgeId) => edgeThickness.get(edgeId) ?? thickness)
   const halfWidth = extrudeDistance / 2
+  const bracesByEdge = indexBracesByEdge(data.braces)
 
   const strutEntries: StrutGeometryEntry[] = strutEntries3d.map(({ a, b, index, posA, posB }) => {
     const override = edgeThickness.get(index)
@@ -82,6 +87,7 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
       offsetB: (offsets.get(index)?.get(b) ?? 0) + offsetModifier,
       beamThickness: override ?? thickness,
       thicknessOverride: override,
+      braces: computeStrutBraces(index, [a, b], posA.distanceTo(posB), bracesByEdge),
     }
   })
 

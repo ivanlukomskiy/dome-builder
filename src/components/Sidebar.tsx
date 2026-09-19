@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import type { StepExportProgress } from '../lib/stepExportRunner'
+import { clampBraceShift, MIN_BRACE_SHIFT } from '../lib/braces'
 import type {
   AxisType,
   PolyhedronData,
@@ -27,6 +28,7 @@ const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
   { value: 'vertices', label: 'Vertices' },
   { value: 'edges', label: 'Edges' },
   { value: 'faces', label: 'Faces' },
+  { value: 'braces', label: 'Braces' },
 ]
 
 interface SidebarProps {
@@ -74,6 +76,13 @@ interface SidebarProps {
   onResetEdgeThickness: () => void
   canCreateFace: boolean
   onCreateFace: () => void
+  canAddBrace: boolean
+  onAddBrace: () => void
+  selectedBraceCount: number
+  // null when the selected braces don't all share the same shift.
+  braceShiftValue: number | null
+  onBraceShiftChange: (value: number) => void
+  onDeleteSelectedBraces: () => void
   selectedFaceCount: number
   onDeleteSelectedFaces: () => void
   centerZ: number
@@ -249,6 +258,12 @@ export function Sidebar({
   onResetEdgeThickness,
   canCreateFace,
   onCreateFace,
+  canAddBrace,
+  onAddBrace,
+  selectedBraceCount,
+  braceShiftValue,
+  onBraceShiftChange,
+  onDeleteSelectedBraces,
   selectedFaceCount,
   onDeleteSelectedFaces,
   centerZ,
@@ -813,6 +828,15 @@ export function Sidebar({
           <p className="hint">
             Turns every triangle hiding among the selected edges into a face.
           </p>
+          <div className="button-row">
+            <button disabled={!canAddBrace} onClick={onAddBrace}>
+              Add Brace
+            </button>
+          </div>
+          <p className="hint">
+            Select exactly two edges that meet at the same vertex (use Point selection mode) to
+            link them with a brace.
+          </p>
         </section>
       )}
 
@@ -863,6 +887,40 @@ export function Sidebar({
               Delete
             </button>
           </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'braces' && (
+        <section className="control-group">
+          <h2>Edit braces</h2>
+          <p className="hint">
+            {selectedBraceCount > 0
+              ? `${selectedBraceCount} ${selectedBraceCount !== 1 ? 'braces' : 'brace'} selected`
+              : 'Click a brace to select it. Add braces from two edges in the Edges tab.'}
+          </p>
+          <div className="button-row">
+            <button disabled={selectedBraceCount === 0} onClick={onDeleteSelectedBraces}>
+              Delete
+            </button>
+          </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'braces' && selectedBraceCount > 0 && (
+        <section className="control-group">
+          <h2>Brace Shift</h2>
+          <div className="transform-field">
+            <label>Shift (fraction of edge length, 0-1)</label>
+            <NumberField
+              value={braceShiftValue}
+              step={0.05}
+              min={MIN_BRACE_SHIFT}
+              placeholder={braceShiftValue === null ? 'Mixed' : undefined}
+              clamp={clampBraceShift}
+              onCommit={onBraceShiftChange}
+            />
+          </div>
+          <p className="hint">Where the brace meets each edge, measured from their shared vertex.</p>
         </section>
       )}
 

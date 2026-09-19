@@ -2,6 +2,7 @@ import { draw, drawCircle, DrawingPen } from "replicad";
 import { Drawing, type Point2D } from "replicad";
 import type * as THREE from "three";
 import { computeStrutPlane } from "./strutGeometry";
+import { NO_STRUT_BRACES, type StrutBraces } from "./braces";
 
 // A sandbox for hand-building computeStrutBoundary's replacement directly with replicad's own
 // 2D primitives (draw(), .cut()/.fuse()/.intersect(), etc.) instead of the hand-rolled Vec2 math
@@ -250,6 +251,8 @@ export function computeStrutBoundaryManual(
   grooveDepth: number,
   millingDiameter: number,
   chamferLength: number,
+  // Braces lying on the A / B end of this strut (see braces.ts); empty lists mean none.
+  braces: StrutBraces = NO_STRUT_BRACES,
 ): StrutBoundaryManualResult {
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
@@ -275,6 +278,7 @@ export function computeStrutBoundaryManual(
     grooveDepth,
     millingDiameter,
     chamferLength,
+    braces,
   );
 }
 
@@ -528,6 +532,9 @@ export function computeStrutBoundaryManual2D(
   grooveDepth: number,
   millingDiameter: number,
   chamferLength: number,
+  // Braces on the A / B end. `distanceFromVertex` is measured along the A-B chord. Not yet used to
+  // shape the outline - for now each one just shows up as a helper marker (see below).
+  braces: StrutBraces = NO_STRUT_BRACES,
 ): StrutBoundaryManualResult {
   // calculate intersection point
 
@@ -584,6 +591,25 @@ export function computeStrutBoundaryManual2D(
     // { drawing: arcBody, color: "magenta", name: "arc" },
     // ...helpers,
   ];
+
+  // Where each brace meets this strut, `distanceFromVertex` in from the end it belongs to.
+  const chordDir = normalize2(sub2(b, a));
+  const braceMarkers: [string, Point2D, Point2D, StrutBraces["a"]][] = [
+    ["A", a, chordDir, braces.a],
+    ["B", b, scale2(chordDir, -1), braces.b],
+  ];
+  for (const [end, origin, dir, endBraces] of braceMarkers) {
+    for (const brace of endBraces) {
+      helpers.push({
+        drawing: drawPointMarker(
+          add2(origin, scale2(dir, brace.distanceFromVertex)),
+          MARKER_RADIUS,
+        ),
+        color: "orange",
+        name: `brace ${brace.braceId} @ ${end}`,
+      });
+    }
+  }
 
   const main = strutA.fuse(arcBody).fuse(strutB)
 

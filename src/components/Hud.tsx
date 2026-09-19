@@ -15,6 +15,7 @@ interface HudProps {
   selectedVertexCount: number
   selectedEdgeCount: number
   selectedFaceCount: number
+  selectedBraceCount: number
   selectedVertexId: number | null
   selectedEdgeId: number | null
   selectedVertexElevation: number | null
@@ -55,6 +56,7 @@ export function Hud({
   selectedVertexCount,
   selectedEdgeCount,
   selectedFaceCount,
+  selectedBraceCount,
   selectedVertexId,
   selectedEdgeId,
   selectedVertexElevation,
@@ -75,6 +77,8 @@ export function Hud({
           : `${selectedEdgeCount} edges selected`
     } else if (editTarget === 'faces' && selectedFaceCount > 0) {
       selectionLine = `${selectedFaceCount} face${selectedFaceCount === 1 ? '' : 's'} selected`
+    } else if (editTarget === 'braces' && selectedBraceCount > 0) {
+      selectionLine = `${selectedBraceCount} brace${selectedBraceCount === 1 ? '' : 's'} selected`
     }
   }
 

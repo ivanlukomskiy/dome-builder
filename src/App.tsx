@@ -22,6 +22,7 @@ import {
   scaleToRadius,
   SHAPE_AXES,
 } from './lib/polyhedra'
+import { addBrace, deleteBraces, resolveBracePair, setBraceShift } from './lib/braces'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
 import type { DomeConfig, DomeState } from './lib/config'
@@ -41,7 +42,7 @@ import { useHistory } from './lib/useHistory'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
 export type EditOrPreviewMode = 'edit' | 'preview'
-export type EditTarget = 'vertices' | 'edges' | 'faces'
+export type EditTarget = 'vertices' | 'edges' | 'faces' | 'braces'
 
 // The strut-shape fields in the Sidebar's "Edge Curvature" and "Grooves" sections - the only
 // preview settings, since rebuilding every strut solid via replicad/opencascade.js is slow.
@@ -183,6 +184,7 @@ function App() {
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
   const [selectedEdgeIndices, setSelectedEdgeIndices] = useState<Set<number>>(new Set())
   const [selectedFaceIndices, setSelectedFaceIndices] = useState<Set<number>>(new Set())
+  const [selectedBraceIndices, setSelectedBraceIndices] = useState<Set<number>>(new Set())
   const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
     new Map(initial?.edgeThickness ?? []),
   )
@@ -354,11 +356,64 @@ function App() {
     setSelectedFaceIndices((prev) => toggleGroupSelection(prev, group))
   }
 
+  // Braces are picked one at a time (no layer/symmetric grouping yet).
+  const handleBraceClick = (id: number) => {
+    if (mode !== 'edit' || editTarget !== 'braces') return
+    setSelectedBraceIndices((prev) => toggleGroupSelection(prev, [id]))
+  }
+
   const handleEditTargetChange = (target: EditTarget) => {
     setEditTarget(target)
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
+    setSelectedBraceIndices(new Set())
+  }
+
+  // Undo/redo can remove a brace that's still selected, so only ever hand out ids that exist.
+  const liveSelectedBraceIndices = useMemo(
+    () => new Set(Array.from(selectedBraceIndices).filter((id) => sceneData.braces.has(id))),
+    [selectedBraceIndices, sceneData.braces],
+  )
+
+  // Add Brace needs exactly two selected edges that share a vertex and don't already have a
+  // brace between them.
+  const canAddBrace = useMemo(
+    () => mode === 'edit' && editTarget === 'edges' && resolveBracePair(sceneData, selectedEdgeIndices) !== null,
+    [mode, editTarget, sceneData, selectedEdgeIndices],
+  )
+
+  const handleAddBrace = () => {
+    if (!canAddBrace) return
+    sceneHistory.commit(addBrace(sceneData, selectedEdgeIndices))
+    setSelectedEdgeIndices(new Set())
+  }
+
+  const handleDeleteSelectedBraces = () => {
+    if (liveSelectedBraceIndices.size === 0) return
+    sceneHistory.commit(deleteBraces(sceneData, liveSelectedBraceIndices))
+    setSelectedBraceIndices(new Set())
+  }
+
+  // null when the selected braces don't all share the same shift.
+  const braceShiftValue = useMemo(() => {
+    let value: number | null = null
+    let first = true
+    for (const id of liveSelectedBraceIndices) {
+      const shift = sceneData.braces.get(id)!.params.shift
+      if (first) {
+        value = shift
+        first = false
+      } else if (shift !== value) {
+        return null
+      }
+    }
+    return value
+  }, [liveSelectedBraceIndices, sceneData.braces])
+
+  const handleBraceShiftChange = (value: number) => {
+    if (liveSelectedBraceIndices.size === 0) return
+    sceneHistory.commit(setBraceShift(sceneData, liveSelectedBraceIndices, value))
   }
 
   const handleDeleteSelectedFaces = () => {
@@ -430,6 +485,7 @@ function App() {
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
+    setSelectedBraceIndices(new Set())
   }
 
   const handleTransformChange = (field: keyof VertexTransform, value: number) => {
@@ -525,6 +581,7 @@ function App() {
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
+    setSelectedBraceIndices(new Set())
     setEditTarget('vertices')
     setCenterZ(DEFAULT_CENTER_Z)
     setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
@@ -617,6 +674,7 @@ function App() {
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
+    setSelectedBraceIndices(new Set())
     setEditTarget('vertices')
     setMode('edit')
   }
@@ -804,6 +862,12 @@ function App() {
         onResetEdgeThickness={handleResetEdgeThickness}
         canCreateFace={creatableFaces.length > 0}
         onCreateFace={handleCreateFacesFromEdges}
+        canAddBrace={canAddBrace}
+        onAddBrace={handleAddBrace}
+        selectedBraceCount={liveSelectedBraceIndices.size}
+        braceShiftValue={braceShiftValue}
+        onBraceShiftChange={handleBraceShiftChange}
+        onDeleteSelectedBraces={handleDeleteSelectedBraces}
         selectedFaceCount={selectedFaceIndices.size}
         onDeleteSelectedFaces={handleDeleteSelectedFaces}
         centerZ={centerZ}
@@ -861,6 +925,7 @@ function App() {
         selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
         selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
+        selectedBraceIndices={isNew ? EMPTY_INDEX_SET : liveSelectedBraceIndices}
         centerY={centerY}
         extrudeDistance={appliedPreviewParams.extrudeDistance}
         thickness={appliedPreviewParams.thickness}
@@ -882,6 +947,7 @@ function App() {
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}
+        onBraceClick={handleBraceClick}
         onDeselectAll={handleDeselectAll}
       />
     </div>

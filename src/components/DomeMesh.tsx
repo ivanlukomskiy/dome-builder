@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { SceneData } from '../lib/polyhedra'
+import { computeBraceEndpoints } from '../lib/braces'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
 import type { FlangeShapeParams } from '../lib/flangeGeometry'
@@ -42,6 +43,7 @@ const EDGE_OVERRIDE_COLOR_REFERENCE = 300
 // A neutral steel-plate tone for flange solids, distinct from any strut color so the hub
 // hardware reads as its own part rather than blending into the beams it connects.
 const FLANGE_COLOR = new THREE.Color('#b0b4bc')
+const BRACE_COLOR = '#e05ad0'
 
 // The heatmap color for a given thickness override (or the default tone if there isn't one) -
 // shared between the clickable edge markers in Edit mode and the beam mesh in Preview, so a
@@ -105,6 +107,7 @@ interface DomeMeshProps {
   selectedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
   selectedFaceIndices: ReadonlySet<number>
+  selectedBraceIndices: ReadonlySet<number>
   centerY: number
   extrudeDistance: number
   thickness: number
@@ -126,6 +129,7 @@ interface DomeMeshProps {
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
+  onBraceClick: (id: number) => void
   onPreviewProgress: (progress: PreviewProgress | null) => void
 }
 
@@ -139,6 +143,7 @@ export function DomeMesh({
   selectedEdgeIndices,
   edgeThickness,
   selectedFaceIndices,
+  selectedBraceIndices,
   centerY,
   extrudeDistance,
   thickness,
@@ -160,6 +165,7 @@ export function DomeMesh({
   onVertexClick,
   onEdgeClick,
   onFaceClick,
+  onBraceClick,
   onPreviewProgress,
 }: DomeMeshProps) {
   const resolvePosition = useCallback((idx: number) => transformedVertices.get(idx)!, [transformedVertices])
@@ -403,6 +409,7 @@ export function DomeMesh({
   const editingVertices = mode === 'edit' && editTarget === 'vertices'
   const editingEdges = mode === 'edit' && editTarget === 'edges'
   const editingFaces = mode === 'edit' && editTarget === 'faces'
+  const editingBraces = mode === 'edit' && editTarget === 'braces'
 
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), [])
 
@@ -414,6 +421,28 @@ export function DomeMesh({
       geometry: buildFanGeometry(face.map(resolvePosition)),
     }))
   }, [editingFaces, data.faces, resolvePosition])
+
+  // Each brace as a straight line between its two points, `shift * edge length` from the shared
+  // vertex along each edge. Shown in Edit mode only, whichever thing is being edited.
+  const braceMarkerEntries = useMemo(() => {
+    if (mode !== 'edit') return []
+    const entries: { id: number; mid: THREE.Vector3; length: number; quaternion: THREE.Quaternion }[] = []
+    for (const [id, brace] of data.braces) {
+      const endpoints = computeBraceEndpoints(brace, data.edges, resolvePosition)
+      if (!endpoints) continue
+      const [p1, p2] = endpoints
+      const direction = p2.clone().sub(p1)
+      const length = direction.length()
+      if (length === 0) continue
+      entries.push({
+        id,
+        mid: p1.clone().add(p2).multiplyScalar(0.5),
+        length,
+        quaternion: new THREE.Quaternion().setFromUnitVectors(up, direction.normalize()),
+      })
+    }
+    return entries
+  }, [mode, data.braces, data.edges, resolvePosition, up])
 
   return (
     <group>
@@ -513,6 +542,30 @@ export function DomeMesh({
             </mesh>
           )
         })}
+      {braceMarkerEntries.map(({ id, mid, length, quaternion }) => {
+        const isSelected = selectedBraceIndices.has(id)
+        const radius = edgeMarkerRadius * 0.6
+        return (
+          <mesh
+            key={`brace-${id}`}
+            position={[mid.x, mid.y, mid.z]}
+            quaternion={quaternion}
+            onClick={
+              editingBraces
+                ? (e) => {
+                    e.stopPropagation()
+                    onBraceClick(id)
+                  }
+                : undefined
+            }
+            onPointerOver={editingBraces ? handlePointerOver : undefined}
+            onPointerOut={editingBraces ? handlePointerOut : undefined}
+          >
+            <cylinderGeometry args={[radius, radius, length, 8]} />
+            <meshStandardMaterial color={isSelected ? SELECTED_COLOR : BRACE_COLOR} />
+          </mesh>
+        )
+      })}
       <mesh position={[0, centerY, 0]}>
         <sphereGeometry args={[vertexMarkerRadius, 16, 16]} />
         <meshStandardMaterial color="#f5e050" />
