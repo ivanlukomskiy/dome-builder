@@ -369,8 +369,9 @@ export function StrutShapeDebug() {
             />
           </div>
           <p className="hint">
-            Each enabled brace adds a <code>braceCenter</code> helper point: from that end toward
-            the other by shift &times; strut length.
+            Each enabled brace adds a <code>braceCenter</code> helper point: midway across the
+            strut&rsquo;s width, where the ray from the center through the brace&rsquo;s position
+            along the strut crosses it.
           </p>
         </section>
       </aside>

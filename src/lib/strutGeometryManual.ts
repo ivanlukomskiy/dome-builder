@@ -658,7 +658,7 @@ export function computeStrutBoundaryManual2D(
     // ...helpers,
   ];
 
-  // braceCenter: for a brace on end A, the point reached by going from A toward B by
+  // braceCenterNoRounding: for a brace on end A, the point reached by going from A toward B by
   // shift * |AB|; for a brace on end B, the same going from B toward A.
   const chord = sub2(b, a);
   const chordLength = length2(chord);
@@ -670,36 +670,43 @@ export function computeStrutBoundaryManual2D(
   ];
   for (const [end, origin, dir, endBraces] of braceEnds) {
     for (const brace of endBraces) {
-      const braceCenter = add2(origin, scale2(dir, brace.shift * chordLength));
-      helpers.push({
-        drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
-        color: "orange",
-        name: `braceCenter ${end} (brace ${brace.braceId})`,
-      });
-
-      // braceInn / braceExt: where the ray from the center through braceCenter crosses the
-      // strut body's inn / ext arc (see arcPointAtAngle). Missing when braceCenter lies angularly
-      // outside the arc, e.g. within a shoulder.
-      const rayAngle = Math.atan2(
-        braceCenter[1] - center[1],
-        braceCenter[0] - center[0],
+      const braceCenterNoRounding = add2(
+        origin,
+        scale2(dir, brace.shift * chordLength),
       );
-      const arcCrossings: [string, Point2D | null][] = [
-        [
-          "Inn",
-          arcPointAtAngle(arcEnds.innA, arcEnds.innB, center, rayAngle),
-        ],
-        [
-          "Ext",
-          arcPointAtAngle(arcEnds.extA, arcEnds.extB, center, rayAngle),
-        ],
-      ];
-      for (const [side, point] of arcCrossings) {
-        if (!point) continue;
+      // Construction points (braceCenterNoRounding, braceInn, braceExt) aren't shown as helpers
+      // any more - only the final braceCenter below is. Re-add a helpers.push() for any of them
+      // when you need to debug it.
+
+      // braceInn / braceExt: where the ray from the center through braceCenterNoRounding
+      // crosses the strut body's inn / ext arc (see arcPointAtAngle). Missing when that point
+      // lies angularly outside the arc, e.g. within a shoulder.
+      const rayAngle = Math.atan2(
+        braceCenterNoRounding[1] - center[1],
+        braceCenterNoRounding[0] - center[0],
+      );
+      const braceInn = arcPointAtAngle(
+        arcEnds.innA,
+        arcEnds.innB,
+        center,
+        rayAngle,
+      );
+      const braceExt = arcPointAtAngle(
+        arcEnds.extA,
+        arcEnds.extB,
+        center,
+        rayAngle,
+      );
+      // braceCenter: halfway between braceInn and braceExt, i.e. the middle of the strut's width
+      // at the brace.
+      if (braceInn && braceExt) {
         helpers.push({
-          drawing: drawPointMarker(point, MARKER_RADIUS),
-          color: "cyan",
-          name: `brace${side}${end} (brace ${brace.braceId})`,
+          drawing: drawPointMarker(
+            scale2(add2(braceInn, braceExt), 0.5),
+            MARKER_RADIUS,
+          ),
+          color: "magenta",
+          name: `braceCenter ${end} (brace ${brace.braceId})`,
         });
       }
     }
