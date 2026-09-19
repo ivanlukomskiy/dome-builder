@@ -544,7 +544,8 @@ export function DomeMesh({
         })}
       {braceMarkerEntries.map(({ id, mid, length, quaternion }) => {
         const isSelected = selectedBraceIndices.has(id)
-        const radius = edgeMarkerRadius * 0.6
+        // Thick enough to click while editing braces, a thin line otherwise.
+        const radius = edgeMarkerRadius * (editingBraces ? 0.6 : 0.2)
         return (
           <mesh
             key={`brace-${id}`}
