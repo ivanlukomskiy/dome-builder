@@ -50,7 +50,8 @@ import {
 import { downloadBlob, downloadJson } from './lib/download'
 import { computeEdgesInfo } from './lib/edgesInfo'
 import { DEFAULT_FLANGE_SHAPE_PARAMS } from './lib/flangeGeometry'
-import { runStepExport, type StepExportProgress } from './lib/stepExportRunner'
+import { runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
+import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
@@ -806,37 +807,42 @@ function App() {
     downloadJson(edgesInfo, 'edges-info.json')
   }
 
+  // Everything the STEP and DXF exports build their parts from - the applied Preview params.
+  const buildExportParams = (): RunStepExportParams => (
+    {
+      data: sceneData,
+      transformedVertices,
+      centerY,
+      edgeThickness,
+      thickness: appliedPreviewParams.thickness,
+      extrudeDistance: appliedPreviewParams.extrudeDistance,
+      cornerLength: appliedPreviewParams.cornerLength,
+      offsetModifier: appliedPreviewParams.offsetModifier,
+      endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
+      midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
+      grooveDepth: appliedPreviewParams.grooveDepth,
+      millingDiameter: appliedPreviewParams.millingDiameter,
+      chamferLength: appliedPreviewParams.chamferLength,
+      flangeParams: {
+        toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
+        toleranceTransverse: appliedPreviewParams.toleranceTransverse,
+        centerHoleDiameter: appliedPreviewParams.centerHoleDiameter,
+        sideHoleDiameter: appliedPreviewParams.sideHoleDiameter,
+        sideHoleDiameterOffset: appliedPreviewParams.sideHoleDiameterOffset,
+        overshoot: appliedPreviewParams.overshoot,
+        minSide: appliedPreviewParams.minSide,
+        millingDiameter: appliedPreviewParams.flangeMillingDiameter,
+      },
+      scale: stepExportScale,
+    }
+  )
+
   const handleDownloadSteps = async () => {
     if (stepExportProgress) return
     setStepExportProgress({ phase: 'struts', done: 0, total: 0 })
     try {
       const zipBlob = await runStepExport(
-        {
-          data: sceneData,
-          transformedVertices,
-          centerY,
-          edgeThickness,
-          thickness: appliedPreviewParams.thickness,
-          extrudeDistance: appliedPreviewParams.extrudeDistance,
-          cornerLength: appliedPreviewParams.cornerLength,
-          offsetModifier: appliedPreviewParams.offsetModifier,
-          endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
-          midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
-          grooveDepth: appliedPreviewParams.grooveDepth,
-          millingDiameter: appliedPreviewParams.millingDiameter,
-          chamferLength: appliedPreviewParams.chamferLength,
-          flangeParams: {
-            toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
-            toleranceTransverse: appliedPreviewParams.toleranceTransverse,
-            centerHoleDiameter: appliedPreviewParams.centerHoleDiameter,
-            sideHoleDiameter: appliedPreviewParams.sideHoleDiameter,
-            sideHoleDiameterOffset: appliedPreviewParams.sideHoleDiameterOffset,
-            overshoot: appliedPreviewParams.overshoot,
-            minSide: appliedPreviewParams.minSide,
-            millingDiameter: appliedPreviewParams.flangeMillingDiameter,
-          },
-          scale: stepExportScale,
-        },
+        buildExportParams(),
         setStepExportProgress,
         () => false,
       )
@@ -845,6 +851,21 @@ function App() {
       console.error('Failed to export STEP archive', err)
     } finally {
       setStepExportProgress(null)
+    }
+  }
+
+  const [dxfExportProgress, setDxfExportProgress] = useState<DxfExportProgress | null>(null)
+
+  const handleDownloadDxf = async () => {
+    if (dxfExportProgress) return
+    setDxfExportProgress({ phase: 'struts', done: 0, total: 0 })
+    try {
+      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => false)
+      if (blob) downloadBlob(blob, 'dome-parts.dxf')
+    } catch (err) {
+      console.error('Failed to export DXF', err)
+    } finally {
+      setDxfExportProgress(null)
     }
   }
 
@@ -857,6 +878,8 @@ function App() {
         onImportConfig={handleImportConfig}
         onGetEdgesInfo={handleGetEdgesInfo}
         onDownloadSteps={handleDownloadSteps}
+        onDownloadDxf={handleDownloadDxf}
+        dxfExportProgress={dxfExportProgress}
         stepExportProgress={stepExportProgress}
         stepExportScale={stepExportScale}
         onStepExportScaleChange={setStepExportScale}

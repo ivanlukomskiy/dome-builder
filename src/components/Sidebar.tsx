@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import type { StepExportProgress } from '../lib/stepExportRunner'
+import type { DxfExportProgress } from '../lib/dxfExportRunner'
 import {
   BRACE_PARAM_FIELDS,
   BRACE_PLATE_PARAM_FIELDS,
@@ -42,6 +43,8 @@ interface SidebarProps {
   onImportConfig: (file: File) => void
   onGetEdgesInfo: () => void
   onDownloadSteps: () => void
+  onDownloadDxf: () => void
+  dxfExportProgress: DxfExportProgress | null
   stepExportProgress: StepExportProgress | null
   stepExportScale: number
   onStepExportScaleChange: (scale: number) => void
@@ -227,6 +230,8 @@ export function Sidebar({
   onImportConfig,
   onGetEdgesInfo,
   onDownloadSteps,
+  onDownloadDxf,
+  dxfExportProgress,
   stepExportProgress,
   stepExportScale,
   onStepExportScaleChange,
@@ -729,13 +734,23 @@ export function Sidebar({
             <button onClick={onDownloadSteps} disabled={stepExportProgress !== null}>
               Download STEP Archive
             </button>
+            <button onClick={onDownloadDxf} disabled={dxfExportProgress !== null}>
+              Download DXF
+            </button>
           </div>
           <p className="hint">
             {stepExportProgress
               ? stepExportProgress.phase === 'zipping'
                 ? 'Zipping…'
                 : `Building ${stepExportProgress.phase} — ${stepExportProgress.done} / ${stepExportProgress.total}`
-              : `Exports every visible strut and flange plate as its own STEP file (same shapes as this Preview${stepExportScale !== 1 ? `, scaled ${stepExportScale}x` : ''}), zipped into one archive.`}
+              : `Exports every visible strut, flange plate, brace plate and brace as its own STEP file (same shapes as this Preview${stepExportScale !== 1 ? `, scaled ${stepExportScale}x` : ''}), zipped into one archive.`}
+          </p>
+          <p className="hint">
+            {dxfExportProgress
+              ? dxfExportProgress.phase === 'writing'
+                ? 'Writing DXF…'
+                : `DXF: building ${dxfExportProgress.phase} — ${dxfExportProgress.done} / ${dxfExportProgress.total}`
+              : 'The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its ID in red.'}
           </p>
         </section>
       )}

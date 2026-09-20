@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import type { FlangeShapeParams } from './flangeGeometry'
 import { computePreviewBuildInputs, type PreviewBuildInputParams, type StrutGeometryEntry } from './previewBuildInputs'
 import type { VertexEdgesInfo } from './edgesInfo'
+import { pairBracePoints, type BraceBody, type BracePoints } from './braceSolid'
 import type {
   StepExportPhase,
   StepExportPiece,
@@ -39,13 +40,14 @@ export interface RunStepExportParams extends PreviewBuildInputParams {
 function runBatch(
   strutJobs: StrutGeometryEntry[],
   vertices: VertexEdgesInfo[],
-  shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices'>,
+  braceBodies: BraceBody[],
+  shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'>,
   requestId: number,
   phase: StepExportPhase,
   doneBefore: number,
   total: number,
   onProgress: (progress: StepExportProgress) => void,
-): Promise<StepExportPiece[]> {
+): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[] }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/stepExportWorker.ts', import.meta.url), {
       type: 'module',
@@ -63,7 +65,7 @@ function runBatch(
       if (msg.type === 'progress') {
         onProgress({ phase, done: doneBefore + msg.done, total })
       } else if (msg.type === 'result') {
-        settle(() => resolve(msg.pieces))
+        settle(() => resolve({ pieces: msg.pieces, bracePoints: msg.bracePoints }))
       } else if (msg.type === 'error') {
         settle(() => reject(new Error(msg.message)))
       }
@@ -72,7 +74,7 @@ function runBatch(
       settle(() => reject(new Error(event.message)))
     }
 
-    const request: StepExportRequest = { ...shared, requestId, strutJobs, vertices }
+    const request: StepExportRequest = { ...shared, requestId, strutJobs, vertices, braceBodies }
     worker.postMessage(request)
   })
 }
@@ -89,7 +91,7 @@ export async function runStepExport(
 ): Promise<Blob | null> {
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
 
-  const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices'> = {
+  const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'> = {
     centerY: params.centerY,
     cornerLength: params.cornerLength,
     halfWidth,
@@ -104,6 +106,9 @@ export async function runStepExport(
 
   let nextRequestId = 0
   const allPieces: StepExportPiece[] = []
+  // Every strut's brace plate end points, across batches - a brace's two struts can land in
+  // different batches, so the bodies are only built once all of them are in.
+  const allBracePoints: BracePoints[] = []
 
   onProgress({ phase: 'struts', done: 0, total: strutEntries.length })
   const strutBatches = chunk(strutEntries, BATCH_SIZE)
@@ -111,8 +116,9 @@ export async function runStepExport(
     if (isCancelled()) return null
     const batch = strutBatches[i]
     try {
-      const pieces = await runBatch(
+      const { pieces, bracePoints } = await runBatch(
         batch,
+        [],
         [],
         shared,
         ++nextRequestId,
@@ -122,6 +128,7 @@ export async function runStepExport(
         onProgress,
       )
       allPieces.push(...pieces)
+      allBracePoints.push(...bracePoints)
     } catch (err) {
       console.error(`Failed to export struts ${batch.map((job) => job.index).join(', ')}`, err)
     }
@@ -133,9 +140,10 @@ export async function runStepExport(
     if (isCancelled()) return null
     const batch = vertexBatches[i]
     try {
-      const pieces = await runBatch(
+      const { pieces } = await runBatch(
         [],
         batch,
+        [],
         shared,
         ++nextRequestId,
         'flanges',
@@ -146,6 +154,30 @@ export async function runStepExport(
       allPieces.push(...pieces)
     } catch (err) {
       console.error(`Failed to export flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
+    }
+  }
+
+  const braceBodies = pairBracePoints(allBracePoints)
+  onProgress({ phase: 'braces', done: 0, total: braceBodies.length })
+  const braceBatches = chunk(braceBodies, BATCH_SIZE)
+  for (let i = 0; i < braceBatches.length; i++) {
+    if (isCancelled()) return null
+    const batch = braceBatches[i]
+    try {
+      const { pieces } = await runBatch(
+        [],
+        [],
+        batch,
+        shared,
+        ++nextRequestId,
+        'braces',
+        i * BATCH_SIZE,
+        braceBodies.length,
+        onProgress,
+      )
+      allPieces.push(...pieces)
+    } catch (err) {
+      console.error(`Failed to export braces ${batch.map((b) => b.braceId).join(', ')}`, err)
     }
   }
 

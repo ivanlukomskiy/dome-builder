@@ -49,15 +49,14 @@ export function fitQuadPlane(quad: THREE.Vector3[]): { centroid: THREE.Vector3; 
   return { centroid, normal: normal.normalize() }
 }
 
-// The prism: the quad projected onto its plane and extruded `thickness / 2` each way. Flat-shaded
-// (every face has its own vertices/normal), triangles wound counter-clockwise seen from outside.
-// Null if the quad is degenerate or the thickness isn't positive.
-export function buildBraceSolidMesh(
+// The brace body's footprint as a flat quad on its own plane: the four points projected onto
+// their best-fit plane and ordered counter-clockwise around the plane's normal, plus that plane
+// (origin at the centroid, xDir along the first side; a local y of normal x xDir - the convention
+// replicad's Plane uses). Null if the quad is degenerate.
+export function braceQuadFrame(
   a: [Vec3, Vec3],
   b: [Vec3, Vec3],
-  thickness: number,
-): BraceSolidMesh | null {
-  if (!(thickness > 0)) return null
+): { flat: THREE.Vector3[]; plane: { origin: THREE.Vector3; normal: THREE.Vector3; xDir: THREE.Vector3 } } | null {
   const toV = (p: Vec3) => new THREE.Vector3(p[0], p[1], p[2])
   const quad = orderBraceQuad([toV(a[0]), toV(a[1])], [toV(b[0]), toV(b[1])])
   const { centroid, normal } = fitQuadPlane(quad)
@@ -69,6 +68,38 @@ export function buildBraceSolidMesh(
   const winding = new THREE.Vector3()
   for (let i = 0; i < 4; i++) winding.add(new THREE.Vector3().crossVectors(flat[i], flat[(i + 1) % 4]))
   if (winding.dot(normal) < 0) flat.reverse()
+
+  const xDir = new THREE.Vector3().subVectors(flat[1], flat[0])
+  if (xDir.lengthSq() === 0) return null
+  xDir.normalize()
+  return { flat, plane: { origin: centroid, normal, xDir } }
+}
+
+// The quad's corners in its plane's own 2D coordinates (see braceQuadFrame), counter-clockwise.
+export function braceQuadPoints2D(
+  frame: NonNullable<ReturnType<typeof braceQuadFrame>>,
+): [number, number][] {
+  const { origin, normal, xDir } = frame.plane
+  const yDir = new THREE.Vector3().crossVectors(normal, xDir)
+  return frame.flat.map((p) => {
+    const d = p.clone().sub(origin)
+    return [d.dot(xDir), d.dot(yDir)]
+  })
+}
+
+// The prism: the quad extruded `thickness / 2` each way along its normal. Flat-shaded (every face
+// has its own vertices/normal), triangles wound counter-clockwise seen from outside. Null if the
+// quad is degenerate or the thickness isn't positive.
+export function buildBraceSolidMesh(
+  a: [Vec3, Vec3],
+  b: [Vec3, Vec3],
+  thickness: number,
+): BraceSolidMesh | null {
+  if (!(thickness > 0)) return null
+  const frame = braceQuadFrame(a, b)
+  if (!frame) return null
+  const { flat } = frame
+  const { normal } = frame.plane
 
   const half = thickness / 2
   const top = flat.map((p) => p.clone().addScaledVector(normal, half))
@@ -102,21 +133,37 @@ export function buildBraceSolidMesh(
   }
 }
 
-// Every brace that has plates on both of its struts, as one solid each. `parts` is the flat
-// collection of every strut's BracePoints; a brace with fewer/more than two entries (one strut
-// missing, or a brace beyond the first on its strut end) is skipped.
-export function buildBraceSolids(parts: BracePoints[]): { braceId: number; mesh: BraceSolidMesh }[] {
+// Groups every strut's BracePoints by brace: the braces that have plates on both of their struts,
+// as {braceId, a, b, thickness}. A brace with fewer/more than two entries (one strut missing, or a
+// brace beyond the first on its strut end) is skipped.
+export interface BraceBody {
+  braceId: number
+  thickness: number
+  a: [Vec3, Vec3]
+  b: [Vec3, Vec3]
+}
+
+export function pairBracePoints(parts: BracePoints[]): BraceBody[] {
   const byBrace = new Map<number, BracePoints[]>()
   for (const part of parts) {
     const list = byBrace.get(part.braceId)
     if (list) list.push(part)
     else byBrace.set(part.braceId, [part])
   }
-  const solids: { braceId: number; mesh: BraceSolidMesh }[] = []
+  const bodies: BraceBody[] = []
   for (const [braceId, list] of byBrace) {
     if (list.length !== 2) continue
-    const mesh = buildBraceSolidMesh(list[0].points, list[1].points, list[0].thickness)
-    if (mesh) solids.push({ braceId, mesh })
+    bodies.push({ braceId, thickness: list[0].thickness, a: list[0].points, b: list[1].points })
+  }
+  return bodies
+}
+
+// Every brace that has plates on both of its struts, as one solid each.
+export function buildBraceSolids(parts: BracePoints[]): { braceId: number; mesh: BraceSolidMesh }[] {
+  const solids: { braceId: number; mesh: BraceSolidMesh }[] = []
+  for (const body of pairBracePoints(parts)) {
+    const mesh = buildBraceSolidMesh(body.a, body.b, body.thickness)
+    if (mesh) solids.push({ braceId: body.braceId, mesh })
   }
   return solids
 }

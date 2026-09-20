@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { buildBraceSolidMesh, buildBraceSolids, orderBraceQuad, type Vec3 } from './braceSolid'
+import { braceQuadFrame, braceQuadPoints2D, buildBraceSolidMesh, buildBraceSolids, orderBraceQuad, pairBracePoints, type Vec3 } from './braceSolid'
 import { bracePlateEndPoints3D, DEFAULT_BRACE_PARAMS, type StrutBraceEnd } from './braces'
 
 function volume(mesh: { positions: Float32Array; indices: Uint32Array }): number {
@@ -87,5 +87,27 @@ describe('bracePlateEndPoints3D', () => {
   it('offsets toward the other edge', () => {
     const [p] = bracePlateEndPoints3D(plane, 4, brace([0, 0, -1]), [[0, 0], [1, 0]])
     expect(p.z).toBe(-7)
+  })
+})
+
+describe('braceQuadFrame / pairBracePoints', () => {
+  it('gives a counter-clockwise 2D quad with the right area, on the frame\'s plane', () => {
+    const frame = braceQuadFrame([[0, 0, 5], [10, 0, 5]], [[10, 4, 5], [0, 4, 5]])!
+    const pts = braceQuadPoints2D(frame)
+    let area = 0
+    for (let i = 0; i < 4; i++) {
+      const [x1, y1] = pts[i]
+      const [x2, y2] = pts[(i + 1) % 4]
+      area += (x1 * y2 - x2 * y1) / 2
+    }
+    expect(area).toBeCloseTo(40, 5)
+    expect(frame.plane.origin.z).toBeCloseTo(5)
+  })
+
+  it('pairs a brace\'s two struts and drops the incomplete ones', () => {
+    const part = (braceId: number) => ({ braceId, thickness: 3, points: [[0, 0, 0], [1, 0, 0]] as [Vec3, Vec3] })
+    const bodies = pairBracePoints([part(1), part(2), part(1)])
+    expect(bodies.map((b) => b.braceId)).toEqual([1])
+    expect(bodies[0].thickness).toBe(3)
   })
 })

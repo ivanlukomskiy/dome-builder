@@ -12,9 +12,14 @@ const DEG2RAD = Math.PI / 180
 // mirror (and its effect on arc winding direction) is undone here so the exported DXF matches
 // the drawing's real coordinates.
 export function drawingToDXF(drawing: Drawing): string {
+  return buildDXF(drawingToPolylines(drawing))
+}
+
+// The drawing's outlines (outer boundaries and holes) as DXF polylines in the drawing's own
+// coordinates, circular arcs kept as bulged segments. Needs replicad's WASM module loaded.
+export function drawingToPolylines(drawing: Drawing): DxfPolyline[] {
   const pathStrings = collectPathStrings(drawing.toSVGPaths())
-  const polylines = pathStrings.map(parseSvgPathToPolyline).filter((pl) => pl.vertices.length >= 2)
-  return buildDXF(polylines)
+  return pathStrings.map(parseSvgPathToPolyline).filter((pl) => pl.vertices.length >= 2)
 }
 
 function collectPathStrings(paths: string[] | string[][]): string[] {
@@ -27,22 +32,24 @@ function collectPathStrings(paths: string[] | string[][]): string[] {
   return out
 }
 
-interface Vertex {
+// A polyline vertex; `bulge` (tan of a quarter of the arc's sweep, signed) describes the segment
+// from this vertex to the next - 0 for a straight one.
+export interface DxfVertex {
   x: number
   y: number
   bulge: number
 }
 
-interface Polyline {
-  vertices: Vertex[]
+export interface DxfPolyline {
+  vertices: DxfVertex[]
   closed: boolean
 }
 
 const PATH_COMMAND_ARG_COUNT: Record<string, number> = { M: 2, L: 2, Q: 4, C: 6, A: 7, Z: 0 }
 
-function parseSvgPathToPolyline(d: string): Polyline {
+function parseSvgPathToPolyline(d: string): DxfPolyline {
   const tokens = d.trim().split(/\s+/)
-  const vertices: Vertex[] = []
+  const vertices: DxfVertex[] = []
   let closed = false
   let cx = 0
   let cy = 0
@@ -220,7 +227,7 @@ function fmt(n: number): string {
   return n.toFixed(6)
 }
 
-function buildDXF(polylines: Polyline[]): string {
+function buildDXF(polylines: DxfPolyline[]): string {
   const lines: string[] = []
   const put = (code: number, value: string) => lines.push(String(code), value)
 
