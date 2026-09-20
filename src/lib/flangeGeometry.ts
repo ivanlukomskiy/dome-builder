@@ -224,7 +224,7 @@ function lineIntersection(
   return [a1[0] + t * dax, a1[1] + t * day];
 }
 
-function moveAwayFromOrigin(p: Point2D, n: number): Point2D {
+export function moveAwayFromOrigin(p: Point2D, n: number): Point2D {
   const len = Math.hypot(p[0], p[1]);
   if (len < 1e-9) return p;
 
@@ -233,7 +233,7 @@ function moveAwayFromOrigin(p: Point2D, n: number): Point2D {
   return [p[0] * scale, p[1] * scale];
 }
 
-function perpendicularFoot(center: Point2D, a: Point2D, b: Point2D): Point2D {
+export function perpendicularFoot(center: Point2D, a: Point2D, b: Point2D): Point2D {
   const ab: Point2D = [b[0] - a[0], b[1] - a[1]];
 
   const ac: Point2D = [center[0] - a[0], center[1] - a[1]];
@@ -398,7 +398,7 @@ function computeConnectionEdgeShape(
 
 // The wedge between `edge` and `next` when a face already fills it - a pie slice from the
 // origin out to `start` and `end`, arcing between them.
-function computeConnectionEdgeShapeNoFace(
+export function computeConnectionEdgeShapeNoFace(
   start: Point2D,
   end: Point2D,
   edge: FlangeEdgeInput,

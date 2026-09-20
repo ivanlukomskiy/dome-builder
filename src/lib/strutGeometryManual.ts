@@ -83,7 +83,7 @@ function toLocal2D(
 
 // Rotates 2D points (around the origin) so that `alignWith` itself ends up pointing straight up
 // along +Y - used to make center->B vertical, see computeStrutBoundaryManual below.
-function alignVertical(p: Point2D, alignWith: Point2D): Point2D {
+export function alignVertical(p: Point2D, alignWith: Point2D): Point2D {
   const up = normalize2(alignWith);
   const right: Point2D = [up[1], -up[0]];
   return [dot2(p, right), dot2(p, up)];
@@ -118,7 +118,7 @@ function angleBetweenRad(v1: Point2D, v2: Point2D): number {
   return Math.atan2(cross2(v1, v2), dot2(v1, v2));
 }
 
-function angleBetweenDeg(v1: Point2D, v2: Point2D): number {
+export function angleBetweenDeg(v1: Point2D, v2: Point2D): number {
   return (angleBetweenRad(v1, v2) * 180) / Math.PI;
 }
 
@@ -144,7 +144,7 @@ function tangentDirection2D(
 
 // Where the line through p1 (direction d1) crosses the line through p2 (direction d2), or null if
 // the two directions are parallel.
-function lineIntersection2D(
+export function lineIntersection2D(
   p1: Point2D,
   d1: Point2D,
   p2: Point2D,
@@ -190,7 +190,7 @@ function drawMillingCircle(
 // distances from `center`, in case they're not perfectly equal) halfway - by angle, the short
 // way around - between p1 and p2. Used as the "via" point for threePointsArcTo when the arc's
 // actual center is known but there's no third point to hand.
-function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
+export function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
   const radius = (length2(sub2(p1, center)) + length2(sub2(p2, center))) / 2;
   const angle1 = Math.atan2(p1[1] - center[1], p1[0] - center[0]);
   const angle2 = Math.atan2(p2[1] - center[1], p2[0] - center[0]);
@@ -207,7 +207,7 @@ function arcMidpoint(p1: Point2D, p2: Point2D, center: Point2D): Point2D {
 // Whether a Drawing still has real, meshable area - a boolean op that goes wrong (see the
 // comment where this is used) can produce a Drawing that no longer throws but also no longer
 // represents any actual shape.
-function isNonEmptyDrawing(drawing: Drawing): boolean {
+export function isNonEmptyDrawing(drawing: Drawing): boolean {
   try {
     const sketched = drawing.sketchOnPlane();
     const face = "face" in sketched ? sketched.face() : sketched.faces();
@@ -222,7 +222,7 @@ function isNonEmptyDrawing(drawing: Drawing): boolean {
 // A diamond (45-degree square, oriented to the given right/up axes rather than the global X/Y
 // ones) centered at `p`, reaching `size` in each of the four right/up directions - used as a
 // chamfer-cut shape at a corner point.
-function drawDiamond(
+export function drawDiamond(
   p: Point2D,
   size: number,
   right: Point2D,
@@ -238,7 +238,7 @@ function drawDiamond(
 
 // Prints every vertex coordinate of `drawing` (meshed just for this - a Drawing itself doesn't
 // expose its polygon points directly) as [x, y, z] triples, tagged with `label`.
-function logDrawingPoints(label: string, drawing: Drawing): void {
+export function logDrawingPoints(label: string, drawing: Drawing): void {
   try {
     const sketched = drawing.sketchOnPlane();
     const face = "face" in sketched ? sketched.face() : sketched.faces();
@@ -322,7 +322,7 @@ interface Geometry {
   negativeShapes: Drawing[];
 }
 
-const nullShoulderGeometry: Geometry = {
+export const nullShoulderGeometry: Geometry = {
   main: draw().close(),
   helpers: [],
   negativeShapes: [],
