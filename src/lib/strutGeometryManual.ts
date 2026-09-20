@@ -42,6 +42,13 @@ export interface HelperDrawing {
   name: string;
 }
 
+// A drawing with a human-readable name, so failures (e.g. a boolean cut that throws) can say
+// which shape was involved.
+export interface DrawingWithLabel {
+  drawing: Drawing;
+  name: string;
+}
+
 export interface StrutMark {
   end: "A" | "B";
   point: Point2D;
@@ -456,7 +463,7 @@ interface Geometry {
   // right away, so the caller can combine shoulder geometry from both ends first (fusing their
   // `main`s and pooling their negativeShapes) and cut once, instead of each end fighting over
   // its own copy of `main`.
-  negativeShapes: Drawing[];
+  negativeShapes: DrawingWithLabel[];
 }
 
 export const nullShoulderGeometry: Geometry = {
@@ -607,7 +614,7 @@ function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
 
   // let negativeShapes: HelperDrawing[] = []
   let helpers: HelperDrawing[] = [];
-  let negativeShapes: Drawing[] = [];
+  let negativeShapes: DrawingWithLabel[] = [];
   if (p.millingDiameter) {
     const mp1 = drawMillingCircle(
       [p.tenonStart, p.halfWidth - p.grooveDepth],
@@ -615,21 +622,21 @@ function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
       p.millingDiameter,
     );
     helpers.push({ drawing: mp1, color: "red", name: "mp1" });
-    negativeShapes.push(mp1);
+    negativeShapes.push({ drawing: mp1, name: "mp1" });
     const mp2 = drawMillingCircle(
       [p.tenonEnd, p.halfWidth - p.grooveDepth],
       "top-right",
       p.millingDiameter,
     );
     helpers.push({ drawing: mp2, color: "red", name: "mp2" });
-    negativeShapes.push(mp2);
+    negativeShapes.push({ drawing: mp2, name: "mp2" });
     const mp3 = drawMillingCircle(
       [p.cornerLength, p.halfWidth - p.grooveDepth],
       "top-left",
       p.millingDiameter,
     );
     helpers.push({ drawing: mp3, color: "red", name: "mp3" });
-    negativeShapes.push(mp3);
+    negativeShapes.push({ drawing: mp3, name: "mp3" });
   }
 
   return {
@@ -643,12 +650,22 @@ function createStrutEnd(p: StrutEndMeasurements): Drawing {
   const half1 = createStrutEndHalf(p);
   const half2 = half1.main.mirror([1, 0], [0, 0], "plane");
   let main = half1.main.fuse(half2);
-  half1.negativeShapes.forEach((s) => {
+  half1.negativeShapes.forEach(({ drawing: s, name }) => {
     // Mirror before cutting - `.cut()` consumes (deletes) its operand, so `s` is no longer valid
     // afterward.
     const mirrored = s.mirror([1, 0], [0, 0], "plane");
-    main = main.cut(s);
-    main = main.cut(mirrored);
+    try {
+      main = main.cut(s);
+    } catch (err) {
+      throw new Error(`createStrutEnd: cutting negative shape "${name}" failed`, { cause: err });
+    }
+    try {
+      main = main.cut(mirrored);
+    } catch (err) {
+      throw new Error(`createStrutEnd: cutting mirrored negative shape "${name}" failed`, {
+        cause: err,
+      });
+    }
   });
   return main;
 }
