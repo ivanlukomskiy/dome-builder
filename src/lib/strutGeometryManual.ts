@@ -3,6 +3,11 @@ import { Drawing, type Point2D } from "replicad";
 import type * as THREE from "three";
 import { computeStrutPlane } from "./strutGeometry";
 import { NO_STRUT_BRACES, type StrutBraces } from "./braces";
+import {
+  arcPointAtAngle,
+  maxRectInArcBand,
+  type ArcEndpoints,
+} from "./braceGeometry";
 
 // A sandbox for hand-building computeStrutBoundary's replacement directly with replicad's own
 // 2D primitives (draw(), .cut()/.fuse()/.intersect(), etc.) instead of the hand-rolled Vec2 math
@@ -490,15 +495,6 @@ function calculateArcPoints(
   });
 }
 
-// Where the strut body's two long sides (the "inn" and "ext" arcs) start and end - the points
-// `arc` draws between.
-interface ArcEndpoints {
-  innA: Point2D;
-  innB: Point2D;
-  extA: Point2D;
-  extB: Point2D;
-}
-
 function arcEndpoints(
   a: Point2D,
   b: Point2D,
@@ -515,41 +511,6 @@ function arcEndpoints(
     extA: arcStart(a, tangentA, -1, aMeasurements),
     extB: arcStart(b, tangentB, 1, bMeasurements),
   };
-}
-
-// Where the ray from `center` at `angle` (radians) crosses the curve calculateArcPoints
-// approximates between `start` and `end` - i.e. that curve with infinitely many segments: the
-// angle sweeps linearly from start's to end's (the short way around) while the distance from
-// `center` changes linearly from start's to end's. Null if the ray points outside the swept
-// angle range, where the curve doesn't exist.
-function arcPointAtAngle(
-  start: Point2D,
-  end: Point2D,
-  center: Point2D,
-  angle: number,
-): Point2D | null {
-  const startVec = sub2(start, center);
-  const endVec = sub2(end, center);
-  const angleStart = Math.atan2(startVec[1], startVec[0]);
-  const angleEnd = Math.atan2(endVec[1], endVec[0]);
-
-  const wrap = (delta: number) => {
-    while (delta > Math.PI) delta -= 2 * Math.PI;
-    while (delta < -Math.PI) delta += 2 * Math.PI;
-    return delta;
-  };
-  const sweep = wrap(angleEnd - angleStart);
-  if (Math.abs(sweep) < 1e-9) return null;
-
-  const t = wrap(angle - angleStart) / sweep;
-  if (t < -1e-9 || t > 1 + 1e-9) return null;
-
-  const radius =
-    length2(startVec) + (length2(endVec) - length2(startVec)) * t;
-  return [
-    center[0] + radius * Math.cos(angle),
-    center[1] + radius * Math.sin(angle),
-  ];
 }
 
 function arc(
@@ -700,13 +661,33 @@ export function computeStrutBoundaryManual2D(
       // braceCenter: halfway between braceInn and braceExt, i.e. the middle of the strut's width
       // at the brace.
       if (braceInn && braceExt) {
+        const braceCenter = scale2(add2(braceInn, braceExt), 0.5);
         helpers.push({
-          drawing: drawPointMarker(
-            scale2(add2(braceInn, braceExt), 0.5),
-            MARKER_RADIUS,
-          ),
+          drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
           color: "magenta",
           name: `braceCenter ${end} (brace ${brace.braceId})`,
+        });
+
+        // The biggest rectangle around braceCenter that stays between the inn / ext arcs, its
+        // sides parallel / perpendicular to this strut end's axis (the tangent at that end -
+        // strutA / strutB above are drawn with their length along it). Shown as its 4 corners.
+        const endAxis =
+          end === "A"
+            ? tangentDirection2D(a, b, center)
+            : tangentDirection2D(b, a, center);
+        const rect = maxRectInArcBand(
+          braceCenter,
+          endAxis,
+          center,
+          arcEnds,
+          chordLength / 2,
+        );
+        rect?.forEach((corner, i) => {
+          helpers.push({
+            drawing: drawPointMarker(corner, MARKER_RADIUS),
+            color: "yellow",
+            name: `braceRect ${end} corner ${i + 1} (brace ${brace.braceId})`,
+          });
         });
       }
     }
