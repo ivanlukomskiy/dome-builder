@@ -751,6 +751,20 @@ export function computeStrutBoundaryManual2D(
             strutHoles.push([hole, brace.params.plateHoleDiameter / 2]);
           }
         }
+        // Where the line through braceCenter along the strut end's axis crosses the plate's two
+        // sides perpendicular to that axis (its ends) - shown as helper points.
+        if (rect) {
+          placeInPlateFrame(braceCenter, endAxis, [
+            [rect.halfAlong, 0],
+            [-rect.halfAlong, 0],
+          ]).forEach((point, i) => {
+            helpers.push({
+              drawing: drawPointMarker(point, MARKER_RADIUS),
+              color: "lime",
+              name: `bracePlateEnd ${end} point ${i + 1} (brace ${brace.braceId})`,
+            });
+          });
+        }
         if (plate && braceIndex === 0) {
           if (end === "A") bracePlateA = plate.clone();
           else bracePlateB = plate.clone();
