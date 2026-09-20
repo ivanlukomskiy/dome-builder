@@ -504,7 +504,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'preview' && (
+      {(mode === 'preview' || mode === 'edit') && (
         <section className="control-group">
           <div className="button-row">
             <button onClick={onApplyPreview} disabled={!previewParamsDirty}>
@@ -519,7 +519,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'preview' && (
+      {(mode === 'preview' || mode === 'edit') && (
         <section className="control-group">
           <h2>Edge Curvature</h2>
           <div className="transform-field">
@@ -560,7 +560,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'preview' && (
+      {(mode === 'preview' || mode === 'edit') && (
         <section className="control-group">
           <h2>Grooves</h2>
           <div className="transform-field">
@@ -603,7 +603,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'preview' && (
+      {(mode === 'preview' || mode === 'edit') && (
         <section className="control-group">
           <h2>Flange</h2>
           <div className="transform-field">
@@ -679,7 +679,7 @@ export function Sidebar({
         </section>
       )}
 
-      {mode === 'preview' && (
+      {(mode === 'preview' || mode === 'edit') && (
         <section className="control-group">
           <h2>Braces</h2>
           {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
