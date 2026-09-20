@@ -24,11 +24,17 @@ import {
 } from './lib/polyhedra'
 import {
   addBrace,
+  applyBracePlateParams,
   BRACE_PARAM_FIELDS,
+  bracePlateParamsDiffer,
+  DEFAULT_BRACE_PLATE_PARAMS,
   deleteBraces,
+  firstBracePlateParams,
   resolveBracePair,
+  sanitizeBraceParam,
   setBraceParam,
   type BraceParams,
+  type BracePlateParams,
 } from './lib/braces'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
@@ -192,6 +198,12 @@ function App() {
   const [selectedEdgeIndices, setSelectedEdgeIndices] = useState<Set<number>>(new Set())
   const [selectedFaceIndices, setSelectedFaceIndices] = useState<Set<number>>(new Set())
   const [selectedBraceIndices, setSelectedBraceIndices] = useState<Set<number>>(new Set())
+  // The plate properties (width, holes, thickness, ...) shown in the Preview sidebar. Every brace
+  // has the same ones for now: Apply copies this draft onto all of them, and new braces start with
+  // it. Starts out as whatever the first brace already has.
+  const [bracePlateDraft, setBracePlateDraft] = useState<BracePlateParams>(() =>
+    firstBracePlateParams((initial?.sceneData ?? DEFAULT_SCENE_DATA).braces),
+  )
   const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
     new Map(initial?.edgeThickness ?? []),
   )
@@ -290,7 +302,16 @@ function App() {
   const previewParamsDirty = (Object.keys(draftPreviewParams) as (keyof PreviewShapeParams)[]).some(
     (key) => draftPreviewParams[key] !== appliedPreviewParams[key],
   )
-  const handleApplyPreview = () => setAppliedPreviewParams(draftPreviewParams)
+  const bracePlateDirty = useMemo(
+    () => bracePlateParamsDiffer(sceneData, bracePlateDraft),
+    [sceneData, bracePlateDraft],
+  )
+  const handleBracePlateParamChange = (key: keyof BracePlateParams, value: number) =>
+    setBracePlateDraft((prev) => ({ ...prev, [key]: sanitizeBraceParam(key, value) }))
+  const handleApplyPreview = () => {
+    setAppliedPreviewParams(draftPreviewParams)
+    if (bracePlateDirty) sceneHistory.commit(applyBracePlateParams(sceneData, bracePlateDraft))
+  }
 
   const transformedVertices = useMemo(
     () => applyVertexTransforms(sceneData.vertices, vertexTransforms),
@@ -392,7 +413,7 @@ function App() {
 
   const handleAddBrace = () => {
     if (!canAddBrace) return
-    sceneHistory.commit(addBrace(sceneData, selectedEdgeIndices))
+    sceneHistory.commit(addBrace(sceneData, selectedEdgeIndices, bracePlateDraft))
     setSelectedEdgeIndices(new Set())
   }
 
@@ -594,6 +615,7 @@ function App() {
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
     setSelectedBraceIndices(new Set())
+    setBracePlateDraft(DEFAULT_BRACE_PLATE_PARAMS)
     setEditTarget('vertices')
     setCenterZ(DEFAULT_CENTER_Z)
     setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
@@ -687,6 +709,7 @@ function App() {
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
     setSelectedBraceIndices(new Set())
+    setBracePlateDraft(firstBracePlateParams(state.sceneData.braces))
     setEditTarget('vertices')
     setMode('edit')
   }
@@ -919,7 +942,9 @@ function App() {
         onMinSideChange={setMinSide}
         flangeMillingDiameter={flangeMillingDiameter}
         onFlangeMillingDiameterChange={setFlangeMillingDiameter}
-        previewParamsDirty={previewParamsDirty}
+        previewParamsDirty={previewParamsDirty || bracePlateDirty}
+        bracePlateDraft={bracePlateDraft}
+        onBracePlateParamChange={handleBracePlateParamChange}
         onApplyPreview={handleApplyPreview}
         canUndo={sceneHistory.canUndo}
         canRedo={sceneHistory.canRedo}

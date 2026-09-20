@@ -5,6 +5,8 @@ import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
 import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
+import { bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
+import type { Drawing } from 'replicad'
 
 // Owns every heavy, WASM-backed step of building the Preview solids: the 2D shoulder-tenon and
 // flange-plate drawings (computeStrutBoundaryManual/computeFlangeBoundary2D - both build their
@@ -21,6 +23,9 @@ import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 // need opencascade.
 
 declare const self: DedicatedWorkerGlobalScope
+
+// Same magenta the brace lines are drawn in in Edit mode.
+const BRACE_PLATE_COLOR: [number, number, number] = [0.878, 0.353, 0.816]
 
 export interface StrutBuildJob extends StrutGeometryEntry {
   color: [number, number, number]
@@ -94,15 +99,39 @@ async function buildPreview(req: PreviewBuildRequest): Promise<PreviewPiece[]> {
       done: i + 1,
       total: req.strutJobs.length,
     } satisfies PreviewWorkerMessage)
-    if (!boundary.main) return
+    const plane = computeStrutPlane(posA, posB, center)
 
-    try {
-      const plane = computeStrutPlane(posA, posB, center)
-      const strut = buildStrutMeshFromDrawing(boundary.main, plane, job.beamThickness)
-      if (!strut) return
-      pieces.push({ positions: strut.positions, normals: strut.normals, indices: strut.indices, color: job.color })
-    } catch (err) {
-      console.error(`Failed to build strut solid for edge ${job.index}`, err)
+    if (boundary.main) {
+      try {
+        const strut = buildStrutMeshFromDrawing(boundary.main, plane, job.beamThickness)
+        if (strut) {
+          pieces.push({ positions: strut.positions, normals: strut.normals, indices: strut.indices, color: job.color })
+        }
+      } catch (err) {
+        console.error(`Failed to build strut solid for edge ${job.index}`, err)
+      }
+    }
+
+    // Each brace plate sits against the strut's side face, on the side its brace's other edge is
+    // on, and sticks out `plateThickness` from it (see bracePlatePlane).
+    const plates: [Drawing | null, StrutBraceEnd | undefined][] = [
+      [boundary.bracePlateA, job.braces.a[0]],
+      [boundary.bracePlateB, job.braces.b[0]],
+    ]
+    for (const [plate, brace] of plates) {
+      if (!plate || !brace || brace.params.plateThickness <= 0) continue
+      try {
+        const mesh = buildStrutMeshFromDrawing(
+          plate,
+          bracePlatePlane(plane, job.beamThickness, brace),
+          brace.params.plateThickness,
+        )
+        if (mesh) {
+          pieces.push({ positions: mesh.positions, normals: mesh.normals, indices: mesh.indices, color: BRACE_PLATE_COLOR })
+        }
+      } catch (err) {
+        console.error(`Failed to build brace plate ${brace.braceId} for edge ${job.index}`, err)
+      }
     }
   })
 

@@ -187,6 +187,7 @@ export function StrutShapeDebug() {
           params: brace,
           distanceFromVertex: brace.shift * chord,
           otherEdgeId: braceId,
+          otherEdgeDirection: [0, 0, 1],
         })
         const braces: StrutBraces = {
           a: braceAEnabled ? [braceEnd(0, braceA)] : [],

@@ -8,7 +8,13 @@ import {
   deleteBraces,
   indexBracesByEdge,
   resolveBracePair,
+  applyBracePlateParams,
+  bracePlateParamsDiffer,
+  bracePlatePlane,
+  DEFAULT_BRACE_PLATE_PARAMS,
+  firstBracePlateParams,
   setBraceParam,
+  type StrutBraceEnd,
   DEFAULT_BRACE_PARAMS,
 } from "./braces";
 import { deleteEdges, deleteVertices, type SceneData } from "./polyhedra";
@@ -133,16 +139,28 @@ describe("computeStrutBraces", () => {
     scene = addBrace(scene, new Set([0, 3]));
     const byEdge = indexBracesByEdge(scene.braces);
     const strut = (edgeId: number, length: number) =>
-      computeStrutBraces(edgeId, scene.edges.get(edgeId)!, length, byEdge);
+      computeStrutBraces(edgeId, scene.edges.get(edgeId)!, length, byEdge, scene.edges, (id) => scene.vertices.get(id)!);
 
     // edge 0 is 0-1: brace 0 sits at A (vertex 0), brace 1 at B (vertex 1)
     const both = strut(0, 10);
-    expect(both.a).toEqual([{ braceId: 0, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 5, otherEdgeId: 1 }]);
-    expect(both.b).toEqual([{ braceId: 1, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 5, otherEdgeId: 3 }]);
+    // brace 0 leaves vertex 0 along edge 1 (0 -> 2, straight up +y)
+    expect(both.a).toEqual([
+      { braceId: 0, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 5, otherEdgeId: 1, otherEdgeDirection: [0, 1, 0] },
+    ]);
+    // brace 1 leaves vertex 1 along edge 3 (1 -> 2, i.e. (-10, 20, 0) normalised)
+    expect(both.b).toHaveLength(1);
+    expect(both.b[0].braceId).toBe(1);
+    expect(both.b[0].distanceFromVertex).toBe(5);
+    expect(both.b[0].otherEdgeId).toBe(3);
+    expect(both.b[0].otherEdgeDirection[0]).toBeCloseTo(-10 / Math.hypot(10, 20), 9);
+    expect(both.b[0].otherEdgeDirection[1]).toBeCloseTo(20 / Math.hypot(10, 20), 9);
+    expect(both.b[0].otherEdgeDirection[2]).toBeCloseTo(0, 9);
 
     // edge 1 is 0-2: only brace 0, at A
     expect(strut(1, 20)).toEqual({
-      a: [{ braceId: 0, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 10, otherEdgeId: 0 }],
+      a: [
+        { braceId: 0, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 10, otherEdgeId: 0, otherEdgeDirection: [1, 0, 0] },
+      ],
       b: [],
     });
     // edge 3 is 1-2: only brace 1, at A (vertex 1)
@@ -152,3 +170,56 @@ describe("computeStrutBraces", () => {
     expect(strut(2, 10)).toEqual({ a: [], b: [] });
   });
 });
+
+describe("brace plate properties shared by all braces", () => {
+  const plate = { ...DEFAULT_BRACE_PLATE_PARAMS, width: 80, plateThickness: 3 };
+
+  it("new braces take the given plate properties, and the default shift", () => {
+    const scene = addBrace(makeScene(), new Set([0, 1]), plate);
+    expect(scene.braces.get(0)!.params).toEqual({ ...DEFAULT_BRACE_PARAMS, ...plate });
+    expect(scene.braces.get(0)!.params.shift).toBe(DEFAULT_BRACE_SHIFT);
+  });
+
+  it("applyBracePlateParams gives every brace the plate properties but keeps each shift", () => {
+    let scene = addBrace(addBrace(makeScene(), new Set([0, 1])), new Set([1, 2]));
+    scene = setBraceParam(scene, new Set([1]), "shift", 0.3);
+    expect(bracePlateParamsDiffer(scene, plate)).toBe(true);
+
+    const applied = applyBracePlateParams(scene, plate);
+    expect(bracePlateParamsDiffer(applied, plate)).toBe(false);
+    expect(applied.braces.get(0)!.params.width).toBe(80);
+    expect(applied.braces.get(1)!.params.plateThickness).toBe(3);
+    expect(applied.braces.get(0)!.params.shift).toBe(DEFAULT_BRACE_SHIFT);
+    expect(applied.braces.get(1)!.params.shift).toBe(0.3);
+    expect(firstBracePlateParams(applied.braces)).toEqual(plate);
+    expect(firstBracePlateParams(new Map())).toEqual(DEFAULT_BRACE_PLATE_PARAMS);
+  });
+});
+
+describe("bracePlatePlane", () => {
+  const strutPlane = () => ({
+    origin: new THREE.Vector3(0, 0, 0),
+    normal: new THREE.Vector3(0, 0, 1),
+    xDir: new THREE.Vector3(1, 0, 0),
+  });
+  const brace = (dir: [number, number, number]): StrutBraceEnd => ({
+    braceId: 0,
+    params: { ...DEFAULT_BRACE_PARAMS, plateThickness: 6 },
+    distanceFromVertex: 0,
+    otherEdgeId: 0,
+    otherEdgeDirection: dir,
+  });
+
+  it("sits half the strut thickness plus half the plate thickness out, on the other edge's side", () => {
+    // strut 30 thick -> plate spans z = 15 .. 21, centred on 18
+    expect(bracePlatePlane(strutPlane(), 30, brace([0.2, 0.1, 0.9])).origin.toArray()).toEqual([0, 0, 18]);
+    expect(bracePlatePlane(strutPlane(), 30, brace([0.2, 0.1, -0.9])).origin.toArray()).toEqual([0, 0, -18]);
+  });
+
+  it("keeps the strut plane's own normal and x direction", () => {
+    const plane = bracePlatePlane(strutPlane(), 30, brace([0, 0, -1]));
+    expect(plane.normal.toArray()).toEqual([0, 0, 1]);
+    expect(plane.xDir.toArray()).toEqual([1, 0, 0]);
+  });
+});
+

@@ -13,12 +13,17 @@ export interface BraceParams {
   // Cap, mm, on the plate's size across the strut (which is otherwise as wide as fits between the
   // strut's two curved sides).
   maxPlateWidth: number
-  // Not used yet:
   plateRadius: number
   plateHoleDiameter: number
   plateHoleOffsetLongitudinal: number
   plateHoleOffsetTransverse: number
+  // How thick the plate is, mm - extruded out from the strut's side face.
+  plateThickness: number
 }
+
+// Everything but `shift` - the properties of a brace's plate, which are the same for every brace
+// for now (see the Preview sidebar). `shift` is where each brace sits, set per brace.
+export type BracePlateParams = Omit<BraceParams, 'shift'>
 
 export const DEFAULT_BRACE_PARAMS: BraceParams = {
   shift: 0.5,
@@ -28,7 +33,13 @@ export const DEFAULT_BRACE_PARAMS: BraceParams = {
   plateHoleDiameter: 5,
   plateHoleOffsetLongitudinal: 7,
   plateHoleOffsetTransverse: 7,
+  plateThickness: 5,
 }
+
+export const DEFAULT_BRACE_PLATE_PARAMS: BracePlateParams = (() => {
+  const { shift: _shift, ...plate } = DEFAULT_BRACE_PARAMS
+  return plate
+})()
 
 // How each brace property is presented when editing it.
 export const BRACE_PARAM_FIELDS: { key: keyof BraceParams; label: string; step: number }[] = [
@@ -39,7 +50,14 @@ export const BRACE_PARAM_FIELDS: { key: keyof BraceParams; label: string; step: 
   { key: 'plateHoleDiameter', label: 'Plate hole diameter (mm)', step: 1 },
   { key: 'plateHoleOffsetLongitudinal', label: 'Plate hole offset, longitudinal (mm)', step: 1 },
   { key: 'plateHoleOffsetTransverse', label: 'Plate hole offset, transverse (mm)', step: 1 },
+  { key: 'plateThickness', label: 'Plate thickness (mm)', step: 1 },
 ]
+
+export const BRACE_PLATE_PARAM_FIELDS = BRACE_PARAM_FIELDS.filter((f) => f.key !== 'shift') as {
+  key: keyof BracePlateParams
+  label: string
+  step: number
+}[]
 
 export interface Brace {
   // The vertex both edges are connected to.
@@ -87,15 +105,50 @@ export function resolveBracePair(
   return [idA, idB]
 }
 
-// "Add Brace": adds one brace between the two selected edges, at the default shift. Returns the
-// scene unchanged if the selection isn't a valid pair (see resolveBracePair).
-export function addBrace(scene: SceneData, selectedEdgeIds: ReadonlySet<number>): SceneData {
+// "Add Brace": adds one brace between the two selected edges, at the default shift, with the given
+// plate properties (the defaults if none). Returns the scene unchanged if the selection isn't a
+// valid pair (see resolveBracePair).
+export function addBrace(
+  scene: SceneData,
+  selectedEdgeIds: ReadonlySet<number>,
+  plateParams: BracePlateParams = DEFAULT_BRACE_PLATE_PARAMS,
+): SceneData {
   const pair = resolveBracePair(scene, selectedEdgeIds)
   if (!pair) return scene
   const vertexId = sharedVertex(scene.edges.get(pair[0])!, scene.edges.get(pair[1])!)!
   const braces = new Map(scene.braces)
-  braces.set(scene.nextBraceId, { vertexId, edgeIds: pair, params: { ...DEFAULT_BRACE_PARAMS } })
+  braces.set(scene.nextBraceId, {
+    vertexId,
+    edgeIds: pair,
+    params: { ...DEFAULT_BRACE_PARAMS, ...plateParams },
+  })
   return { ...scene, braces, nextBraceId: scene.nextBraceId + 1 }
+}
+
+// The plate properties of the first brace, or the defaults if there are none.
+export function firstBracePlateParams(braces: ReadonlyMap<number, Brace>): BracePlateParams {
+  for (const brace of braces.values()) {
+    const { shift: _shift, ...plate } = { ...DEFAULT_BRACE_PARAMS, ...brace.params }
+    return plate
+  }
+  return DEFAULT_BRACE_PLATE_PARAMS
+}
+
+// Whether any brace's plate properties differ from `plate`.
+export function bracePlateParamsDiffer(scene: SceneData, plate: BracePlateParams): boolean {
+  const keys = Object.keys(plate) as (keyof BracePlateParams)[]
+  for (const brace of scene.braces.values()) {
+    if (keys.some((key) => brace.params[key] !== plate[key])) return true
+  }
+  return false
+}
+
+// Gives every brace the same plate properties (keeping each one's own shift).
+export function applyBracePlateParams(scene: SceneData, plate: BracePlateParams): SceneData {
+  if (scene.braces.size === 0) return scene
+  const braces = new Map<number, Brace>()
+  for (const [id, brace] of scene.braces) braces.set(id, { ...brace, params: { ...brace.params, ...plate } })
+  return { ...scene, braces }
 }
 
 export function deleteBraces(scene: SceneData, ids: ReadonlySet<number>): SceneData {
@@ -157,6 +210,9 @@ export interface StrutBraceEnd {
   distanceFromVertex: number
   // The other edge the brace runs to.
   otherEdgeId: number
+  // Unit vector, in the model's 3D space, from this end's vertex along that other edge - which way
+  // the brace's plate should stick out from the strut.
+  otherEdgeDirection: [number, number, number]
 }
 
 // The braces on a strut's two ends - A is the edge's first vertex, B its second. Empty lists mean
@@ -191,17 +247,44 @@ export function computeStrutBraces(
   edge: Edge,
   length: number,
   bracesByEdge: ReadonlyMap<number, { braceId: number; brace: Brace }[]>,
+  edges: ReadonlyMap<number, Edge>,
+  positionOf: (vertexId: number) => THREE.Vector3,
 ): StrutBraces {
   const result: StrutBraces = { a: [], b: [] }
   for (const { braceId, brace } of bracesByEdge.get(edgeId) ?? []) {
+    const otherEdgeId = brace.edgeIds[0] === edgeId ? brace.edgeIds[1] : brace.edgeIds[0]
+    const otherEdge = edges.get(otherEdgeId)
+    if (!otherEdge) continue
+    const farVertexId = otherEdge[0] === brace.vertexId ? otherEdge[1] : otherEdge[0]
+    const direction = positionOf(farVertexId).clone().sub(positionOf(brace.vertexId)).normalize()
     const entry: StrutBraceEnd = {
       braceId,
       params: brace.params,
       distanceFromVertex: brace.params.shift * length,
-      otherEdgeId: brace.edgeIds[0] === edgeId ? brace.edgeIds[1] : brace.edgeIds[0],
+      otherEdgeId,
+      otherEdgeDirection: [direction.x, direction.y, direction.z],
     }
     if (brace.vertexId === edge[0]) result.a.push(entry)
     else if (brace.vertexId === edge[1]) result.b.push(entry)
   }
   return result
+}
+
+// Where a brace's plate goes, as the plane `buildStrutMeshFromDrawing` extrudes symmetrically about
+// (see replicadCad.ts): the strut's own plane moved out along its normal, toward the side the
+// brace's other edge is on, so the plate starts at the strut's face (half its thickness out) and
+// reaches `plateThickness` beyond it. Pair with `params.plateThickness` as the extrusion depth.
+export function bracePlatePlane(
+  strutPlane: { origin: THREE.Vector3; normal: THREE.Vector3; xDir: THREE.Vector3 },
+  strutThickness: number,
+  brace: StrutBraceEnd,
+): { origin: THREE.Vector3; normal: THREE.Vector3; xDir: THREE.Vector3 } {
+  const toOther = new THREE.Vector3(...brace.otherEdgeDirection)
+  const side = strutPlane.normal.dot(toOther) < 0 ? -1 : 1
+  const offset = side * (strutThickness / 2 + brace.params.plateThickness / 2)
+  return {
+    origin: strutPlane.origin.clone().addScaledVector(strutPlane.normal, offset),
+    normal: strutPlane.normal.clone(),
+    xDir: strutPlane.xDir.clone(),
+  }
 }

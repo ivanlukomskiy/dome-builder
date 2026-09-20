@@ -46,10 +46,10 @@ export interface StrutBoundaryManualResult {
   // The actual strut sketch outline - what would eventually replace computeStrutBoundary's
   // return value. Null while you don't have one yet (helpers alone still render).
   main: Drawing | null;
-  // The sketch of the brace attached at this strut's A / B end, or null if there's none (or it
-  // isn't built yet - always null for now).
-  braceA: Drawing | null;
-  braceB: Drawing | null;
+  // The flat brace plate (rounded rectangle with its bolt holes) at this strut's A / B end, or
+  // null if there's no brace there. If several braces sit on one end, it's the first one's.
+  bracePlateA: Drawing | null;
+  bracePlateB: Drawing | null;
   // Construction lines, reference points turned into tiny shapes, anything else worth seeing
   // while building `main` up. Purely visual - never fed into the real pipeline.
   helpers: HelperDrawing[];
@@ -676,8 +676,10 @@ export function computeStrutBoundaryManual2D(
   ];
   // Centers of the holes to punch through the strut itself (each brace plate's corner holes).
   const strutHoles: [Point2D, number][] = [];
+  let bracePlateA: Drawing | null = null;
+  let bracePlateB: Drawing | null = null;
   for (const [end, origin, dir, endBraces] of braceEnds) {
-    for (const brace of endBraces) {
+    for (const [braceIndex, brace] of endBraces.entries()) {
       const braceCenterNoRounding = add2(
         origin,
         scale2(dir, brace.params.shift * chordLength),
@@ -749,6 +751,10 @@ export function computeStrutBoundaryManual2D(
             strutHoles.push([hole, brace.params.plateHoleDiameter / 2]);
           }
         }
+        if (plate && braceIndex === 0) {
+          if (end === "A") bracePlateA = plate.clone();
+          else bracePlateB = plate.clone();
+        }
         if (plate) {
           helpers.push({
             drawing: plate,
@@ -767,7 +773,7 @@ export function computeStrutBoundaryManual2D(
     main = main.cut(drawCircle(holeRadius).translate(holeCenter));
   }
 
-  return { main: main, braceA: null, braceB: null, helpers };
+  return { main: main, bracePlateA, bracePlateB, helpers };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and

@@ -87,7 +87,14 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
       offsetB: (offsets.get(index)?.get(b) ?? 0) + offsetModifier,
       beamThickness: override ?? thickness,
       thicknessOverride: override,
-      braces: computeStrutBraces(index, [a, b], posA.distanceTo(posB), bracesByEdge),
+      braces: computeStrutBraces(
+        index,
+        [a, b],
+        posA.distanceTo(posB),
+        bracesByEdge,
+        data.edges,
+        (id) => transformedVertices.get(id)!,
+      ),
     }
   })
 

@@ -2,7 +2,13 @@ import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import type { StepExportProgress } from '../lib/stepExportRunner'
-import { BRACE_PARAM_FIELDS, sanitizeBraceParam, type BraceParams } from '../lib/braces'
+import {
+  BRACE_PARAM_FIELDS,
+  BRACE_PLATE_PARAM_FIELDS,
+  sanitizeBraceParam,
+  type BraceParams,
+  type BracePlateParams,
+} from '../lib/braces'
 import type {
   AxisType,
   PolyhedronData,
@@ -122,6 +128,9 @@ interface SidebarProps {
   onMinSideChange: (value: number) => void
   flangeMillingDiameter: number
   onFlangeMillingDiameterChange: (value: number) => void
+  // The plate properties every brace shares, edited in Preview (applied with the Apply button).
+  bracePlateDraft: BracePlateParams
+  onBracePlateParamChange: (key: keyof BracePlateParams, value: number) => void
   previewParamsDirty: boolean
   onApplyPreview: () => void
   canUndo: boolean
@@ -303,6 +312,8 @@ export function Sidebar({
   onMinSideChange,
   flangeMillingDiameter,
   onFlangeMillingDiameterChange,
+  bracePlateDraft,
+  onBracePlateParamChange,
   previewParamsDirty,
   onApplyPreview,
   canUndo,
@@ -659,6 +670,29 @@ export function Sidebar({
             lengthwise/across each strut arm; overshoot and min side set how far the plate reaches
             past a strut's own corner and how narrow it's allowed to pinch; the side/center holes
             and their offsets are the plate's own bolt pattern.
+          </p>
+        </section>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>Braces</h2>
+          {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
+            <div className="transform-field" key={key}>
+              <label>{label}</label>
+              <NumberField
+                value={bracePlateDraft[key]}
+                step={step}
+                min={0}
+                clamp={(n) => sanitizeBraceParam(key, n)}
+                onCommit={(value) => onBracePlateParamChange(key, value)}
+              />
+            </div>
+          ))}
+          <p className="hint">
+            The same for every brace, and applied to all of them with Apply (new braces start with
+            these too). Where a brace sits (shift) is set per brace in Edit &rarr; Braces. The plate
+            is extruded out from the strut&rsquo;s side face, toward the brace&rsquo;s other edge.
           </p>
         </section>
       )}
