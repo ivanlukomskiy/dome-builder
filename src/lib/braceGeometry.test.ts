@@ -3,6 +3,7 @@ import {
   arcPointAtAngle,
   isInsideArcBand,
   braceRectInArcBand,
+  bracePlateHoleCenters,
   rectCorners,
   rectFitsInBand,
   type ArcEndpoints,
@@ -58,7 +59,7 @@ describe("braceRectInArcBand", () => {
   };
 
   it("is `width` long along the axis and capped at the max width across it", () => {
-    const rect = braceRectInArcBand(c, u, origin, ends, 50, 50)!;
+    const rect = braceRectInArcBand(c, u, origin, ends, 50, 50)!.corners;
     const [p, q] = halfExtents(rect, u, c);
     expect(p).toBeCloseTo(25, 6);
     expect(q).toBeCloseTo(25, 6);
@@ -66,7 +67,7 @@ describe("braceRectInArcBand", () => {
   });
 
   it("is as wide as fits between the arcs when the cap allows more", () => {
-    const rect = braceRectInArcBand(c, u, origin, ends, 50, 500)!;
+    const rect = braceRectInArcBand(c, u, origin, ends, 50, 500)!.corners;
     const [p, q] = halfExtents(rect, u, c);
     expect(p).toBeCloseTo(25, 6);
     // the band is 120 wide, so at most 60 each side, and a bit less because of the curvature
@@ -78,7 +79,7 @@ describe("braceRectInArcBand", () => {
 
   it("keeps its sides parallel / perpendicular to a tilted axis", () => {
     const tilted: Pt = [Math.sin(-0.3), Math.cos(-0.3)];
-    const rect = braceRectInArcBand(c, tilted, origin, ends, 50, 500)!;
+    const rect = braceRectInArcBand(c, tilted, origin, ends, 50, 500)!.corners;
     const side: Pt = [rect[1][0] - rect[0][0], rect[1][1] - rect[0][1]];
     const other: Pt = [rect[2][0] - rect[1][0], rect[2][1] - rect[1][1]];
     // `side` runs along the strut (parallel to the axis), `other` across it (perpendicular)
@@ -93,3 +94,32 @@ describe("braceRectInArcBand", () => {
     expect(braceRectInArcBand([100, 0], u, origin, ends, 50, 50)).toBeNull();
   });
 });
+
+describe("braceRectInArcBand dimensions", () => {
+  it("reports the half extents it built the rectangle from", () => {
+    const r = braceRectInArcBand([2500, 0], [0, 1], origin, concentricBand(2500, 60, 0.4), 50, 50)!;
+    expect(r.halfAlong).toBe(25);
+    expect(r.halfAcross).toBe(25);
+    expect(r.corners).toHaveLength(4);
+  });
+});
+
+describe("bracePlateHoleCenters", () => {
+  it("puts holes in the 4 corners plus one midway across each end", () => {
+    const holes = bracePlateHoleCenters(25, 40, 7, 9);
+    expect(holes).toHaveLength(6);
+    // corners: 7 in from each end (x), 9 in from each long side (y)
+    expect(holes.slice(0, 4)).toEqual([
+      [18, 31],
+      [-18, 31],
+      [-18, -31],
+      [18, -31],
+    ]);
+    // the other two lie on the line through the center along the axis (y = 0), at the ends' columns
+    expect(holes.slice(4)).toEqual([
+      [18, 0],
+      [-18, 0],
+    ]);
+  });
+});
+

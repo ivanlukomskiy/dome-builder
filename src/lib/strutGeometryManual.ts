@@ -1,11 +1,13 @@
-import { draw, drawCircle, DrawingPen } from "replicad";
+import { draw, drawCircle, drawRoundedRectangle, DrawingPen } from "replicad";
 import { Drawing, type Point2D } from "replicad";
 import type * as THREE from "three";
 import { computeStrutPlane } from "./strutGeometry";
-import { NO_STRUT_BRACES, type StrutBraces } from "./braces";
+import { NO_STRUT_BRACES, type BraceParams, type StrutBraces } from "./braces";
 import {
   arcPointAtAngle,
+  bracePlateHoleCenters,
   braceRectInArcBand,
+  type BraceRect,
   type ArcEndpoints,
 } from "./braceGeometry";
 
@@ -308,6 +310,47 @@ const nullShoulderGeometry: Geometry = {
   helpers: [],
   negativeShapes: [],
 };
+
+// The brace plate, flat: the rectangle `rect` (centered at `c`, its length along `axis`) with
+// corners rounded by `plateRadius`, and 6 bolt holes cut in it (see bracePlateHoleCenters).
+// Null if the rectangle is degenerate.
+function drawBracePlate(
+  c: Point2D,
+  axis: Point2D,
+  rect: BraceRect,
+  params: BraceParams,
+): Drawing | null {
+  if (rect.halfAlong <= 0 || rect.halfAcross <= 0) return null;
+
+  // Built around the origin with x along the strut end's axis, then rotated / moved into place.
+  const radius = Math.min(
+    Math.max(params.plateRadius, 0),
+    rect.halfAlong,
+    rect.halfAcross,
+  );
+  const width = rect.halfAlong * 2;
+  const height = rect.halfAcross * 2;
+  let plate =
+    radius > 0
+      ? drawRoundedRectangle(width, height, radius)
+      : drawRoundedRectangle(width, height);
+
+  if (params.plateHoleDiameter > 0) {
+    for (const holeCenter of bracePlateHoleCenters(
+      rect.halfAlong,
+      rect.halfAcross,
+      params.plateHoleOffsetLongitudinal,
+      params.plateHoleOffsetTransverse,
+    )) {
+      plate = plate.cut(
+        drawCircle(params.plateHoleDiameter / 2).translate(holeCenter),
+      );
+    }
+  }
+
+  const angleDeg = (Math.atan2(axis[1], axis[0]) * 180) / Math.PI;
+  return plate.rotate(angleDeg).translate(c);
+}
 
 export interface StrutEndMeasurements {
   offset: number;
@@ -671,7 +714,7 @@ export function computeStrutBoundaryManual2D(
         // The brace plate's rectangle around braceCenter: `width` long along this strut end's
         // axis (the tangent at that end - strutA / strutB above are drawn with their length along
         // it), and as wide as fits between the inn / ext arcs across it, up to `maxPlateWidth`.
-        // Shown as its 4 corners.
+        // The plate is drawn from it (see drawBracePlate).
         const endAxis =
           end === "A"
             ? tangentDirection2D(a, b, center)
@@ -684,13 +727,16 @@ export function computeStrutBoundaryManual2D(
           brace.params.width,
           brace.params.maxPlateWidth,
         );
-        rect?.forEach((corner, i) => {
+        const plate = rect
+          ? drawBracePlate(braceCenter, endAxis, rect, brace.params)
+          : null;
+        if (plate) {
           helpers.push({
-            drawing: drawPointMarker(corner, MARKER_RADIUS),
+            drawing: plate,
             color: "yellow",
-            name: `braceRect ${end} corner ${i + 1} (brace ${brace.braceId})`,
+            name: `bracePlate ${end} (brace ${brace.braceId})`,
           });
-        });
+        }
       }
     }
   }

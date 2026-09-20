@@ -91,11 +91,18 @@ export function rectFitsInBand(c: Pt, u: Pt, p: number, q: number, center: Pt, e
   return true;
 }
 
+export interface BraceRect {
+  // The 4 corners going around.
+  corners: [Pt, Pt, Pt, Pt];
+  // Half the rectangle's size along the strut end's axis (`u`) / across it.
+  halfAlong: number;
+  halfAcross: number;
+}
+
 // The brace plate's rectangle: centered at `c`, `width` long along `u` (the strut end's axis, i.e.
 // the direction of the strut) and as wide as possible across it (perpendicular to `u`) while
-// staying inside the band between the inn and ext arcs, capped at `maxAcrossWidth`. Returns its
-// 4 corners, or null if even a zero-width sliver `width` long doesn't fit (or `c` isn't in the
-// band).
+// staying inside the band between the inn and ext arcs, capped at `maxAcrossWidth`. Null if even a
+// zero-width sliver `width` long doesn't fit (or `c` isn't in the band).
 export function braceRectInArcBand(
   c: Pt,
   u: Pt,
@@ -103,12 +110,14 @@ export function braceRectInArcBand(
   ends: ArcEndpoints,
   width: number,
   maxAcrossWidth: number,
-): [Pt, Pt, Pt, Pt] | null {
+): BraceRect | null {
   const p = width / 2;
   if (!isInsideArcBand(c, center, ends) || !rectFitsInBand(c, u, p, 0, center, ends)) return null;
 
   const qCap = Math.max(maxAcrossWidth, 0) / 2;
-  if (rectFitsInBand(c, u, p, qCap, center, ends)) return rectCorners(c, u, p, qCap);
+  if (rectFitsInBand(c, u, p, qCap, center, ends)) {
+    return { corners: rectCorners(c, u, p, qCap), halfAlong: p, halfAcross: qCap };
+  }
 
   // Fitting is monotone (shrink a fitting rectangle about its center and it still fits), so the
   // widest fit can be bisected.
@@ -119,5 +128,28 @@ export function braceRectInArcBand(
     if (rectFitsInBand(c, u, p, mid, center, ends)) lo = mid;
     else hi = mid;
   }
-  return rectCorners(c, u, p, lo);
+  return { corners: rectCorners(c, u, p, lo), halfAlong: p, halfAcross: lo };
+}
+
+// The brace plate's 6 bolt holes, as offsets from the plate's center in its own frame (x along the
+// strut end's axis, y across it): one in each corner, `offsetLongitudinal` in from the plate's
+// ends (along x) and `offsetTransverse` in from its long sides (along y), plus one midway between
+// the two corner holes at each end - so those two lie on the line through the center along the
+// axis.
+export function bracePlateHoleCenters(
+  halfAlong: number,
+  halfAcross: number,
+  offsetLongitudinal: number,
+  offsetTransverse: number,
+): Pt[] {
+  const x = halfAlong - offsetLongitudinal;
+  const y = halfAcross - offsetTransverse;
+  return [
+    [x, y],
+    [-x, y],
+    [-x, -y],
+    [x, -y],
+    [x, 0],
+    [-x, 0],
+  ];
 }
