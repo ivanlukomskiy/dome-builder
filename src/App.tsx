@@ -49,7 +49,7 @@ import {
 } from './lib/config'
 import { downloadBlob, downloadJson } from './lib/download'
 import { computeEdgesInfo } from './lib/edgesInfo'
-import { DEFAULT_FLANGE_SHAPE_PARAMS } from './lib/flangeGeometry'
+import { DEFAULT_FLANGE_SHAPE_PARAMS, type FlangeShapeParams } from './lib/flangeGeometry'
 import { runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
@@ -121,6 +121,8 @@ const DEFAULT_CHAMFER_LENGTH = 6
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_EDGE_THICKNESS: ReadonlyMap<number, number> = new Map()
+const EMPTY_VERTEX_CORNER_LENGTH: ReadonlyMap<number, number> = new Map()
+const EMPTY_VERTEX_FLANGE_PARAMS: ReadonlyMap<number, Partial<FlangeShapeParams>> = new Map()
 
 function App() {
   // Restored once, on first render, from whatever was auto-saved last time (see the autosave
@@ -208,6 +210,16 @@ function App() {
   const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
     new Map(initial?.edgeThickness ?? []),
   )
+  // Per-vertex corner length override (mm), keyed by vertex id; a vertex without an entry uses the
+  // global `cornerLength`. Like edgeThickness, applies live rather than waiting for "Apply".
+  const [vertexCornerLength, setVertexCornerLength] = useState<Map<number, number>>(
+    new Map(initial?.vertexCornerLength ?? []),
+  )
+  // Per-vertex overrides of any flange parameter, keyed by vertex id; only the overridden
+  // parameters are present, the rest use the global ones. Applies live, like the above.
+  const [vertexFlangeParams, setVertexFlangeParams] = useState<
+    Map<number, Partial<FlangeShapeParams>>
+  >(new Map(initial?.vertexFlangeParams ?? []))
   const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
     new Map(initial?.vertexTransforms ?? []),
   )
@@ -506,6 +518,59 @@ function App() {
     })
   }
 
+  const handleVertexCornerLengthChange = (value: number) => {
+    if (selectedVertexIndices.size === 0) return
+    setVertexCornerLength((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedVertexIndices) {
+        if (value <= 0) next.delete(idx)
+        else next.set(idx, value)
+      }
+      return next
+    })
+  }
+
+  const handleResetVertexCornerLength = () => {
+    if (selectedVertexIndices.size === 0) return
+    setVertexCornerLength((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedVertexIndices) next.delete(idx)
+      return next
+    })
+  }
+
+  // Sets one flange parameter on every selected vertex; `value` undefined clears it (back to the
+  // global one). A vertex left with no overrides at all is dropped from the map entirely.
+  const updateSelectedVertexFlangeParam = (key: keyof FlangeShapeParams, value: number | undefined) => {
+    if (selectedVertexIndices.size === 0) return
+    setVertexFlangeParams((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedVertexIndices) {
+        const overrides = { ...next.get(idx) }
+        if (value === undefined) delete overrides[key]
+        else overrides[key] = value
+        if (Object.keys(overrides).length === 0) next.delete(idx)
+        else next.set(idx, overrides)
+      }
+      return next
+    })
+  }
+
+  const handleVertexFlangeParamChange = (key: keyof FlangeShapeParams, value: number) =>
+    updateSelectedVertexFlangeParam(key, value)
+
+  const handleResetVertexFlangeParam = (key: keyof FlangeShapeParams) =>
+    updateSelectedVertexFlangeParam(key, undefined)
+
+  const handleResetVertexFlangeParams = () => {
+    if (selectedVertexIndices.size === 0) return
+    setVertexFlangeParams((prev) => {
+      const next = new Map(prev)
+      for (const idx of selectedVertexIndices) next.delete(idx)
+      return next
+    })
+  }
+
   const handleDeleteSelected = () => {
     if (selectedVertexIndices.size === 0) return
     sceneHistory.commit(deleteVertices(sceneData, selectedVertexIndices))
@@ -612,6 +677,8 @@ function App() {
     sceneHistory.reset(pruneToLayerCount(previewData, layerCount))
     setVertexTransforms(new Map())
     setEdgeThickness(new Map())
+    setVertexCornerLength(new Map())
+    setVertexFlangeParams(new Map())
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
@@ -706,6 +773,8 @@ function App() {
     })
     setVertexTransforms(new Map(state.vertexTransforms))
     setEdgeThickness(new Map(state.edgeThickness))
+    setVertexCornerLength(new Map(state.vertexCornerLength))
+    setVertexFlangeParams(new Map(state.vertexFlangeParams))
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
@@ -740,6 +809,8 @@ function App() {
       flangeMillingDiameter,
       vertexTransforms,
       edgeThickness,
+      vertexCornerLength,
+      vertexFlangeParams,
     })
 
   // Auto-save on every change to any config field, so the next page load can restore it.
@@ -769,6 +840,8 @@ function App() {
     flangeMillingDiameter,
     vertexTransforms,
     edgeThickness,
+    vertexCornerLength,
+    vertexFlangeParams,
   ])
 
   const handleExportConfig = () => {
@@ -796,6 +869,8 @@ function App() {
       centerY,
       edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? appliedPreviewParams.thickness,
       cornerLength: appliedPreviewParams.cornerLength,
+      vertexCornerLength,
+      vertexFlangeParams,
       halfWidth: appliedPreviewParams.extrudeDistance / 2,
       offsetModifier: appliedPreviewParams.offsetModifier,
       endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
@@ -817,6 +892,8 @@ function App() {
       thickness: appliedPreviewParams.thickness,
       extrudeDistance: appliedPreviewParams.extrudeDistance,
       cornerLength: appliedPreviewParams.cornerLength,
+      vertexCornerLength,
+      vertexFlangeParams,
       offsetModifier: appliedPreviewParams.offsetModifier,
       endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
       midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
@@ -918,6 +995,13 @@ function App() {
         edgeThickness={edgeThickness}
         onEdgeThicknessChange={handleEdgeThicknessChange}
         onResetEdgeThickness={handleResetEdgeThickness}
+        vertexCornerLength={vertexCornerLength}
+        onVertexCornerLengthChange={handleVertexCornerLengthChange}
+        onResetVertexCornerLength={handleResetVertexCornerLength}
+        vertexFlangeParams={vertexFlangeParams}
+        onVertexFlangeParamChange={handleVertexFlangeParamChange}
+        onResetVertexFlangeParam={handleResetVertexFlangeParam}
+        onResetVertexFlangeParams={handleResetVertexFlangeParams}
         canCreateFace={creatableFaces.length > 0}
         onCreateFace={handleCreateFacesFromEdges}
         canAddBrace={canAddBrace}
@@ -984,6 +1068,8 @@ function App() {
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
         selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
+        vertexCornerLength={isNew ? EMPTY_VERTEX_CORNER_LENGTH : vertexCornerLength}
+        vertexFlangeParams={isNew ? EMPTY_VERTEX_FLANGE_PARAMS : vertexFlangeParams}
         selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
         selectedBraceIndices={isNew ? EMPTY_INDEX_SET : liveSelectedBraceIndices}
         centerY={centerY}

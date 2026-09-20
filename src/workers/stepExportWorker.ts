@@ -2,7 +2,7 @@
 import * as THREE from 'three'
 import { computeStrutPlane } from '../lib/strutGeometry'
 import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
-import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
@@ -24,7 +24,6 @@ export interface StepExportRequest {
   // Brace bodies to export (see braceSolid.ts's pairBracePoints) - a batch of these is all a
   // 'braces' worker does, and strutJobs/vertices are empty then.
   braceBodies: BraceBody[]
-  cornerLength: number
   halfWidth: number
   endGrooveLengthPercent: number
   midGrooveLengthPercent: number
@@ -74,7 +73,8 @@ async function buildStepExports(
       center,
       job.offsetA,
       job.offsetB,
-      req.cornerLength,
+      job.cornerLengthA,
+      job.cornerLengthB,
       req.halfWidth,
       req.endGrooveLengthPercent,
       req.midGrooveLengthPercent,
@@ -156,7 +156,7 @@ async function buildStepExports(
   req.vertices.forEach((vertex, i) => {
     const boundary = computeFlangeBoundary2D(
       { vertexId: vertex.vertexId, edges: vertex.edges },
-      req.flangeParams,
+      resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
     )
     self.postMessage({
       type: 'progress',

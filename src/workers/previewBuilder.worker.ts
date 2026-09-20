@@ -2,7 +2,7 @@
 import * as THREE from 'three'
 import { computeStrutPlane } from '../lib/strutGeometry'
 import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
-import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
@@ -36,7 +36,6 @@ export interface PreviewBuildRequest {
   requestId: number
   centerY: number
   strutJobs: StrutBuildJob[]
-  cornerLength: number
   halfWidth: number
   endGrooveLengthPercent: number
   midGrooveLengthPercent: number
@@ -46,6 +45,8 @@ export interface PreviewBuildRequest {
   vertices: VertexEdgesInfo[]
   flangeParams: FlangeShapeParams
   flangeColor: [number, number, number]
+  // Flanges at a vertex with any override of its own (corner length or flange parameters).
+  flangeOverrideColor: [number, number, number]
 }
 
 export interface PreviewPiece {
@@ -89,7 +90,8 @@ async function buildPreview(
       center,
       job.offsetA,
       job.offsetB,
-      req.cornerLength,
+      job.cornerLengthA,
+      job.cornerLengthB,
       req.halfWidth,
       req.endGrooveLengthPercent,
       req.midGrooveLengthPercent,
@@ -164,7 +166,7 @@ async function buildPreview(
   req.vertices.forEach((vertex, i) => {
     const boundary = computeFlangeBoundary2D(
       { vertexId: vertex.vertexId, edges: vertex.edges },
-      req.flangeParams,
+      resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
     )
     self.postMessage({
       type: 'progress',
@@ -192,7 +194,10 @@ async function buildPreview(
           positions: flange.positions,
           normals: flange.normals,
           indices: flange.indices,
-          color: req.flangeColor,
+          color:
+            vertex.cornerLengthOverride !== undefined || vertex.flangeOverrides !== undefined
+              ? req.flangeOverrideColor
+              : req.flangeColor,
         })
       }
     } catch (err) {

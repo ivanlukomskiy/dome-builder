@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { Face, SceneData } from './polyhedra'
 import { buildVertexAdjacency, computeVertexHubMetrics, computeVertexTangentPlane } from './polyhedra'
 import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometryManual'
+import type { FlangeShapeParams } from './flangeGeometry'
 
 type Vec3Tuple = [number, number, number]
 
@@ -43,6 +44,12 @@ export interface VertexEdgesInfo {
     e1: Vec3Tuple
     e2: Vec3Tuple
   }
+  // This vertex's own corner length override, if it has one (its struts' ends and the flange
+  // built from them use it instead of the global corner length). Undefined otherwise.
+  cornerLengthOverride?: number
+  // This vertex's own overrides of the flange parameters, if it has any - laid over the global ones
+  // when its flange is built (see resolveFlangeParams). Undefined otherwise.
+  flangeOverrides?: Partial<FlangeShapeParams>
   // Sorted in angular order around the tangent plane (matching angleToNextEdgeDeg's meaning).
   edges: EdgeInfo[]
 }
@@ -58,6 +65,11 @@ export interface ComputeEdgesInfoParams {
   edgeThicknessOf: (edgeId: number) => number
   // Strut-end params - see precalculateStrutEnd in strutGeometryManual.ts.
   cornerLength: number
+  // Per-vertex corner length overrides, keyed by vertex id; a vertex without one uses
+  // `cornerLength`.
+  vertexCornerLength: ReadonlyMap<number, number>
+  // Per-vertex flange parameter overrides, keyed by vertex id.
+  vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   halfWidth: number
   offsetModifier: number
   endGrooveLengthPercent: number
@@ -139,7 +151,9 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
     transformedVertices,
     centerY,
     edgeThicknessOf,
-    cornerLength,
+    cornerLength: globalCornerLength,
+    vertexCornerLength,
+    vertexFlangeParams,
     halfWidth,
     offsetModifier,
     endGrooveLengthPercent,
@@ -177,6 +191,9 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
       projectedAngleByEdge.set(ref.edgeId, (angle * 180) / Math.PI)
     }
 
+    const cornerLengthOverride = vertexCornerLength.get(vertexId)
+    const cornerLength = cornerLengthOverride ?? globalCornerLength
+
     const facePairs = faceNeighborPairs.get(vertexId) ?? new Map<string, number>()
     const n = metrics.length
 
@@ -212,6 +229,8 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
     vertices.push({
       vertexId,
       position: toTuple(vertexPos),
+      cornerLengthOverride,
+      flangeOverrides: vertexFlangeParams.get(vertexId),
       tangentPlane: {
         origin: toTuple(vertexPos),
         normal: toTuple(normal),

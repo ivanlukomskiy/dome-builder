@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { SceneData } from './polyhedra'
 import { computeEdgeEndOffsets } from './strutGeometry'
 import { computeEdgesInfo, type VertexEdgesInfo } from './edgesInfo'
+import type { FlangeShapeParams } from './flangeGeometry'
 import { computeStrutBraces, indexBracesByEdge, type StrutBraces } from './braces'
 
 // Everything DomeMesh.tsx's live Preview build and the "Download STEP Archive" export both need
@@ -20,6 +21,9 @@ export interface StrutGeometryEntry {
   posB: [number, number, number]
   offsetA: number
   offsetB: number
+  // Corner length at each end - its vertex's override, or the global one.
+  cornerLengthA: number
+  cornerLengthB: number
   beamThickness: number
   // This edge's own thickness override, if any - undefined means "uses the model default". Not
   // needed to build the solid itself; DomeMesh uses it to pick the strut's preview color.
@@ -43,6 +47,10 @@ export interface PreviewBuildInputParams {
   thickness: number
   extrudeDistance: number
   cornerLength: number
+  // Per-vertex corner length overrides, keyed by vertex id (absent = use `cornerLength`).
+  vertexCornerLength: ReadonlyMap<number, number>
+  // Per-vertex flange parameter overrides, keyed by vertex id.
+  vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   offsetModifier: number
   endGrooveLengthPercent: number
   midGrooveLengthPercent: number
@@ -60,6 +68,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     thickness,
     extrudeDistance,
     cornerLength,
+    vertexCornerLength,
+    vertexFlangeParams,
     offsetModifier,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
@@ -90,6 +100,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
       posB: [posB.x, posB.y, posB.z],
       offsetA: (offsets.get(index)?.get(a) ?? 0) + offsetModifier,
       offsetB: (offsets.get(index)?.get(b) ?? 0) + offsetModifier,
+      cornerLengthA: vertexCornerLength.get(a) ?? cornerLength,
+      cornerLengthB: vertexCornerLength.get(b) ?? cornerLength,
       beamThickness: override ?? thickness,
       thicknessOverride: override,
       braces: computeStrutBraces(
@@ -109,6 +121,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     centerY,
     edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? thickness,
     cornerLength,
+    vertexCornerLength,
+    vertexFlangeParams,
     halfWidth,
     offsetModifier,
     endGrooveLengthPercent,

@@ -6,6 +6,7 @@ import type { EditTarget, ViewMode } from '../App'
 import type { HubEdgeMetric, SceneData } from '../lib/polyhedra'
 import { buildVertexAdjacency, computeModelStats, computeVertexHubMetrics } from '../lib/polyhedra'
 import { buildFaceNeighborPairs, directedEdgeKey } from '../lib/edgesInfo'
+import type { FlangeShapeParams } from '../lib/flangeGeometry'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
 import { Hud, type HudHubEdgeMetric } from './Hud'
 
@@ -18,6 +19,8 @@ interface ViewportProps {
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
+  vertexCornerLength: ReadonlyMap<number, number>
+  vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   selectedFaceIndices: ReadonlySet<number>
   selectedBraceIndices: ReadonlySet<number>
   centerY: number
@@ -54,6 +57,8 @@ export function Viewport({
   selectedVertexIndices,
   selectedEdgeIndices,
   edgeThickness,
+  vertexCornerLength,
+  vertexFlangeParams,
   selectedFaceIndices,
   selectedBraceIndices,
   centerY,
@@ -182,6 +187,8 @@ export function Viewport({
           selectedVertexIndices={selectedVertexIndices}
           selectedEdgeIndices={selectedEdgeIndices}
           edgeThickness={edgeThickness}
+          vertexCornerLength={vertexCornerLength}
+          vertexFlangeParams={vertexFlangeParams}
           selectedFaceIndices={selectedFaceIndices}
           selectedBraceIndices={selectedBraceIndices}
           centerY={centerY}

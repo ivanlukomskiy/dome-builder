@@ -10,6 +10,7 @@ import {
   type BraceParams,
   type BracePlateParams,
 } from '../lib/braces'
+import { FLANGE_PARAM_FIELDS, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type {
   AxisType,
   PolyhedronData,
@@ -83,6 +84,13 @@ interface SidebarProps {
   edgeThickness: ReadonlyMap<number, number>
   onEdgeThicknessChange: (value: number) => void
   onResetEdgeThickness: () => void
+  vertexCornerLength: ReadonlyMap<number, number>
+  onVertexCornerLengthChange: (value: number) => void
+  onResetVertexCornerLength: () => void
+  vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
+  onVertexFlangeParamChange: (key: keyof FlangeShapeParams, value: number) => void
+  onResetVertexFlangeParam: (key: keyof FlangeShapeParams) => void
+  onResetVertexFlangeParams: () => void
   canCreateFace: boolean
   onCreateFace: () => void
   canAddBrace: boolean
@@ -163,9 +171,9 @@ function sharedTransformValue(
   return value
 }
 
-// null return means the selected edges don't all share the same override (an edge without one
-// counts as 0, i.e. "use the default thickness").
-function sharedEdgeThicknessValue(
+// null return means the selected items don't all share the same override (one without an
+// override counts as 0, i.e. "use the global default").
+function sharedOverrideValue(
   selected: ReadonlySet<number>,
   overrides: ReadonlyMap<number, number>,
 ): number | null {
@@ -181,6 +189,31 @@ function sharedEdgeThicknessValue(
     }
   }
   return value
+}
+
+// How one flange parameter's per-vertex override looks across the selected vertices: `value` is
+// the override if every selected vertex has the same one (null if none has one), `mixed` if they
+// differ (some overridden differently, or only some overridden), `any` if at least one has one.
+function sharedFlangeOverride(
+  selected: ReadonlySet<number>,
+  overrides: ReadonlyMap<number, Partial<FlangeShapeParams>>,
+  key: keyof FlangeShapeParams,
+): { value: number | null; mixed: boolean; any: boolean } {
+  let first = true
+  let value: number | undefined
+  let mixed = false
+  let any = false
+  for (const idx of selected) {
+    const v = overrides.get(idx)?.[key]
+    if (v !== undefined) any = true
+    if (first) {
+      value = v
+      first = false
+    } else if (v !== value) {
+      mixed = true
+    }
+  }
+  return { value: mixed ? null : (value ?? null), mixed, any }
 }
 
 export interface NumberFieldProps {
@@ -270,6 +303,13 @@ export function Sidebar({
   edgeThickness,
   onEdgeThicknessChange,
   onResetEdgeThickness,
+  vertexCornerLength,
+  onVertexCornerLengthChange,
+  onResetVertexCornerLength,
+  vertexFlangeParams,
+  onVertexFlangeParamChange,
+  onResetVertexFlangeParam,
+  onResetVertexFlangeParams,
   canCreateFace,
   onCreateFace,
   canAddBrace,
@@ -335,8 +375,27 @@ export function Sidebar({
   const thetaValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'theta')
   const hasTransforms = Array.from(selectedVertexIndices).some((idx) => vertexTransforms.has(idx))
 
-  const edgeThicknessValue = sharedEdgeThicknessValue(selectedEdgeIndices, edgeThickness)
+  const edgeThicknessValue = sharedOverrideValue(selectedEdgeIndices, edgeThickness)
   const hasEdgeOverrides = Array.from(selectedEdgeIndices).some((idx) => edgeThickness.has(idx))
+
+  const flangeDefaults: FlangeShapeParams = {
+    toleranceLongitudinal,
+    toleranceTransverse,
+    centerHoleDiameter,
+    sideHoleDiameter,
+    sideHoleDiameterOffset,
+    overshoot,
+    minSide,
+    millingDiameter: flangeMillingDiameter,
+  }
+  const hasVertexFlangeOverrides = Array.from(selectedVertexIndices).some((idx) =>
+    vertexFlangeParams.has(idx),
+  )
+
+  const vertexCornerLengthValue = sharedOverrideValue(selectedVertexIndices, vertexCornerLength)
+  const hasVertexCornerLengthOverrides = Array.from(selectedVertexIndices).some((idx) =>
+    vertexCornerLength.has(idx),
+  )
 
   const importInputRef = useRef<HTMLInputElement>(null)
 
@@ -975,6 +1034,74 @@ export function Sidebar({
             Shift is where the brace meets each edge, measured from their shared vertex. The plate
             settings after the first two aren&rsquo;t used yet.
           </p>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+        <section className="control-group">
+          <h2>Corner Length</h2>
+          <div className="transform-field">
+            <label>Corner length override (mm)</label>
+            <NumberField
+              value={vertexCornerLengthValue}
+              step={5}
+              min={0}
+              placeholder={vertexCornerLengthValue === null ? 'Mixed' : undefined}
+              clamp={(n) => Math.max(n, 0)}
+              onCommit={onVertexCornerLengthChange}
+            />
+          </div>
+          <p className="hint">
+            Applies to every strut end and flange at the selected vertices. 0 uses the global corner
+            length set in Edge Curvature.
+          </p>
+          <div className="button-row">
+            <button disabled={!hasVertexCornerLengthOverrides} onClick={onResetVertexCornerLength}>
+              Reset Corner Length
+            </button>
+          </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+        <section className="control-group">
+          <h2>Flange Overrides</h2>
+          {FLANGE_PARAM_FIELDS.map(({ key, label }) => {
+            const shared = sharedFlangeOverride(selectedVertexIndices, vertexFlangeParams, key)
+            return (
+              <div className="transform-field" key={key}>
+                <label>{label}</label>
+                <span className="field-with-reset">
+                  <NumberField
+                    value={shared.value}
+                    step={1}
+                    min={0}
+                    placeholder={shared.mixed ? 'Mixed' : `${flangeDefaults[key]} (default)`}
+                    clamp={(n) => Math.max(n, 0)}
+                    onCommit={(v) => onVertexFlangeParamChange(key, v)}
+                  />
+                  <button
+                    className="reset-field"
+                    title="Use the global value"
+                    disabled={!shared.any}
+                    onClick={() => onResetVertexFlangeParam(key)}
+                  >
+                    &times;
+                  </button>
+                </span>
+              </div>
+            )
+          })}
+          <p className="hint">
+            Overrides the Flange section's values for the flange at the selected vertices only. A
+            blank field uses the global value (shown in grey); &times; goes back to it. Overridden
+            vertices are shown in cyan.
+          </p>
+          <div className="button-row">
+            <button disabled={!hasVertexFlangeOverrides} onClick={onResetVertexFlangeParams}>
+              Reset Flange Overrides
+            </button>
+          </div>
         </section>
       )}
 

@@ -44,6 +44,9 @@ const EDGE_OVERRIDE_COLOR_REFERENCE = 300
 // A neutral steel-plate tone for flange solids, distinct from any strut color so the hub
 // hardware reads as its own part rather than blending into the beams it connects.
 const FLANGE_COLOR = new THREE.Color('#b0b4bc')
+// Marks a vertex (Edit) and its flanges (Preview) that have any override of their own (corner
+// length or flange parameters).
+const CORNER_OVERRIDE_COLOR = new THREE.Color('#22d3ee')
 const BRACE_COLOR = '#e05ad0'
 
 // The heatmap color for a given thickness override (or the default tone if there isn't one) -
@@ -110,6 +113,8 @@ interface DomeMeshProps {
   selectedVertexIndices: ReadonlySet<number>
   selectedEdgeIndices: ReadonlySet<number>
   edgeThickness: ReadonlyMap<number, number>
+  vertexCornerLength: ReadonlyMap<number, number>
+  vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   selectedFaceIndices: ReadonlySet<number>
   selectedBraceIndices: ReadonlySet<number>
   centerY: number
@@ -146,6 +151,8 @@ export function DomeMesh({
   selectedVertexIndices,
   selectedEdgeIndices,
   edgeThickness,
+  vertexCornerLength,
+  vertexFlangeParams,
   selectedFaceIndices,
   selectedBraceIndices,
   centerY,
@@ -244,6 +251,8 @@ export function DomeMesh({
       thickness,
       extrudeDistance,
       cornerLength,
+      vertexCornerLength,
+      vertexFlangeParams,
       offsetModifier,
       endGrooveLengthPercent,
       midGrooveLengthPercent,
@@ -273,7 +282,6 @@ export function DomeMesh({
     const sharedRequestFields = {
       requestId,
       centerY,
-      cornerLength,
       halfWidth,
       endGrooveLengthPercent,
       midGrooveLengthPercent,
@@ -282,6 +290,11 @@ export function DomeMesh({
       chamferLength,
       flangeParams,
       flangeColor: [FLANGE_COLOR.r, FLANGE_COLOR.g, FLANGE_COLOR.b] as [number, number, number],
+      flangeOverrideColor: [CORNER_OVERRIDE_COLOR.r, CORNER_OVERRIDE_COLOR.g, CORNER_OVERRIDE_COLOR.b] as [
+        number,
+        number,
+        number,
+      ],
     }
 
     // Runs one batch (a handful of struts, or of flange vertices - never both) in its own fresh
@@ -402,6 +415,8 @@ export function DomeMesh({
     thickness,
     extrudeDistance,
     cornerLength,
+    vertexCornerLength,
+    vertexFlangeParams,
     offsetModifier,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
@@ -506,7 +521,15 @@ export function DomeMesh({
               <sphereGeometry
                 args={[isSelected ? selectedVertexMarkerRadius : vertexMarkerRadius, 16, 16]}
               />
-              <meshStandardMaterial color={isSelected ? '#f5a623' : '#4fd97e'} />
+              <meshStandardMaterial
+                color={
+                  isSelected
+                    ? '#f5a623'
+                    : vertexCornerLength.has(idx) || vertexFlangeParams.has(idx)
+                      ? `#${CORNER_OVERRIDE_COLOR.getHexString()}`
+                      : '#4fd97e'
+                }
+              />
             </mesh>
           )
         })}

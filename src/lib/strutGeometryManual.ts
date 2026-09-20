@@ -279,7 +279,10 @@ function computeStrutBoundaryManualUnguarded(
   center: THREE.Vector3,
   offsetA: number,
   offsetB: number,
-  cornerLength: number,
+  // Each end's own corner length (a vertex can override the global one - see App's
+  // vertexCornerLength).
+  cornerLengthA: number,
+  cornerLengthB: number,
   halfWidth: number,
   endGrooveLengthPercent: number,
   midGrooveLengthPercent: number,
@@ -306,7 +309,8 @@ function computeStrutBoundaryManualUnguarded(
     centerRaw,
     offsetA,
     offsetB,
-    cornerLength,
+    cornerLengthA,
+    cornerLengthB,
     halfWidth,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
@@ -326,7 +330,8 @@ export interface StrutBoundaryManualInput {
   center: [number, number, number];
   offsetA: number;
   offsetB: number;
-  cornerLength: number;
+  cornerLengthA: number;
+  cornerLengthB: number;
   halfWidth: number;
   endGrooveLengthPercent: number;
   midGrooveLengthPercent: number;
@@ -371,10 +376,17 @@ export function strutBoundaryManualInputFromJson(json: string): StrutBoundaryMan
       throw new Error(`"${key}" must be an [x, y, z] array of numbers`);
     }
   }
+  // Dumps from before corner length could differ per end carry a single `cornerLength`.
+  const legacy = input as { cornerLength?: number };
+  if (typeof legacy.cornerLength === "number") {
+    input.cornerLengthA ??= legacy.cornerLength;
+    input.cornerLengthB ??= legacy.cornerLength;
+  }
   for (const key of [
     "offsetA",
     "offsetB",
-    "cornerLength",
+    "cornerLengthA",
+    "cornerLengthB",
     "halfWidth",
     "endGrooveLengthPercent",
     "midGrooveLengthPercent",
@@ -396,7 +408,10 @@ export function computeStrutBoundaryManual(
   center: THREE.Vector3,
   offsetA: number,
   offsetB: number,
-  cornerLength: number,
+  // Each end's own corner length (a vertex can override the global one - see App's
+  // vertexCornerLength).
+  cornerLengthA: number,
+  cornerLengthB: number,
   halfWidth: number,
   endGrooveLengthPercent: number,
   midGrooveLengthPercent: number,
@@ -413,7 +428,8 @@ export function computeStrutBoundaryManual(
       center,
       offsetA,
       offsetB,
-      cornerLength,
+      cornerLengthA,
+      cornerLengthB,
       halfWidth,
       endGrooveLengthPercent,
       midGrooveLengthPercent,
@@ -431,7 +447,8 @@ export function computeStrutBoundaryManual(
           center: center.toArray(),
           offsetA,
           offsetB,
-          cornerLength,
+          cornerLengthA,
+          cornerLengthB,
           halfWidth,
           endGrooveLengthPercent,
           midGrooveLengthPercent,
@@ -767,7 +784,10 @@ export function computeStrutBoundaryManual2D(
   center: Point2D,
   offsetA: number,
   offsetB: number,
-  cornerLength: number,
+  // Each end's own corner length (a vertex can override the global one - see App's
+  // vertexCornerLength).
+  cornerLengthA: number,
+  cornerLengthB: number,
   halfWidth: number,
   endGrooveLengthPercent: number,
   midGrooveLengthPercent: number,
@@ -795,7 +815,7 @@ export function computeStrutBoundaryManual2D(
 
   const endA = precalculateStrutEnd(
     offsetA,
-    cornerLength,
+    cornerLengthA,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
     chamferLength,
@@ -811,7 +831,7 @@ export function computeStrutBoundaryManual2D(
 
   const endB = precalculateStrutEnd(
     offsetB,
-    cornerLength,
+    cornerLengthB,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
     chamferLength,

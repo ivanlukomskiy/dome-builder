@@ -84,6 +84,27 @@ export const DEFAULT_FLANGE_SHAPE_PARAMS: FlangeShapeParams = {
   millingDiameter: 5,
 };
 
+// The flange parameters a single vertex can override (all of them), with the labels the Sidebar
+// shows for them.
+export const FLANGE_PARAM_FIELDS: { key: keyof FlangeShapeParams; label: string }[] = [
+  { key: "toleranceLongitudinal", label: "Tolerance longitudinal (mm)" },
+  { key: "toleranceTransverse", label: "Tolerance transverse (mm)" },
+  { key: "centerHoleDiameter", label: "Center hole diameter (mm)" },
+  { key: "sideHoleDiameter", label: "Side hole diameter (mm)" },
+  { key: "sideHoleDiameterOffset", label: "Side hole diameter offset (mm)" },
+  { key: "overshoot", label: "Overshoot (mm)" },
+  { key: "minSide", label: "Min side (mm)" },
+  { key: "millingDiameter", label: "Flange milling diameter (mm)" },
+];
+
+// The global flange params with one vertex's own overrides (if any) laid over them.
+export function resolveFlangeParams(
+  base: FlangeShapeParams,
+  overrides: Partial<FlangeShapeParams> | undefined,
+): FlangeShapeParams {
+  return overrides ? { ...base, ...overrides } : base;
+}
+
 // The middle of one strut's rectangular tenon hole in the flange plate: which strut (edge), where,
 // the direction along the hole (degrees) and how wide the hole is across it.
 export interface FlangeEdgeMark {

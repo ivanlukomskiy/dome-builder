@@ -2,7 +2,7 @@
 import * as THREE from 'three'
 import { computeStrutPlane } from '../lib/strutGeometry'
 import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
-import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D } from '../lib/braces'
@@ -22,7 +22,6 @@ export interface DxfExportRequest {
   requestId: number
   centerY: number
   strutJobs: StrutGeometryEntry[]
-  cornerLength: number
   halfWidth: number
   endGrooveLengthPercent: number
   midGrooveLengthPercent: number
@@ -68,7 +67,8 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       center,
       job.offsetA,
       job.offsetB,
-      req.cornerLength,
+      job.cornerLengthA,
+      job.cornerLengthB,
       req.halfWidth,
       req.endGrooveLengthPercent,
       req.midGrooveLengthPercent,
@@ -129,7 +129,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
   req.vertices.forEach((vertex, i) => {
     const boundary = computeFlangeBoundary2D(
       { vertexId: vertex.vertexId, edges: vertex.edges },
-      req.flangeParams,
+      resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
     )
     self.postMessage({
       type: 'progress',

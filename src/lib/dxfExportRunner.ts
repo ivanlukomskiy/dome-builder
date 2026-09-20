@@ -66,7 +66,6 @@ export async function runDxfExport(
 
   const shared: Shared = {
     centerY: params.centerY,
-    cornerLength: params.cornerLength,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
     midGrooveLengthPercent: params.midGrooveLengthPercent,

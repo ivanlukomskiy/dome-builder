@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
+import type { FlangeShapeParams } from './flangeGeometry'
 import { downloadJson } from './download'
 
 // A saved config captures the *result* of picking a shape in the "New" tab - the concrete,
@@ -9,7 +10,7 @@ import { downloadJson } from './download'
 // while still choosing a shape), which tab is active, or the undo history (session-only, not
 // worth persisting).
 export interface DomeConfig {
-  version: 13 | 14
+  version: 13 | 14 | 15
   // The "Adjust to a Sphere" target size in Edit, or the shape recipe's own size while still in
   // "New" - kept here (rather than left to reset to its hardcoded default) since it's live,
   // user-facing state either way.
@@ -56,6 +57,12 @@ export interface DomeConfig {
   // Per-edge thickness override, in mm, keyed by edge id; absent means "use the global
   // `thickness` above".
   edgeThickness: [number, number][]
+  // Per-vertex corner length override, in mm, keyed by vertex id; absent means "use the global
+  // `cornerLength` above". Missing in configs older than version 15.
+  vertexCornerLength?: [number, number][]
+  // Per-vertex overrides of any flange parameter, keyed by vertex id (only the overridden ones are
+  // present). Missing in configs saved before this existed.
+  vertexFlangeParams?: [number, Partial<FlangeShapeParams>][]
 }
 
 // The subset of App's state a config captures - plain data in, plain data out, so App can
@@ -84,11 +91,13 @@ export interface DomeState {
   flangeMillingDiameter: number
   vertexTransforms: ReadonlyMap<number, VertexTransform>
   edgeThickness: ReadonlyMap<number, number>
+  vertexCornerLength: ReadonlyMap<number, number>
+  vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
 }
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 14,
+    version: 15,
     diameter: state.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
       id,
@@ -122,6 +131,8 @@ export function serializeConfig(state: DomeState): DomeConfig {
     flangeMillingDiameter: state.flangeMillingDiameter,
     vertexTransforms: Array.from(state.vertexTransforms.entries()),
     edgeThickness: Array.from(state.edgeThickness.entries()),
+    vertexCornerLength: Array.from(state.vertexCornerLength.entries()),
+    vertexFlangeParams: Array.from(state.vertexFlangeParams.entries()),
   }
 }
 
@@ -165,6 +176,8 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     flangeMillingDiameter: config.flangeMillingDiameter,
     vertexTransforms: new Map(config.vertexTransforms),
     edgeThickness: new Map(config.edgeThickness),
+    vertexCornerLength: new Map(config.vertexCornerLength ?? []),
+    vertexFlangeParams: new Map(config.vertexFlangeParams ?? []),
   }
 }
 
@@ -179,8 +192,9 @@ export function loadConfigFromLocalStorage(): DomeConfig | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as DomeConfig
-    // Version 13 predates braces; deserializeConfig fills in an empty set for them.
-    return parsed.version === 13 || parsed.version === 14 ? parsed : null
+    // Version 13 predates braces and 14 predates corner length overrides; deserializeConfig
+    // fills in empty sets for them.
+    return parsed.version === 13 || parsed.version === 14 || parsed.version === 15 ? parsed : null
   } catch {
     return null
   }

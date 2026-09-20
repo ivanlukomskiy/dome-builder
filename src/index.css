@@ -218,6 +218,34 @@ body,
   border-radius: 4px;
 }
 
+.field-with-reset {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field-with-reset .reset-field {
+  width: 22px;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: #21242c;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.field-with-reset .reset-field:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.field-with-reset .reset-field:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .transform-field input[type='number']::placeholder {
   color: var(--text-dim);
   font-style: italic;
