@@ -266,7 +266,7 @@ export function logDrawingPoints(label: string, drawing: Drawing): void {
 // doesn't change anything's shape or relative position) so that center->B comes out pointing
 // straight up (+Y) instead - simpler to reason about, and createShoulderGeometry's own right/up
 // basis (see below) still works out correctly for A even though A isn't vertically aligned.
-export function computeStrutBoundaryManual(
+function computeStrutBoundaryManualUnguarded(
   a: THREE.Vector3,
   b: THREE.Vector3,
   center: THREE.Vector3,
@@ -308,6 +308,143 @@ export function computeStrutBoundaryManual(
     chamferLength,
     braces,
   );
+}
+
+// Everything computeStrutBoundaryManual takes, as plain JSON-friendly data (vectors as [x, y, z]).
+// When the computation throws we dump this to the console; the /strut-shape-debug page can import
+// it ("Import failure JSON") to reproduce the exact same call.
+export interface StrutBoundaryManualInput {
+  a: [number, number, number];
+  b: [number, number, number];
+  center: [number, number, number];
+  offsetA: number;
+  offsetB: number;
+  cornerLength: number;
+  halfWidth: number;
+  endGrooveLengthPercent: number;
+  midGrooveLengthPercent: number;
+  grooveDepth: number;
+  millingDiameter: number;
+  chamferLength: number;
+  braces: StrutBraces;
+}
+
+const NON_FINITE_NUMBERS = new Set(["NaN", "Infinity", "-Infinity"]);
+
+// JSON.stringify turns NaN / Infinity into `null`, which would hide exactly the kind of bad input
+// that tends to cause these failures - so write them as the strings "NaN" / "Infinity" instead
+// (and turn them back into numbers on import).
+export function strutBoundaryManualInputToJson(
+  input: StrutBoundaryManualInput,
+  extra: Record<string, unknown> = {},
+): string {
+  return JSON.stringify(
+    { ...extra, input },
+    (_key, value) => (typeof value === "number" && !Number.isFinite(value) ? String(value) : value),
+    2,
+  );
+}
+
+// Accepts either the full dump (`{ error, input: {...} }`) or a bare input object.
+export function strutBoundaryManualInputFromJson(json: string): StrutBoundaryManualInput {
+  const parsed: unknown = JSON.parse(json, (_key, value) =>
+    typeof value === "string" && NON_FINITE_NUMBERS.has(value) ? Number(value) : value,
+  );
+  const candidate =
+    typeof parsed === "object" && parsed !== null && "input" in parsed
+      ? (parsed as { input: unknown }).input
+      : parsed;
+  if (typeof candidate !== "object" || candidate === null) {
+    throw new Error("Expected a JSON object with the strut inputs");
+  }
+  const input = candidate as Partial<StrutBoundaryManualInput>;
+  for (const key of ["a", "b", "center"] as const) {
+    const v = input[key];
+    if (!Array.isArray(v) || v.length !== 3 || v.some((n) => typeof n !== "number")) {
+      throw new Error(`"${key}" must be an [x, y, z] array of numbers`);
+    }
+  }
+  for (const key of [
+    "offsetA",
+    "offsetB",
+    "cornerLength",
+    "halfWidth",
+    "endGrooveLengthPercent",
+    "midGrooveLengthPercent",
+    "grooveDepth",
+    "millingDiameter",
+    "chamferLength",
+  ] as const) {
+    if (typeof input[key] !== "number") throw new Error(`"${key}" must be a number`);
+  }
+  return { ...(input as StrutBoundaryManualInput), braces: input.braces ?? NO_STRUT_BRACES };
+}
+
+// Public entry point. Same as computeStrutBoundaryManualUnguarded, but if that throws, logs
+// everything needed to reproduce the call as JSON (copy it from the console and paste it into
+// /strut-shape-debug via "Import failure JSON"), then rethrows so callers behave as before.
+export function computeStrutBoundaryManual(
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  center: THREE.Vector3,
+  offsetA: number,
+  offsetB: number,
+  cornerLength: number,
+  halfWidth: number,
+  endGrooveLengthPercent: number,
+  midGrooveLengthPercent: number,
+  grooveDepth: number,
+  millingDiameter: number,
+  chamferLength: number,
+  // Braces lying on the A / B end of this strut (see braces.ts); empty lists mean none.
+  braces: StrutBraces = NO_STRUT_BRACES,
+): StrutBoundaryManualResult {
+  try {
+    return computeStrutBoundaryManualUnguarded(
+      a,
+      b,
+      center,
+      offsetA,
+      offsetB,
+      cornerLength,
+      halfWidth,
+      endGrooveLengthPercent,
+      midGrooveLengthPercent,
+      grooveDepth,
+      millingDiameter,
+      chamferLength,
+      braces,
+    );
+  } catch (err) {
+    try {
+      const json = strutBoundaryManualInputToJson(
+        {
+          a: a.toArray(),
+          b: b.toArray(),
+          center: center.toArray(),
+          offsetA,
+          offsetB,
+          cornerLength,
+          halfWidth,
+          endGrooveLengthPercent,
+          midGrooveLengthPercent,
+          grooveDepth,
+          millingDiameter,
+          chamferLength,
+          braces,
+        },
+        { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) },
+      );
+      console.error(
+        "computeStrutBoundaryManual threw. To reproduce: open /strut-shape-debug and paste the JSON below into \"Import failure JSON\":",
+        err,
+      );
+      console.error(json);
+    } catch (dumpErr) {
+      console.error("computeStrutBoundaryManual threw, and dumping its inputs failed too", dumpErr);
+    }
+    throw err;
+  }
 }
 
 const MARKER_RADIUS = 8;

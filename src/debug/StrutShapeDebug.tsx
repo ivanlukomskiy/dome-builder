@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
 import { drawingToDXF } from '../lib/dxfExport'
+import { strutBoundaryManualInputFromJson, type StrutBoundaryManualInput } from '../lib/strutGeometryManual'
 import type { StrutMesh } from '../lib/replicadCad'
 import {
   BRACE_PARAM_FIELDS,
@@ -9,7 +10,6 @@ import {
   sanitizeBraceParam,
   type BraceParams,
   type StrutBraceEnd,
-  type StrutBraces,
 } from '../lib/braces'
 import { StrutShapeScene, type StrutShapeViewport } from './StrutShapeScene'
 
@@ -62,6 +62,18 @@ const DEFAULT_SHOW_HELPER_POINTS = true
 // full-reloads (e.g. after editing strutGeometryManual.ts) or a manual page refresh.
 const PARAMS_STORAGE_KEY = 'strut-shape-debug:params'
 const VIEWPORT_STORAGE_KEY = 'strut-shape-debug:viewport'
+const IMPORTED_STORAGE_KEY = 'strut-shape-debug:imported-input'
+
+// A computeStrutBoundaryManual call imported from a console failure dump. While set it replaces
+// the params-derived inputs, so the exact failing call is reproduced.
+function loadImportedInput(): StrutBoundaryManualInput | null {
+  try {
+    const raw = localStorage.getItem(IMPORTED_STORAGE_KEY)
+    return raw ? strutBoundaryManualInputFromJson(raw) : null
+  } catch {
+    return null
+  }
+}
 
 function loadParams(): Params {
   try {
@@ -124,6 +136,9 @@ export function StrutShapeDebug() {
     }))
   const setFlag = (field: BooleanParamKey) => (value: boolean) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
+  const [imported, setImported] = useState<StrutBoundaryManualInput | null>(loadImportedInput)
+  const [importText, setImportText] = useState('')
+  const [importError, setImportError] = useState<string | null>(null)
   const [showHelperPoints, setShowHelperPoints] = useState(DEFAULT_SHOW_HELPER_POINTS)
   const [initialViewport, setInitialViewport] = useState<StrutShapeViewport | null>(loadViewport)
   // Bumped on Reset to force StrutShapeScene to remount (via `key`) and re-fit the camera to the
@@ -133,6 +148,27 @@ export function StrutShapeDebug() {
   useEffect(() => {
     localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(params))
   }, [params])
+
+  const handleImport = () => {
+    try {
+      const input = strutBoundaryManualInputFromJson(importText)
+      // Stored with "NaN"/"Infinity" as strings, which the loader turns back into numbers.
+      localStorage.setItem(
+        IMPORTED_STORAGE_KEY,
+        JSON.stringify(input, (_k, v) => (typeof v === 'number' && !Number.isFinite(v) ? String(v) : v)),
+      )
+      setImported(input)
+      setImportError(null)
+      setImportText('')
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleClearImported = () => {
+    localStorage.removeItem(IMPORTED_STORAGE_KEY)
+    setImported(null)
+  }
 
   const handleViewportChange = (viewport: StrutShapeViewport) => {
     localStorage.setItem(VIEWPORT_STORAGE_KEY, JSON.stringify(viewport))
@@ -159,55 +195,73 @@ export function StrutShapeDebug() {
         await ensureReplicadReady()
         if (cancelled) return
 
-        const {
-          radius,
-          angleDeg,
-          offset1,
-          offset2,
-          cornerLength,
-          width,
-          endGrooveLengthPercent,
-          midGrooveLengthPercent,
-          grooveDepth,
-          millingDiameter,
-          chamferLength,
-          braceAEnabled,
-          braceA,
-          braceBEnabled,
-          braceB,
-        } = params
-        const center = new THREE.Vector3(0, 0, 0)
-        const angleRad = angleDeg * DEG2RAD
-        const a = new THREE.Vector3(radius * 1.11, 0, 0)
-        const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
+        let call: StrutBoundaryManualInput
+        if (imported) {
+          call = imported
+        } else {
+          const {
+            radius,
+            angleDeg,
+            offset1,
+            offset2,
+            cornerLength,
+            width,
+            endGrooveLengthPercent,
+            midGrooveLengthPercent,
+            grooveDepth,
+            millingDiameter,
+            chamferLength,
+            braceAEnabled,
+            braceA,
+            braceBEnabled,
+            braceB,
+          } = params
+          const angleRad = angleDeg * DEG2RAD
+          const a = new THREE.Vector3(radius * 1.11, 0, 0)
+          const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
-        const chord = a.distanceTo(b)
-        const braceEnd = (braceId: number, brace: BraceParams): StrutBraceEnd => ({
-          braceId,
-          params: brace,
-          distanceFromVertex: brace.shift * chord,
-          otherEdgeId: braceId,
-          otherEdgeDirection: [0, 0, 1],
-        })
-        const braces: StrutBraces = {
-          a: braceAEnabled ? [braceEnd(0, braceA)] : [],
-          b: braceBEnabled ? [braceEnd(1, braceB)] : [],
+          const chord = a.distanceTo(b)
+          const braceEnd = (braceId: number, brace: BraceParams): StrutBraceEnd => ({
+            braceId,
+            params: brace,
+            distanceFromVertex: brace.shift * chord,
+            otherEdgeId: braceId,
+            otherEdgeDirection: [0, 0, 1],
+          })
+          call = {
+            a: a.toArray(),
+            b: b.toArray(),
+            center: [0, 0, 0],
+            offsetA: offset1,
+            offsetB: offset2,
+            cornerLength,
+            halfWidth: width / 2,
+            endGrooveLengthPercent,
+            midGrooveLengthPercent,
+            grooveDepth,
+            millingDiameter,
+            chamferLength,
+            braces: {
+              a: braceAEnabled ? [braceEnd(0, braceA)] : [],
+              b: braceBEnabled ? [braceEnd(1, braceB)] : [],
+            },
+          }
         }
 
         const result = computeStrutBoundaryManual(
-          a,
-          b,
-          center,
-          offset1,
-          offset2,
-          cornerLength,
-          width / 2,
-          endGrooveLengthPercent,
-          midGrooveLengthPercent,
-          grooveDepth,
-          millingDiameter,
-          chamferLength,
-          braces,
+          new THREE.Vector3(...call.a),
+          new THREE.Vector3(...call.b),
+          new THREE.Vector3(...call.center),
+          call.offsetA,
+          call.offsetB,
+          call.cornerLength,
+          call.halfWidth,
+          call.endGrooveLengthPercent,
+          call.midGrooveLengthPercent,
+          call.grooveDepth,
+          call.millingDiameter,
+          call.chamferLength,
+          call.braces,
         )
         if (cancelled) return
 
@@ -236,7 +290,7 @@ export function StrutShapeDebug() {
     return () => {
       cancelled = true
     }
-  }, [params])
+  }, [params, imported])
 
   const dxf = state.status === 'ready' ? state.dxf : null
   const downloadDxf = () => {
@@ -272,6 +326,41 @@ export function StrutShapeDebug() {
           <code>src/lib/strutGeometryManual.ts</code> returns. Edit that file and save - this page
           reloads automatically.
         </p>
+
+        <section className="control-group">
+          <h2>Import failure JSON</h2>
+          {imported ? (
+            <>
+              <p className="hint">
+                Showing an <strong>imported call</strong>; the controls below are ignored until you
+                clear it.
+              </p>
+              <div className="button-row">
+                <button type="button" onClick={handleClearImported}>
+                  Clear imported input
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="hint">
+              If <code>computeStrutBoundaryManual</code> throws elsewhere in the app, it logs a JSON
+              dump to the console. Paste it here to reproduce that exact call.
+            </p>
+          )}
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            placeholder='{ "error": "...", "input": { "a": [...], ... } }'
+            rows={5}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 11 }}
+          />
+          <div className="button-row">
+            <button type="button" onClick={handleImport} disabled={!importText.trim()}>
+              Load JSON
+            </button>
+          </div>
+          {importError && <p className="hint" style={{ color: '#ff6b6b' }}>{importError}</p>}
+        </section>
 
         <label className="checkbox-field">
           <input
