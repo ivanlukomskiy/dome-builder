@@ -3,7 +3,14 @@ import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
 import { drawingToDXF } from '../lib/dxfExport'
 import type { StrutMesh } from '../lib/replicadCad'
-import { clampBraceShift, DEFAULT_BRACE_PARAMS, type StrutBraceEnd, type StrutBraces } from '../lib/braces'
+import {
+  BRACE_PARAM_FIELDS,
+  DEFAULT_BRACE_PARAMS,
+  sanitizeBraceParam,
+  type BraceParams,
+  type StrutBraceEnd,
+  type StrutBraces,
+} from '../lib/braces'
 import { StrutShapeScene, type StrutShapeViewport } from './StrutShapeScene'
 
 const DEG2RAD = Math.PI / 180
@@ -20,15 +27,12 @@ interface Params {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
-  // A brace at end A / B of the strut (see braces.ts), `shift` being its fraction of the A-B length.
+  // A brace at end A / B of the strut and all of its properties (see braces.ts), `shift` being its
+  // fraction of the A-B length.
   braceAEnabled: boolean
-  braceAShift: number
-  braceAWidth: number
-  braceAMaxPlateWidth: number
+  braceA: BraceParams
   braceBEnabled: boolean
-  braceBShift: number
-  braceBWidth: number
-  braceBMaxPlateWidth: number
+  braceB: BraceParams
 }
 
 type NumberParamKey = { [K in keyof Params]: Params[K] extends number ? K : never }[keyof Params]
@@ -47,13 +51,9 @@ const DEFAULT_PARAMS: Params = {
   millingDiameter: 8,
   chamferLength: 6,
   braceAEnabled: false,
-  braceAShift: DEFAULT_BRACE_PARAMS.shift,
-  braceAWidth: DEFAULT_BRACE_PARAMS.width,
-  braceAMaxPlateWidth: DEFAULT_BRACE_PARAMS.maxPlateWidth,
+  braceA: { ...DEFAULT_BRACE_PARAMS },
   braceBEnabled: false,
-  braceBShift: DEFAULT_BRACE_PARAMS.shift,
-  braceBWidth: DEFAULT_BRACE_PARAMS.width,
-  braceBMaxPlateWidth: DEFAULT_BRACE_PARAMS.maxPlateWidth,
+  braceB: { ...DEFAULT_BRACE_PARAMS },
 }
 
 const DEFAULT_SHOW_HELPER_POINTS = true
@@ -69,7 +69,13 @@ function loadParams(): Params {
     if (!raw) return DEFAULT_PARAMS
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return DEFAULT_PARAMS
-    return { ...DEFAULT_PARAMS, ...parsed }
+    const saved = parsed as Partial<Params>
+    return {
+      ...DEFAULT_PARAMS,
+      ...saved,
+      braceA: { ...DEFAULT_BRACE_PARAMS, ...saved.braceA },
+      braceB: { ...DEFAULT_BRACE_PARAMS, ...saved.braceB },
+    }
   } catch {
     return DEFAULT_PARAMS
   }
@@ -111,6 +117,11 @@ type State =
 export function StrutShapeDebug() {
   const [params, setParams] = useState<Params>(loadParams)
   const setParam = (field: NumberParamKey) => (value: number) => setParams((prev) => ({ ...prev, [field]: value }))
+  const setBraceParam = (brace: 'braceA' | 'braceB', field: keyof BraceParams) => (value: number) =>
+    setParams((prev) => ({
+      ...prev,
+      [brace]: { ...prev[brace], [field]: sanitizeBraceParam(field, value) },
+    }))
   const setFlag = (field: BooleanParamKey) => (value: boolean) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
   const [showHelperPoints, setShowHelperPoints] = useState(DEFAULT_SHOW_HELPER_POINTS)
@@ -161,13 +172,9 @@ export function StrutShapeDebug() {
           millingDiameter,
           chamferLength,
           braceAEnabled,
-          braceAShift,
-          braceAWidth,
-          braceAMaxPlateWidth,
+          braceA,
           braceBEnabled,
-          braceBShift,
-          braceBWidth,
-          braceBMaxPlateWidth,
+          braceB,
         } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
@@ -175,20 +182,15 @@ export function StrutShapeDebug() {
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
         const chord = a.distanceTo(b)
-        const braceEnd = (
-          braceId: number,
-          shift: number,
-          width: number,
-          maxPlateWidth: number,
-        ): StrutBraceEnd => ({
+        const braceEnd = (braceId: number, brace: BraceParams): StrutBraceEnd => ({
           braceId,
-          params: { ...DEFAULT_BRACE_PARAMS, shift, width, maxPlateWidth },
-          distanceFromVertex: shift * chord,
+          params: brace,
+          distanceFromVertex: brace.shift * chord,
           otherEdgeId: braceId,
         })
         const braces: StrutBraces = {
-          a: braceAEnabled ? [braceEnd(0, braceAShift, braceAWidth, braceAMaxPlateWidth)] : [],
-          b: braceBEnabled ? [braceEnd(1, braceBShift, braceBWidth, braceBMaxPlateWidth)] : [],
+          a: braceAEnabled ? [braceEnd(0, braceA)] : [],
+          b: braceBEnabled ? [braceEnd(1, braceB)] : [],
         }
 
         const result = computeStrutBoundaryManual(
@@ -351,73 +353,40 @@ export function StrutShapeDebug() {
 
         <section className="control-group">
           <h2>Braces</h2>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={params.braceAEnabled}
-              onChange={(e) => setFlag('braceAEnabled')(e.target.checked)}
-            />
-            Brace at end A
-          </label>
-          <div className="transform-field">
-            <label>Shift A (0-1)</label>
-            <NumberField
-              value={params.braceAShift}
-              step={0.05}
-              min={0.01}
-              clamp={clampBraceShift}
-              onCommit={setParam('braceAShift')}
-            />
-          </div>
-          <div className="transform-field">
-            <label>Brace width A (mm)</label>
-            <NumberField value={params.braceAWidth} step={5} min={0} onCommit={setParam('braceAWidth')} />
-          </div>
-          <div className="transform-field">
-            <label>Max plate width A (mm)</label>
-            <NumberField
-              value={params.braceAMaxPlateWidth}
-              step={5}
-              min={0}
-              onCommit={setParam('braceAMaxPlateWidth')}
-            />
-          </div>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={params.braceBEnabled}
-              onChange={(e) => setFlag('braceBEnabled')(e.target.checked)}
-            />
-            Brace at end B
-          </label>
-          <div className="transform-field">
-            <label>Shift B (0-1)</label>
-            <NumberField
-              value={params.braceBShift}
-              step={0.05}
-              min={0.01}
-              clamp={clampBraceShift}
-              onCommit={setParam('braceBShift')}
-            />
-          </div>
-          <div className="transform-field">
-            <label>Brace width B (mm)</label>
-            <NumberField value={params.braceBWidth} step={5} min={0} onCommit={setParam('braceBWidth')} />
-          </div>
-          <div className="transform-field">
-            <label>Max plate width B (mm)</label>
-            <NumberField
-              value={params.braceBMaxPlateWidth}
-              step={5}
-              min={0}
-              onCommit={setParam('braceBMaxPlateWidth')}
-            />
-          </div>
+          {(['A', 'B'] as const).map((end) => {
+            const enabledKey = end === 'A' ? 'braceAEnabled' : 'braceBEnabled'
+            const braceKey = end === 'A' ? 'braceA' : 'braceB'
+            return (
+              <div key={end}>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={params[enabledKey]}
+                    onChange={(e) => setFlag(enabledKey)(e.target.checked)}
+                  />
+                  Brace at end {end}
+                </label>
+                {BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
+                  <div className="transform-field" key={key}>
+                    <label>{`${end}: ${label}`}</label>
+                    <NumberField
+                      value={params[braceKey][key]}
+                      step={step}
+                      min={0}
+                      clamp={(n) => sanitizeBraceParam(key, n)}
+                      onCommit={setBraceParam(braceKey, key)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )
+          })}
           <p className="hint">
             Each enabled brace adds a <code>braceCenter</code> helper point (midway across the
             strut&rsquo;s width, where the ray from the center through the brace&rsquo;s position
-            along the strut crosses it) and the 4 corners of its plate rectangle: brace width long
-            along the strut, as wide as fits between the arcs across it, up to the max plate width.
+            along the strut crosses it) and its plate: a rounded rectangle, brace width long along
+            the strut and as wide as fits between the arcs across it (up to the max plate width),
+            with 6 holes. The 4 corner holes are also cut through the strut.
           </p>
         </section>
       </aside>

@@ -135,21 +135,37 @@ export function braceRectInArcBand(
 // strut end's axis, y across it): one in each corner, `offsetLongitudinal` in from the plate's
 // ends (along x) and `offsetTransverse` in from its long sides (along y), plus one midway between
 // the two corner holes at each end - so those two lie on the line through the center along the
-// axis.
+// axis. The corner holes are also punched through the strut itself; the middle ones only go in the
+// plate.
+export interface BracePlateHoles {
+  corner: Pt[];
+  middle: Pt[];
+}
+
 export function bracePlateHoleCenters(
   halfAlong: number,
   halfAcross: number,
   offsetLongitudinal: number,
   offsetTransverse: number,
-): Pt[] {
+): BracePlateHoles {
   const x = halfAlong - offsetLongitudinal;
   const y = halfAcross - offsetTransverse;
-  return [
-    [x, y],
-    [-x, y],
-    [-x, -y],
-    [x, -y],
-    [x, 0],
-    [-x, 0],
-  ];
+  return {
+    corner: [
+      [x, y],
+      [-x, y],
+      [-x, -y],
+      [x, -y],
+    ],
+    middle: [
+      [x, 0],
+      [-x, 0],
+    ],
+  };
+}
+
+// Moves points given in the plate's own frame (x along the strut end's axis `u`, y across it, origin
+// at the plate's center `c`) into the strut's frame.
+export function placeInPlateFrame(c: Pt, u: Pt, local: Pt[]): Pt[] {
+  return local.map(([x, y]) => [c[0] + x * u[0] - y * u[1], c[1] + x * u[1] + y * u[0]]);
 }

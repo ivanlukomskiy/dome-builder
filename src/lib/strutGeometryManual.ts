@@ -6,6 +6,7 @@ import { NO_STRUT_BRACES, type BraceParams, type StrutBraces } from "./braces";
 import {
   arcPointAtAngle,
   bracePlateHoleCenters,
+  placeInPlateFrame,
   braceRectInArcBand,
   type BraceRect,
   type ArcEndpoints,
@@ -336,12 +337,13 @@ function drawBracePlate(
       : drawRoundedRectangle(width, height);
 
   if (params.plateHoleDiameter > 0) {
-    for (const holeCenter of bracePlateHoleCenters(
+    const holes = bracePlateHoleCenters(
       rect.halfAlong,
       rect.halfAcross,
       params.plateHoleOffsetLongitudinal,
       params.plateHoleOffsetTransverse,
-    )) {
+    );
+    for (const holeCenter of [...holes.corner, ...holes.middle]) {
       plate = plate.cut(
         drawCircle(params.plateHoleDiameter / 2).translate(holeCenter),
       );
@@ -672,6 +674,8 @@ export function computeStrutBoundaryManual2D(
     ["A", a, chordDir, braces.a],
     ["B", b, scale2(chordDir, -1), braces.b],
   ];
+  // Centers of the holes to punch through the strut itself (each brace plate's corner holes).
+  const strutHoles: [Point2D, number][] = [];
   for (const [end, origin, dir, endBraces] of braceEnds) {
     for (const brace of endBraces) {
       const braceCenterNoRounding = add2(
@@ -730,6 +734,21 @@ export function computeStrutBoundaryManual2D(
         const plate = rect
           ? drawBracePlate(braceCenter, endAxis, rect, brace.params)
           : null;
+        if (rect && brace.params.plateHoleDiameter > 0) {
+          const holes = bracePlateHoleCenters(
+            rect.halfAlong,
+            rect.halfAcross,
+            brace.params.plateHoleOffsetLongitudinal,
+            brace.params.plateHoleOffsetTransverse,
+          );
+          for (const hole of placeInPlateFrame(
+            braceCenter,
+            endAxis,
+            holes.corner,
+          )) {
+            strutHoles.push([hole, brace.params.plateHoleDiameter / 2]);
+          }
+        }
         if (plate) {
           helpers.push({
             drawing: plate,
@@ -741,7 +760,12 @@ export function computeStrutBoundaryManual2D(
     }
   }
 
-  const main = strutA.fuse(arcBody).fuse(strutB)
+  let main = strutA.fuse(arcBody).fuse(strutB);
+
+  // The brace plates' corner holes go through the strut too.
+  for (const [holeCenter, holeRadius] of strutHoles) {
+    main = main.cut(drawCircle(holeRadius).translate(holeCenter));
+  }
 
   return { main: main, braceA: null, braceB: null, helpers };
 }

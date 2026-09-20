@@ -4,6 +4,7 @@ import {
   isInsideArcBand,
   braceRectInArcBand,
   bracePlateHoleCenters,
+  placeInPlateFrame,
   rectCorners,
   rectFitsInBand,
   type ArcEndpoints,
@@ -107,19 +108,29 @@ describe("braceRectInArcBand dimensions", () => {
 describe("bracePlateHoleCenters", () => {
   it("puts holes in the 4 corners plus one midway across each end", () => {
     const holes = bracePlateHoleCenters(25, 40, 7, 9);
-    expect(holes).toHaveLength(6);
     // corners: 7 in from each end (x), 9 in from each long side (y)
-    expect(holes.slice(0, 4)).toEqual([
+    expect(holes.corner).toEqual([
       [18, 31],
       [-18, 31],
       [-18, -31],
       [18, -31],
     ]);
     // the other two lie on the line through the center along the axis (y = 0), at the ends' columns
-    expect(holes.slice(4)).toEqual([
+    expect(holes.middle).toEqual([
       [18, 0],
       [-18, 0],
     ]);
+  });
+});
+
+describe("placeInPlateFrame", () => {
+  it("maps x along the axis and y across it (a quarter turn counter-clockwise from it)", () => {
+    const placed = placeInPlateFrame([10, 20], [0, 1], [[3, 0], [0, 2]]);
+    // axis is +y, so x -> +y and y -> -x
+    expect(placed[0][0]).toBeCloseTo(10, 9);
+    expect(placed[0][1]).toBeCloseTo(23, 9);
+    expect(placed[1][0]).toBeCloseTo(8, 9);
+    expect(placed[1][1]).toBeCloseTo(20, 9);
   });
 });
 
