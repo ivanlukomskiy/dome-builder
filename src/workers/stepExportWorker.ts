@@ -19,7 +19,6 @@ declare const self: DedicatedWorkerGlobalScope
 
 export interface StepExportRequest {
   requestId: number
-  centerY: number
   strutJobs: StrutGeometryEntry[]
   // Brace bodies to export (see braceSolid.ts's pairBracePoints) - a batch of these is all a
   // 'braces' worker does, and strutJobs/vertices are empty then.
@@ -59,7 +58,7 @@ async function buildStepExports(
   const { ensureReplicadReady, buildStrutStepFromDrawing } = await import('../lib/replicadCad')
   await ensureReplicadReady()
 
-  const center = new THREE.Vector3(0, req.centerY, 0)
+  const center = new THREE.Vector3(0, 0, 0)
   const pieces: StepExportPiece[] = []
   // Each strut's brace plate end points in 3D, for the caller to pair up into brace bodies.
   const bracePoints: BracePoints[] = []

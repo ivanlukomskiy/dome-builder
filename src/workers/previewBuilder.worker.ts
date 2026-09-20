@@ -34,7 +34,6 @@ export interface StrutBuildJob extends StrutGeometryEntry {
 
 export interface PreviewBuildRequest {
   requestId: number
-  centerY: number
   strutJobs: StrutBuildJob[]
   halfWidth: number
   endGrooveLengthPercent: number
@@ -75,7 +74,7 @@ async function buildPreview(
   await ensureReplicadReady()
   self.postMessage({ type: 'ready', requestId: req.requestId } satisfies PreviewWorkerMessage)
 
-  const center = new THREE.Vector3(0, req.centerY, 0)
+  const center = new THREE.Vector3(0, 0, 0)
   const pieces: PreviewPiece[] = []
   // Each strut's brace plate end points, in 3D - the main thread pairs them up per brace and builds
   // the brace solids (see braceSolid.ts).

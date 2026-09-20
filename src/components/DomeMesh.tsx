@@ -117,7 +117,6 @@ interface DomeMeshProps {
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   selectedFaceIndices: ReadonlySet<number>
   selectedBraceIndices: ReadonlySet<number>
-  centerY: number
   extrudeDistance: number
   thickness: number
   cornerLength: number
@@ -155,7 +154,6 @@ export function DomeMesh({
   vertexFlangeParams,
   selectedFaceIndices,
   selectedBraceIndices,
-  centerY,
   extrudeDistance,
   thickness,
   cornerLength,
@@ -246,7 +244,6 @@ export function DomeMesh({
     const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs({
       data,
       transformedVertices,
-      centerY,
       edgeThickness,
       thickness,
       extrudeDistance,
@@ -281,7 +278,6 @@ export function DomeMesh({
 
     const sharedRequestFields = {
       requestId,
-      centerY,
       halfWidth,
       endGrooveLengthPercent,
       midGrooveLengthPercent,
@@ -410,7 +406,6 @@ export function DomeMesh({
     mode,
     data,
     transformedVertices,
-    centerY,
     edgeThickness,
     thickness,
     extrudeDistance,
@@ -611,7 +606,7 @@ export function DomeMesh({
           </mesh>
         )
       })}
-      <mesh position={[0, centerY, 0]}>
+      <mesh position={[0, 0, 0]}>
         <sphereGeometry args={[vertexMarkerRadius, 16, 16]} />
         <meshStandardMaterial color="#f5e050" />
       </mesh>

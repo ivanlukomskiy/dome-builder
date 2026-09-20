@@ -5,7 +5,6 @@ import {
   addMidpointsBetween,
   applyVertexTransforms,
   computePolyhedron,
-  computeTransformToPosition,
   connectVertexPairs,
   DEFAULT_DIAMETER_MM,
   DEFAULT_VERTEX_TRANSFORM,
@@ -19,7 +18,6 @@ import {
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
   pruneToLayerCount,
-  scaleToRadius,
   SHAPE_AXES,
 } from './lib/polyhedra'
 import {
@@ -107,7 +105,6 @@ const DEFAULT_SHAPE_DATA = computePolyhedron(
 const DEFAULT_LAYER_COUNT = Math.ceil(DEFAULT_SHAPE_DATA.layers.length / 2)
 const DEFAULT_SCENE_DATA = pruneToLayerCount(DEFAULT_SHAPE_DATA, DEFAULT_LAYER_COUNT)
 
-const DEFAULT_CENTER_Z = 0
 const DEFAULT_EXTRUDE_DISTANCE = 125
 const DEFAULT_THICKNESS = 30
 const DEFAULT_CORNER_LENGTH = 200
@@ -120,6 +117,7 @@ const DEFAULT_MILLING_DIAMETER = 5
 const DEFAULT_CHAMFER_LENGTH = 6
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
+const EMPTY_VERTEX_TRANSFORMS: ReadonlyMap<number, VertexTransform> = new Map()
 const EMPTY_EDGE_THICKNESS: ReadonlyMap<number, number> = new Map()
 const EMPTY_VERTEX_CORNER_LENGTH: ReadonlyMap<number, number> = new Map()
 const EMPTY_VERTEX_FLANGE_PARAMS: ReadonlyMap<number, Partial<FlangeShapeParams>> = new Map()
@@ -176,13 +174,9 @@ function App() {
   const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions, diameter)
   const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions, diameter)
   const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s, diameter)
-  // In "New" a diameter change is part of the shape recipe (regenerates the preview and marks
-  // it dirty to commit); in "Edit" it's just the target size "Adjust to a Sphere" snaps onto,
-  // so it doesn't touch the committed geometry on its own.
-  const handleDiameterChange = (d: number) => {
-    if (mode === 'new') setNewShapeParams(shape, axis, subdivisions, d)
-    else setDiameter(d)
-  }
+  // The diameter is part of the shape recipe (regenerates the preview and marks it dirty to
+  // commit) - it's only editable in "New".
+  const handleDiameterChange = (d: number) => setNewShapeParams(shape, axis, subdivisions, d)
 
   // The committed geometry actually being edited/previewed - vertices, edges, and faces, plain
   // and concrete, with bounded undo/redo over every structural edit (delete/add). Only reset
@@ -224,8 +218,6 @@ function App() {
     new Map(initial?.vertexTransforms ?? []),
   )
 
-  // Sphere center: a fixed point on the main axis (x = 0, radius = 0), at this height in mm.
-  const [centerZ, setCenterZ] = useState(initial?.centerZ ?? DEFAULT_CENTER_Z)
   const [extrudeDistance, setExtrudeDistance] = useState(
     initial?.extrudeDistance ?? DEFAULT_EXTRUDE_DISTANCE,
   )
@@ -326,12 +318,20 @@ function App() {
     if (bracePlateDirty) sceneHistory.commit(applyBracePlateParams(sceneData, bracePlateDraft))
   }
 
+  // xyz positions of every vertex: its polar coordinates plus its polar transform diff.
   const transformedVertices = useMemo(
     () => applyVertexTransforms(sceneData.vertices, vertexTransforms),
     [sceneData.vertices, vertexTransforms],
   )
-
-  const centerY = centerZ
+  // The same without any transform - the base positions selection grouping works against.
+  const canonicalVertices = useMemo(
+    () => applyVertexTransforms(sceneData.vertices, EMPTY_VERTEX_TRANSFORMS),
+    [sceneData.vertices],
+  )
+  const previewVertices = useMemo(
+    () => applyVertexTransforms(previewSceneData.vertices, EMPTY_VERTEX_TRANSFORMS),
+    [previewSceneData.vertices],
+  )
 
   // The "New" tab's shape/axis choice no longer describes committed geometry after edits, but
   // it's still the best guess we have for the model's rotational symmetry.
@@ -342,8 +342,8 @@ function App() {
 
     // Grouping is always done against base (untransformed) positions, so it stays stable
     // regardless of any transform edits.
-    const positionOf = (id: number) => sceneData.vertices.get(id)!
-    const candidateIds = Array.from(sceneData.vertices.keys())
+    const positionOf = (id: number) => canonicalVertices.get(id)!
+    const candidateIds = Array.from(canonicalVertices.keys())
 
     let group: number[]
     if (selectionMode === 'layer') {
@@ -361,7 +361,7 @@ function App() {
     if (mode !== 'edit' || editTarget !== 'edges') return
 
     const edgeById = (eid: number): Edge => sceneData.edges.get(eid)!
-    const positionOf = (vid: number) => sceneData.vertices.get(vid)!
+    const positionOf = (vid: number) => canonicalVertices.get(vid)!
     const midpointOf = (eid: number) => edgeMidpoint(edgeById(eid), positionOf)
     const candidateIds = Array.from(sceneData.edges.keys())
 
@@ -381,7 +381,7 @@ function App() {
     if (mode !== 'edit' || editTarget !== 'faces') return
 
     const faceById = (fid: number): Face => sceneData.faces.get(fid)!
-    const positionOf = (vid: number) => sceneData.vertices.get(vid)!
+    const positionOf = (vid: number) => canonicalVertices.get(vid)!
     const centroidOf = (fid: number) => faceCentroid(faceById(fid), positionOf)
     const candidateIds = Array.from(sceneData.faces.keys())
 
@@ -628,40 +628,6 @@ function App() {
     setSelectedVertexIndices(new Set())
   }
 
-  // Snaps every vertex onto the sphere of the given diameter around the gravity center, moving
-  // each vertex along its own ray from that center out to that fixed radius, replacing any
-  // transform it already had.
-  const handleAdjustToSphere = () => {
-    const allIds = Array.from(sceneData.vertices.keys())
-    if (allIds.length === 0) return
-
-    const currentPositionOf = (id: number) => transformedVertices.get(id)!
-    const canonicalPositionOf = (id: number) => sceneData.vertices.get(id)!
-
-    const targetRadius = diameter / 2
-
-    setVertexTransforms((prev) => {
-      const next = new Map(prev)
-      for (const id of allIds) {
-        const current = currentPositionOf(id)
-        const target = scaleToRadius(current.x, current.y, current.z, centerY, targetRadius)
-        const t = computeTransformToPosition(canonicalPositionOf(id), target)
-        if (isDefaultVertexTransform(t)) next.delete(id)
-        else next.set(id, t)
-      }
-      return next
-    })
-  }
-
-  // Lowers (or raises) the gravity center so it sits at the same height as the model's lowest
-  // vertex - i.e. the dome's base rests exactly on the center's plane.
-  const handleGroundCenter = () => {
-    if (transformedVertices.size === 0) return
-    let minY = Infinity
-    for (const p of transformedVertices.values()) minY = Math.min(minY, p.y)
-    setCenterZ(minY)
-  }
-
   // "New" opens from a button now, rather than living in the Edit/Preview switcher - remember
   // where to come back to when it closes.
   const handleOpenNew = () => {
@@ -685,7 +651,6 @@ function App() {
     setSelectedBraceIndices(new Set())
     setBracePlateDraft(DEFAULT_BRACE_PLATE_PARAMS)
     setEditTarget('vertices')
-    setCenterZ(DEFAULT_CENTER_Z)
     setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
     setThickness(DEFAULT_THICKNESS)
     setCornerLength(DEFAULT_CORNER_LENGTH)
@@ -734,7 +699,6 @@ function App() {
     setDiameter(state.diameter)
     sceneHistory.reset(state.sceneData)
     setSelectionMode(state.selectionMode)
-    setCenterZ(state.centerZ)
     setExtrudeDistance(state.extrudeDistance)
     setThickness(state.thickness)
     setCornerLength(state.cornerLength)
@@ -789,7 +753,6 @@ function App() {
       diameter,
       sceneData,
       selectionMode,
-      centerZ,
       extrudeDistance,
       thickness,
       cornerLength,
@@ -820,7 +783,6 @@ function App() {
     diameter,
     sceneData,
     selectionMode,
-    centerZ,
     extrudeDistance,
     thickness,
     cornerLength,
@@ -866,7 +828,6 @@ function App() {
     const edgesInfo = computeEdgesInfo({
       data: sceneData,
       transformedVertices,
-      centerY,
       edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? appliedPreviewParams.thickness,
       cornerLength: appliedPreviewParams.cornerLength,
       vertexCornerLength,
@@ -887,7 +848,6 @@ function App() {
     {
       data: sceneData,
       transformedVertices,
-      centerY,
       edgeThickness,
       thickness: appliedPreviewParams.thickness,
       extrudeDistance: appliedPreviewParams.extrudeDistance,
@@ -988,7 +948,6 @@ function App() {
         canAddPoints={canPairVertices}
         onAddPoints={handleAddPoints}
         onConnectVertices={handleConnectVertices}
-        onAdjustToSphere={handleAdjustToSphere}
         selectedEdgeCount={selectedEdgeIndices.size}
         selectedEdgeIndices={selectedEdgeIndices}
         onDeleteSelectedEdges={handleDeleteSelectedEdges}
@@ -1012,9 +971,6 @@ function App() {
         onDeleteSelectedBraces={handleDeleteSelectedBraces}
         selectedFaceCount={selectedFaceIndices.size}
         onDeleteSelectedFaces={handleDeleteSelectedFaces}
-        centerZ={centerZ}
-        onCenterZChange={setCenterZ}
-        onGroundCenter={handleGroundCenter}
         extrudeDistance={extrudeDistance}
         onExtrudeDistanceChange={setExtrudeDistance}
         thickness={thickness}
@@ -1064,7 +1020,7 @@ function App() {
         editTarget={editTarget}
         diameter={diameter}
         data={isNew ? previewSceneData : sceneData}
-        transformedVertices={isNew ? previewSceneData.vertices : transformedVertices}
+        transformedVertices={isNew ? previewVertices : transformedVertices}
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}
         selectedEdgeIndices={isNew ? EMPTY_INDEX_SET : selectedEdgeIndices}
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
@@ -1072,7 +1028,6 @@ function App() {
         vertexFlangeParams={isNew ? EMPTY_VERTEX_FLANGE_PARAMS : vertexFlangeParams}
         selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
         selectedBraceIndices={isNew ? EMPTY_INDEX_SET : liveSelectedBraceIndices}
-        centerY={centerY}
         extrudeDistance={appliedPreviewParams.extrudeDistance}
         thickness={appliedPreviewParams.thickness}
         cornerLength={appliedPreviewParams.cornerLength}

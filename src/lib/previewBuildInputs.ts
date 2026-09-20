@@ -42,7 +42,6 @@ export interface PreviewBuildInputs {
 export interface PreviewBuildInputParams {
   data: SceneData
   transformedVertices: ReadonlyMap<number, THREE.Vector3>
-  centerY: number
   edgeThickness: ReadonlyMap<number, number>
   thickness: number
   extrudeDistance: number
@@ -63,7 +62,6 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
   const {
     data,
     transformedVertices,
-    centerY,
     edgeThickness,
     thickness,
     extrudeDistance,
@@ -86,7 +84,7 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     posB: transformedVertices.get(b)!,
   }))
 
-  const offsets = computeEdgeEndOffsets(data, transformedVertices, centerY, (edgeId) => edgeThickness.get(edgeId) ?? thickness)
+  const offsets = computeEdgeEndOffsets(data, transformedVertices, (edgeId) => edgeThickness.get(edgeId) ?? thickness)
   const halfWidth = extrudeDistance / 2
   const bracesByEdge = indexBracesByEdge(data.braces)
 
@@ -118,7 +116,6 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
   const edgesInfo = computeEdgesInfo({
     data,
     transformedVertices,
-    centerY,
     edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? thickness,
     cornerLength,
     vertexCornerLength,

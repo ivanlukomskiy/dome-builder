@@ -61,7 +61,6 @@ export interface EdgesInfoResult {
 export interface ComputeEdgesInfoParams {
   data: SceneData
   transformedVertices: ReadonlyMap<number, THREE.Vector3>
-  centerY: number
   edgeThicknessOf: (edgeId: number) => number
   // Strut-end params - see precalculateStrutEnd in strutGeometryManual.ts.
   cornerLength: number
@@ -149,7 +148,6 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
   const {
     data,
     transformedVertices,
-    centerY,
     edgeThicknessOf,
     cornerLength: globalCornerLength,
     vertexCornerLength,
@@ -165,7 +163,7 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
 
   // console.log('data', data)
 
-  const center = new THREE.Vector3(0, centerY, 0)
+  const center = new THREE.Vector3(0, 0, 0)
   const positionOf = (id: number) => transformedVertices.get(id)!
 
   const adjacency = buildVertexAdjacency(data.edges)

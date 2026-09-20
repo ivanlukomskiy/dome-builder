@@ -366,10 +366,9 @@ export function computeStrutBoundary(
 export function computeEdgeEndOffsets(
   data: SceneData,
   transformedVertices: ReadonlyMap<number, THREE.Vector3>,
-  centerY: number,
   edgeThicknessOf: (edgeId: number) => number,
 ): Map<number, Map<number, number>> {
-  const center = new THREE.Vector3(0, centerY, 0)
+  const center = new THREE.Vector3(0, 0, 0)
   const positionOf = (id: number) => transformedVertices.get(id)!
   const adjacency = buildVertexAdjacency(data.edges)
 

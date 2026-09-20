@@ -350,6 +350,33 @@ export function computePolyhedron(
   return { vertices, faces, edges, layers: computeLayers(vertices) }
 }
 
+// A point in spherical (polar) coordinates about the dome's center, which is the origin. Y is up,
+// matching the scene: `r` is the distance from the center in mm, `azimuth` is the angle around the
+// vertical axis in radians (0 along +x, increasing toward +z), and `elevation` is the angle above
+// the horizontal (x-z) plane in radians (0 on the equator, +PI/2 straight up at the apex).
+export interface PolarCoord {
+  r: number
+  azimuth: number
+  elevation: number
+}
+
+export function cartesianToPolar(v: THREE.Vector3): PolarCoord {
+  return {
+    r: v.length(),
+    azimuth: Math.atan2(v.z, v.x),
+    elevation: Math.atan2(v.y, Math.hypot(v.x, v.z)),
+  }
+}
+
+export function polarToCartesian(p: PolarCoord): THREE.Vector3 {
+  const horizontal = p.r * Math.cos(p.elevation)
+  return new THREE.Vector3(
+    horizontal * Math.cos(p.azimuth),
+    p.r * Math.sin(p.elevation),
+    horizontal * Math.sin(p.azimuth),
+  )
+}
+
 // The committed, currently-editable geometry: every vertex/edge/face in here is real and
 // visible - there is no "hidden but remembered" data, and no separate scheme for user-added
 // geometry. Ids are stable and never reused within one editing session (the three counters only
@@ -357,7 +384,9 @@ export function computePolyhedron(
 // edgeThickness/selection (all keyed by id, and deliberately outside the undo snapshot - see
 // useHistory) survive undo/redo without any remapping.
 export interface SceneData {
-  vertices: Map<number, THREE.Vector3>
+  // Stored in polar coordinates about the origin (see PolarCoord); everything downstream that
+  // needs xyz positions works on the Cartesian map applyVertexTransforms derives from these.
+  vertices: Map<number, PolarCoord>
   edges: Map<number, Edge>
   faces: Map<number, Face>
   nextVertexId: number
@@ -382,12 +411,12 @@ export function pruneToLayerCount(data: PolyhedronData, layerCount: number): Sce
   }
 
   const idMap = new Map<number, number>()
-  const vertices = new Map<number, THREE.Vector3>()
+  const vertices = new Map<number, PolarCoord>()
   let nextVertexId = 0
   for (const oldIdx of Array.from(kept).sort((a, b) => a - b)) {
     const id = nextVertexId++
     idMap.set(oldIdx, id)
-    vertices.set(id, data.vertices[oldIdx])
+    vertices.set(id, cartesianToPolar(data.vertices[oldIdx]))
   }
 
   const edges = new Map<number, Edge>()
@@ -466,39 +495,35 @@ export function findRotationalSymmetryGroup(
   return Array.from(group)
 }
 
-// Per-vertex adjustment away from its default (canonical) position. All fields are 0
-// at the default position: z shifts elevation in mm, r shifts radial distance from the
-// main axis in mm, and theta rotates the vertex around the main (vertical) axis, in radians.
-export interface VertexTransform {
-  z: number
-  r: number
-  theta: number
-}
+// Per-vertex adjustment away from its default (canonical) position, as a diff in polar
+// coordinates (see PolarCoord) about the dome's center. All fields are 0 at the default position:
+// r shifts the distance from the center in mm, azimuth rotates the vertex around the main
+// (vertical) axis, and elevation tilts it up/down along its meridian - both in radians.
+export type VertexTransform = PolarCoord
 
-export const DEFAULT_VERTEX_TRANSFORM: VertexTransform = { z: 0, r: 0, theta: 0 }
+export const DEFAULT_VERTEX_TRANSFORM: VertexTransform = { r: 0, azimuth: 0, elevation: 0 }
 
 export function isDefaultVertexTransform(t: VertexTransform): boolean {
-  return t.z === 0 && t.r === 0 && t.theta === 0
+  return t.r === 0 && t.azimuth === 0 && t.elevation === 0
 }
 
-export function applyVertexTransform(v: THREE.Vector3, t: VertexTransform): THREE.Vector3 {
-  if (isDefaultVertexTransform(t)) return v
-
-  const radius = Math.hypot(v.x, v.z)
-  const angle = Math.atan2(v.z, v.x) + t.theta
-  const newRadius = radius + t.r
-  return new THREE.Vector3(newRadius * Math.cos(angle), v.y + t.z, newRadius * Math.sin(angle))
+export function applyVertexTransform(p: PolarCoord, t: VertexTransform): THREE.Vector3 {
+  return polarToCartesian({
+    r: p.r + t.r,
+    azimuth: p.azimuth + t.azimuth,
+    elevation: p.elevation + t.elevation,
+  })
 }
 
+// Every vertex's xyz position: its polar coordinates with its transform (if any) added on.
 export function applyVertexTransforms(
-  vertices: ReadonlyMap<number, THREE.Vector3>,
+  vertices: ReadonlyMap<number, PolarCoord>,
   transforms: ReadonlyMap<number, VertexTransform>,
 ): ReadonlyMap<number, THREE.Vector3> {
-  if (transforms.size === 0) return vertices
   const result = new Map<number, THREE.Vector3>()
-  for (const [id, v] of vertices) {
+  for (const [id, p] of vertices) {
     const t = transforms.get(id)
-    result.set(id, t ? applyVertexTransform(v, t) : v)
+    result.set(id, t ? applyVertexTransform(p, t) : polarToCartesian(p))
   }
   return result
 }
@@ -814,7 +839,7 @@ export function addMidpointsBetween(
   for (const [a, b] of pairByNearestNeighbor(selectedIds, positionOf)) {
     const mid = positionOf(a).clone().add(positionOf(b)).multiplyScalar(0.5)
     const midId = nextVertexId++
-    vertices.set(midId, mid)
+    vertices.set(midId, cartesianToPolar(mid))
     faces.set(nextFaceId++, [a, b, midId])
     edges.set(nextEdgeId++, [a, midId])
     edges.set(nextEdgeId++, [midId, b])
@@ -860,41 +885,3 @@ export function addFaces(scene: SceneData, triangles: [number, number, number][]
 }
 
 const RADIAL_EPS = 1e-9
-
-// Rescales (guideX, guideY, guideZ) away from the center, along its own direction from that
-// center, until its distance from the center equals `targetRadius`. Preserves the point's
-// direction from the center, since that's exactly what's being held fixed.
-export function scaleToRadius(
-  guideX: number,
-  guideY: number,
-  guideZ: number,
-  centerY: number,
-  targetRadius: number,
-): THREE.Vector3 {
-  const axialOffset = guideY - centerY
-  const dist = Math.hypot(guideX, axialOffset, guideZ)
-  if (dist < RADIAL_EPS) return new THREE.Vector3(0, centerY + targetRadius, 0)
-
-  const scale = targetRadius / dist
-  return new THREE.Vector3(guideX * scale, centerY + axialOffset * scale, guideZ * scale)
-}
-
-// The (z, r, theta) transform that, applied to `canonicalPos` via applyVertexTransform, lands
-// exactly on `targetPos`. Used to bake an absolute target position (e.g. a point moved onto a
-// given sphere) into the same cylindrical-offset representation manual edits use, replacing
-// whatever transform (if any) was there before.
-export function computeTransformToPosition(
-  canonicalPos: THREE.Vector3,
-  targetPos: THREE.Vector3,
-): VertexTransform {
-  const baseCylRadius = Math.hypot(canonicalPos.x, canonicalPos.z)
-  const targetCylRadius = Math.hypot(targetPos.x, targetPos.z)
-  const baseAngle = Math.atan2(canonicalPos.z, canonicalPos.x)
-  const targetAngle = Math.atan2(targetPos.z, targetPos.x)
-  return {
-    z: targetPos.y - canonicalPos.y,
-    r: targetCylRadius - baseCylRadius,
-    theta: targetCylRadius > RADIAL_EPS ? targetAngle - baseAngle : 0,
-  }
-}
-

@@ -1,4 +1,3 @@
-import * as THREE from 'three'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
 import type { FlangeShapeParams } from './flangeGeometry'
@@ -10,23 +9,21 @@ import { downloadJson } from './download'
 // while still choosing a shape), which tab is active, or the undo history (session-only, not
 // worth persisting).
 export interface DomeConfig {
-  version: 13 | 14 | 15
-  // The "Adjust to a Sphere" target size in Edit, or the shape recipe's own size while still in
-  // "New" - kept here (rather than left to reset to its hardcoded default) since it's live,
-  // user-facing state either way.
+  version: 16
+  // The shape recipe's own size (also what the viewport's marker sizes scale to) - kept here
+  // (rather than left to reset to its hardcoded default) since it's live, user-facing state.
   diameter: number
+  // Polar coordinates about the origin: [r (mm), azimuth (rad), elevation (rad)] - see PolarCoord.
   vertices: [number, [number, number, number]][]
   edges: [number, Edge][]
   faces: [number, Face][]
-  // Cross-links between two edges at a vertex (see braces.ts). Absent in version-13 configs, which
-  // load with no braces.
+  // Cross-links between two edges at a vertex (see braces.ts).
   braces?: [number, Brace][]
   nextVertexId: number
   nextEdgeId: number
   nextFaceId: number
   nextBraceId?: number
   selectionMode: SelectionMode
-  centerZ: number
   extrudeDistance: number
   thickness: number
   cornerLength: number
@@ -71,7 +68,6 @@ export interface DomeState {
   diameter: number
   sceneData: SceneData
   selectionMode: SelectionMode
-  centerZ: number
   extrudeDistance: number
   thickness: number
   cornerLength: number
@@ -97,11 +93,11 @@ export interface DomeState {
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 15,
+    version: 16,
     diameter: state.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
       id,
-      [v.x, v.y, v.z],
+      [v.r, v.azimuth, v.elevation],
     ]),
     edges: Array.from(state.sceneData.edges.entries()),
     faces: Array.from(state.sceneData.faces.entries()),
@@ -111,7 +107,6 @@ export function serializeConfig(state: DomeState): DomeConfig {
     nextFaceId: state.sceneData.nextFaceId,
     nextBraceId: state.sceneData.nextBraceId,
     selectionMode: state.selectionMode,
-    centerZ: state.centerZ,
     extrudeDistance: state.extrudeDistance,
     thickness: state.thickness,
     cornerLength: state.cornerLength,
@@ -140,7 +135,7 @@ export function deserializeConfig(config: DomeConfig): DomeState {
   return {
     diameter: config.diameter,
     sceneData: {
-      vertices: new Map(config.vertices.map(([id, [x, y, z]]) => [id, new THREE.Vector3(x, y, z)])),
+      vertices: new Map(config.vertices.map(([id, [r, azimuth, elevation]]) => [id, { r, azimuth, elevation }])),
       edges: new Map(config.edges),
       faces: new Map(config.faces),
       nextVertexId: config.nextVertexId,
@@ -156,7 +151,6 @@ export function deserializeConfig(config: DomeConfig): DomeState {
       nextBraceId: config.nextBraceId ?? 0,
     },
     selectionMode: config.selectionMode,
-    centerZ: config.centerZ,
     extrudeDistance: config.extrudeDistance,
     thickness: config.thickness,
     cornerLength: config.cornerLength,
@@ -192,9 +186,7 @@ export function loadConfigFromLocalStorage(): DomeConfig | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as DomeConfig
-    // Version 13 predates braces and 14 predates corner length overrides; deserializeConfig
-    // fills in empty sets for them.
-    return parsed.version === 13 || parsed.version === 14 || parsed.version === 15 ? parsed : null
+    return parsed.version === 16 ? parsed : null
   } catch {
     return null
   }

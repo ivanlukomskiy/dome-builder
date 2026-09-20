@@ -77,7 +77,6 @@ interface SidebarProps {
   canAddPoints: boolean
   onAddPoints: () => void
   onConnectVertices: () => void
-  onAdjustToSphere: () => void
   selectedEdgeCount: number
   selectedEdgeIndices: ReadonlySet<number>
   onDeleteSelectedEdges: () => void
@@ -102,9 +101,6 @@ interface SidebarProps {
   onDeleteSelectedBraces: () => void
   selectedFaceCount: number
   onDeleteSelectedFaces: () => void
-  centerZ: number
-  onCenterZChange: (value: number) => void
-  onGroundCenter: () => void
   extrudeDistance: number
   onExtrudeDistanceChange: (value: number) => void
   thickness: number
@@ -296,7 +292,6 @@ export function Sidebar({
   canAddPoints,
   onAddPoints,
   onConnectVertices,
-  onAdjustToSphere,
   selectedEdgeCount,
   selectedEdgeIndices,
   onDeleteSelectedEdges,
@@ -320,9 +315,6 @@ export function Sidebar({
   onDeleteSelectedBraces,
   selectedFaceCount,
   onDeleteSelectedFaces,
-  centerZ,
-  onCenterZChange,
-  onGroundCenter,
   extrudeDistance,
   onExtrudeDistanceChange,
   thickness,
@@ -370,9 +362,9 @@ export function Sidebar({
   const axisOptions = SHAPE_AXES[shape]
   const maxLayers = data.layers.length
 
-  const zValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'z')
   const rValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'r')
-  const thetaValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'theta')
+  const azimuthValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'azimuth')
+  const elevationValue = sharedTransformValue(selectedVertexIndices, vertexTransforms, 'elevation')
   const hasTransforms = Array.from(selectedVertexIndices).some((idx) => vertexTransforms.has(idx))
 
   const edgeThicknessValue = sharedOverrideValue(selectedEdgeIndices, edgeThickness)
@@ -461,16 +453,13 @@ export function Sidebar({
         </>
       )}
 
-      {(mode === 'new' || mode === 'edit') && (
+      {mode === 'new' && (
         <section className="control-group">
           <h2>Diameter</h2>
           <div className="transform-field">
             <label>Diameter (mm)</label>
             <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
           </div>
-          {mode === 'edit' && (
-            <p className="hint">The target size &ldquo;Adjust to a Sphere&rdquo; snaps onto.</p>
-          )}
         </section>
       )}
 
@@ -546,20 +535,6 @@ export function Sidebar({
               {layerCount} / {maxLayers}
             </span>
           </div>
-        </section>
-      )}
-
-      {mode !== 'new' && (
-        <section className="control-group">
-          <h2>Center</h2>
-          <div className="transform-field">
-            <label>Center (z, mm)</label>
-            <NumberField value={centerZ} step={10} onCommit={onCenterZChange} />
-          </div>
-          <div className="button-row">
-            <button onClick={onGroundCenter}>Ground the Center</button>
-          </div>
-          <p className="hint">Sets the center&rsquo;s height to match the lowest visible vertex.</p>
         </section>
       )}
 
@@ -890,13 +865,6 @@ export function Sidebar({
             Connect Vertices pairs them by nearest neighbor and joins each pair with a direct
             edge, skipping any pair that's already connected.
           </p>
-          <div className="button-row">
-            <button onClick={onAdjustToSphere}>Adjust to a Sphere</button>
-          </div>
-          <p className="hint">
-            Moves every vertex along its own line from the gravity center out to the sphere of
-            the diameter set above.
-          </p>
         </section>
       )}
 
@@ -1109,16 +1077,7 @@ export function Sidebar({
         <section className="control-group">
           <h2>Transform</h2>
           <div className="transform-field">
-            <label>Elevation (z, mm)</label>
-            <NumberField
-              value={zValue}
-              step={10}
-              placeholder={zValue === null ? 'Mixed' : undefined}
-              onCommit={(v) => onTransformChange('z', v)}
-            />
-          </div>
-          <div className="transform-field">
-            <label>Radius (r, mm)</label>
+            <label>Radius (&Delta;r, mm)</label>
             <NumberField
               value={rValue}
               step={10}
@@ -1127,18 +1086,27 @@ export function Sidebar({
             />
           </div>
           <div className="transform-field">
-            <label>Angle (&theta;&deg;)</label>
+            <label>Azimuth (&Delta;&deg;)</label>
             <NumberField
-              value={thetaValue === null ? null : Math.round(((thetaValue * 180) / Math.PI) * 100) / 100}
+              value={azimuthValue === null ? null : Math.round(((azimuthValue * 180) / Math.PI) * 100) / 100}
               step={1}
-              placeholder={thetaValue === null ? 'Mixed' : undefined}
-              onCommit={(deg) => onTransformChange('theta', (deg * Math.PI) / 180)}
+              placeholder={azimuthValue === null ? 'Mixed' : undefined}
+              onCommit={(deg) => onTransformChange('azimuth', (deg * Math.PI) / 180)}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Elevation (&Delta;&deg;)</label>
+            <NumberField
+              value={elevationValue === null ? null : Math.round(((elevationValue * 180) / Math.PI) * 100) / 100}
+              step={1}
+              placeholder={elevationValue === null ? 'Mixed' : undefined}
+              onCommit={(deg) => onTransformChange('elevation', (deg * Math.PI) / 180)}
             />
           </div>
           <p className="hint">
-            {zValue === 0 && rValue === 0 && thetaValue === 0
+            {rValue === 0 && azimuthValue === 0 && elevationValue === 0
               ? 'Default position (0, 0, 0)'
-              : 'Values are relative to the default position'}
+              : 'Polar offsets from the default position, about the dome center. Radius moves the vertex toward/away from the center; azimuth rotates it around the vertical axis; elevation tilts it up/down along its meridian.'}
           </p>
           <div className="button-row">
             <button disabled={!hasTransforms} onClick={onResetTransform}>

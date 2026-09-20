@@ -23,7 +23,6 @@ interface ViewportProps {
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   selectedFaceIndices: ReadonlySet<number>
   selectedBraceIndices: ReadonlySet<number>
-  centerY: number
   extrudeDistance: number
   thickness: number
   cornerLength: number
@@ -61,7 +60,6 @@ export function Viewport({
   vertexFlangeParams,
   selectedFaceIndices,
   selectedBraceIndices,
-  centerY,
   extrudeDistance,
   thickness,
   cornerLength,
@@ -116,7 +114,7 @@ export function Viewport({
     const id = selectedVertexId
     const positionOf = (vid: number) => transformedVertices.get(vid)!
     const edges = buildVertexAdjacency(data.edges).get(id) ?? []
-    const center = new THREE.Vector3(0, centerY, 0)
+    const center = new THREE.Vector3(0, 0, 0)
     const metrics: HubEdgeMetric[] = computeVertexHubMetrics(
       positionOf(id),
       center,
@@ -133,7 +131,7 @@ export function Viewport({
         hasFaceToNextEdge: facePairs.has(directedEdgeKey(m.neighborId, nextNeighborId)),
       }
     })
-  }, [selectedVertexId, transformedVertices, data.edges, data.faces, centerY, edgeThickness, thickness])
+  }, [selectedVertexId, transformedVertices, data.edges, data.faces, edgeThickness, thickness])
 
   // Preview mode builds every strut/flange solid in a background worker (see DomeMesh.tsx and
   // previewBuilder.worker.ts) - this just holds whatever progress it last reported, to surface in
@@ -191,7 +189,6 @@ export function Viewport({
           vertexFlangeParams={vertexFlangeParams}
           selectedFaceIndices={selectedFaceIndices}
           selectedBraceIndices={selectedBraceIndices}
-          centerY={centerY}
           extrudeDistance={extrudeDistance}
           thickness={thickness}
           cornerLength={cornerLength}

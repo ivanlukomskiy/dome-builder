@@ -20,7 +20,6 @@ declare const self: DedicatedWorkerGlobalScope
 
 export interface DxfExportRequest {
   requestId: number
-  centerY: number
   strutJobs: StrutGeometryEntry[]
   halfWidth: number
   endGrooveLengthPercent: number
@@ -54,7 +53,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
   const { ensureReplicadReady } = await import('../lib/replicadCad')
   await ensureReplicadReady()
 
-  const center = new THREE.Vector3(0, req.centerY, 0)
+  const center = new THREE.Vector3(0, 0, 0)
   const parts: DxfPart[] = []
   const bracePoints: BracePoints[] = []
 

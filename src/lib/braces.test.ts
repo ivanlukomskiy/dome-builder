@@ -17,18 +17,22 @@ import {
   type StrutBraceEnd,
   DEFAULT_BRACE_PARAMS,
 } from "./braces";
-import { deleteEdges, deleteVertices, type SceneData } from "./polyhedra";
+import { cartesianToPolar, deleteEdges, deleteVertices, type SceneData } from "./polyhedra";
 
 // Vertex 0 at the origin with edges to 1 (+x, length 10), 2 (+y, length 20) and 3 (+z, length 10),
 // plus edge 3 joining vertices 1 and 2.
+const POSITIONS = new Map<number, THREE.Vector3>([
+  [0, new THREE.Vector3(0, 0, 0)],
+  [1, new THREE.Vector3(10, 0, 0)],
+  [2, new THREE.Vector3(0, 20, 0)],
+  [3, new THREE.Vector3(0, 0, 10)],
+]);
+
+// The scene stores its vertices in polar coordinates, so the exact xyz positions above are kept
+// aside for the tests that assert on exact points.
 function makeScene(): SceneData {
   return {
-    vertices: new Map([
-      [0, new THREE.Vector3(0, 0, 0)],
-      [1, new THREE.Vector3(10, 0, 0)],
-      [2, new THREE.Vector3(0, 20, 0)],
-      [3, new THREE.Vector3(0, 0, 10)],
-    ]),
+    vertices: new Map(Array.from(POSITIONS, ([id, p]) => [id, cartesianToPolar(p)])),
     edges: new Map<number, [number, number]>([
       [0, [0, 1]],
       [1, [0, 2]],
@@ -113,7 +117,7 @@ describe("computeBraceEndpoints", () => {
     const [p1, p2] = computeBraceEndpoints(
       scene.braces.get(0)!,
       scene.edges,
-      (id) => scene.vertices.get(id)!,
+      (id) => POSITIONS.get(id)!,
     )!;
     expect(p1.toArray()).toEqual([2.5, 0, 0]);
     expect(p2.toArray()).toEqual([0, 5, 0]);
@@ -125,7 +129,7 @@ describe("computeBraceEndpoints", () => {
     const [p1, p2] = computeBraceEndpoints(
       scene.braces.get(0)!,
       scene.edges,
-      (id) => scene.vertices.get(id)!,
+      (id) => POSITIONS.get(id)!,
     )!;
     expect(p1.toArray()).toEqual([5, 0, 0]);
     expect(p2.toArray()).toEqual([5, 10, 0]);
@@ -139,7 +143,7 @@ describe("computeStrutBraces", () => {
     scene = addBrace(scene, new Set([0, 3]));
     const byEdge = indexBracesByEdge(scene.braces);
     const strut = (edgeId: number, length: number) =>
-      computeStrutBraces(edgeId, scene.edges.get(edgeId)!, length, byEdge, scene.edges, (id) => scene.vertices.get(id)!);
+      computeStrutBraces(edgeId, scene.edges.get(edgeId)!, length, byEdge, scene.edges, (id) => POSITIONS.get(id)!);
 
     // edge 0 is 0-1: brace 0 sits at A (vertex 0), brace 1 at B (vertex 1)
     const both = strut(0, 10);

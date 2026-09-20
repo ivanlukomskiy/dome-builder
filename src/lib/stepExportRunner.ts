@@ -92,7 +92,6 @@ export async function runStepExport(
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
 
   const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'> = {
-    centerY: params.centerY,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
     midGrooveLengthPercent: params.midGrooveLengthPercent,

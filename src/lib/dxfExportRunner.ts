@@ -65,7 +65,6 @@ export async function runDxfExport(
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
 
   const shared: Shared = {
-    centerY: params.centerY,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
     midGrooveLengthPercent: params.midGrooveLengthPercent,

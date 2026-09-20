@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   addMidpointsBetween,
+  applyVertexTransforms,
   buildVertexAdjacency,
+  cartesianToPolar,
   computeVertexHubMetrics,
   type SceneData,
 } from "./polyhedra";
@@ -16,9 +18,9 @@ describe("buildFaceNeighborPairs with Add Points faces", () => {
   const center = new THREE.Vector3(0, 0, 0);
 
   function faceFlagsAtNewVertex(selection: [number, number]) {
-    const vertices = new Map<number, THREE.Vector3>([
-      [0, new THREE.Vector3(R, 0, 0)],
-      [1, new THREE.Vector3(0, 0, R)],
+    const vertices = new Map([
+      [0, cartesianToPolar(new THREE.Vector3(R, 0, 0))],
+      [1, cartesianToPolar(new THREE.Vector3(0, 0, R))],
     ]);
     const scene: SceneData = {
       vertices,
@@ -30,10 +32,11 @@ describe("buildFaceNeighborPairs with Add Points faces", () => {
       braces: new Map(),
       nextBraceId: 0,
     };
-    const out = addMidpointsBetween(scene, selection, (id) => vertices.get(id)!);
+    const canonical = applyVertexTransforms(vertices, new Map());
+    const out = addMidpointsBetween(scene, selection, (id) => canonical.get(id)!);
 
     // The user then lifts the new vertex off the chord.
-    const positions = new Map(out.vertices);
+    const positions = new Map(applyVertexTransforms(out.vertices, new Map()));
     positions.set(2, new THREE.Vector3(7.07, 1.5, 7.07));
     const positionOf = (id: number) => positions.get(id)!;
 
