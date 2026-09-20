@@ -4,7 +4,7 @@ import type { StrutMesh } from '../lib/replicadCad'
 import { StrutShapeScene, type StrutShapeViewport } from './StrutShapeScene'
 
 // Shared (non-per-edge) strut-shape knobs - same fields precalculateStrutEnd takes beyond each
-// edge's own offset, see strutGeometryManual.ts.
+// edge's own offset, see strutGeometry.ts.
 interface SharedParams {
   cornerLength: number
   halfWidth: number
@@ -201,7 +201,7 @@ export function FlangeShapeDebug() {
         const [{ ensureReplicadReady, meshDrawing }, { precalculateStrutEnd }, { computeFlangeBoundary2D }] =
           await Promise.all([
             import('../lib/replicadCad'),
-            import('../lib/strutGeometryManual'),
+            import('../lib/strutGeometry'),
             import('../lib/flangeGeometry'),
           ])
         await ensureReplicadReady()

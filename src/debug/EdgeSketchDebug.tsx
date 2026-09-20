@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
-import type { Vec2 } from '../lib/strutGeometry'
-import { computeStrutBoundary } from '../lib/strutGeometry'
+import { computeStrutSketch, type Vec2 } from '../lib/strutGeometry'
 import { EdgeSketchScene } from './EdgeSketchScene'
 
 const DEG2RAD = Math.PI / 180
@@ -44,7 +43,7 @@ export function EdgeSketchDebug() {
     const angleRad = angleDeg * DEG2RAD
     const a = new THREE.Vector3(radius, 0, 0)
     const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
-    return computeStrutBoundary(a, b, center, offset1, offset2, cornerLength, width / 2, {
+    return computeStrutSketch(a, b, center, offset1, offset2, cornerLength, width / 2, {
       height: toothHeight,
       length: toothLength,
       chamfer: toothChamfer,

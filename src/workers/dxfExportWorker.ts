@@ -1,7 +1,6 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
-import { computeStrutPlane } from '../lib/strutGeometry'
-import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
+import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
@@ -60,7 +59,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
   req.strutJobs.forEach((job, i) => {
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
-    const boundary = computeStrutBoundaryManual(
+    const boundary = computeStrutBoundary(
       posA,
       posB,
       center,

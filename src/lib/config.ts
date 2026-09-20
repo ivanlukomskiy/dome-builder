@@ -32,8 +32,8 @@ export interface DomeConfig {
   // (positive) or closer to (negative) its vertex than the raw miter math calls for. 0 means no
   // change.
   offsetModifier: number
-  // Shouldered tenon cut into each strut end (see computeStrutBoundaryManual's groove/mill
-  // params in strutGeometryManual.ts).
+  // Shouldered tenon cut into each strut end (see computeStrutBoundary's groove/mill
+  // params in strutGeometry.ts).
   endGrooveLengthPercent: number
   midGrooveLengthPercent: number
   grooveDepth: number

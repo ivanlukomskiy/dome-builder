@@ -60,7 +60,7 @@ function boundingBoxOf({ main, helpers }: StrutShapeSceneProps) {
 // above) that the user can still pan and zoom, same as the main dome viewport and the edge-sketch
 // debug view. Fit once to the shapes present on mount (main plus every helper, so a reference
 // line reaching further out than `main` still stays in frame); later updates (from editing
-// strutGeometryManual.ts and tweaking params) reshape the geometry without yanking the camera
+// strutGeometry.ts and tweaking params) reshape the geometry without yanking the camera
 // around.
 function useInitialCameraFit(props: StrutShapeSceneProps) {
   const [fit] = useState(() => {
@@ -177,7 +177,7 @@ function SceneContents({
   )
 }
 
-// Hovering a helper shape shows its `name` (set in strutGeometryManual.ts) in a small tooltip
+// Hovering a helper shape shows its `name` (set in strutGeometry.ts) in a small tooltip
 // that follows the cursor - lets you point at a marker in the viewport and immediately see which
 // computed point/line it is, instead of matching colors against the source by eye. Clicking one
 // copies that name to the clipboard, so you can paste it straight into a console.log or the

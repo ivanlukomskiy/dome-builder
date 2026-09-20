@@ -1,6 +1,6 @@
 // Pure 2D maths (no replicad) for laying a brace out on a strut: points on the strut body's
 // curved sides, and the biggest rectangle that fits between them. Kept separate from
-// strutGeometryManual.ts so it can be unit-tested without loading the CAD engine.
+// strutGeometry.ts so it can be unit-tested without loading the CAD engine.
 
 export type Pt = [number, number];
 
@@ -27,7 +27,7 @@ function wrapAngle(delta: number): number {
 }
 
 // Where the ray from `center` at `angle` (radians) crosses the curve calculateArcPoints
-// (strutGeometryManual.ts) approximates between `start` and `end` - i.e. that curve with
+// (strutGeometry.ts) approximates between `start` and `end` - i.e. that curve with
 // infinitely many segments: the angle sweeps linearly from start's to end's (the short way
 // around) while the distance from `center` changes linearly from start's to end's. Null if the ray
 // points outside the swept angle range, where the curve doesn't exist.

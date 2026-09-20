@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
 import { drawingToDXF } from '../lib/dxfExport'
-import { strutBoundaryManualInputFromJson, type StrutBoundaryManualInput } from '../lib/strutGeometryManual'
+import { strutBoundaryInputFromJson, type StrutBoundaryInput } from '../lib/strutGeometry'
 import type { StrutMesh } from '../lib/replicadCad'
 import {
   BRACE_PARAM_FIELDS,
@@ -59,17 +59,17 @@ const DEFAULT_PARAMS: Params = {
 const DEFAULT_SHOW_HELPER_POINTS = true
 
 // Persisted across reloads so tweaking params or the viewport doesn't get reset by Vite's HMR
-// full-reloads (e.g. after editing strutGeometryManual.ts) or a manual page refresh.
+// full-reloads (e.g. after editing strutGeometry.ts) or a manual page refresh.
 const PARAMS_STORAGE_KEY = 'strut-shape-debug:params'
 const VIEWPORT_STORAGE_KEY = 'strut-shape-debug:viewport'
 const IMPORTED_STORAGE_KEY = 'strut-shape-debug:imported-input'
 
-// A computeStrutBoundaryManual call imported from a console failure dump. While set it replaces
+// A computeStrutBoundary call imported from a console failure dump. While set it replaces
 // the params-derived inputs, so the exact failing call is reproduced.
-function loadImportedInput(): StrutBoundaryManualInput | null {
+function loadImportedInput(): StrutBoundaryInput | null {
   try {
     const raw = localStorage.getItem(IMPORTED_STORAGE_KEY)
-    return raw ? strutBoundaryManualInputFromJson(raw) : null
+    return raw ? strutBoundaryInputFromJson(raw) : null
   } catch {
     return null
   }
@@ -119,11 +119,11 @@ type State =
   | { status: 'empty' }
   | { status: 'error'; message: string }
 
-// Companion to EdgeSketchDebug, but wired to `computeStrutBoundaryManual` in
-// strutGeometryManual.ts - a sandbox for hand-building the strut sketch directly with replicad's
+// Companion to EdgeSketchDebug, but wired to `computeStrutBoundary` in
+// strutGeometry.ts - a sandbox for hand-building the strut sketch directly with replicad's
 // own draw()/boolean-op primitives instead of trusting the existing Vec2 math to get it right.
 // Reachable via `npm run strut-shape-debug`, which opens straight here. Edit
-// strutGeometryManual.ts, save, and this page (auto-reloaded by Vite) shows the resulting shape -
+// strutGeometry.ts, save, and this page (auto-reloaded by Vite) shows the resulting shape -
 // including a clear error message if your function throws, which is expected to happen a lot
 // while iterating.
 export function StrutShapeDebug() {
@@ -136,7 +136,7 @@ export function StrutShapeDebug() {
     }))
   const setFlag = (field: BooleanParamKey) => (value: boolean) => setParams((prev) => ({ ...prev, [field]: value }))
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [imported, setImported] = useState<StrutBoundaryManualInput | null>(loadImportedInput)
+  const [imported, setImported] = useState<StrutBoundaryInput | null>(loadImportedInput)
   const [importText, setImportText] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
   const [showHelperPoints, setShowHelperPoints] = useState(DEFAULT_SHOW_HELPER_POINTS)
@@ -151,7 +151,7 @@ export function StrutShapeDebug() {
 
   const handleImport = () => {
     try {
-      const input = strutBoundaryManualInputFromJson(importText)
+      const input = strutBoundaryInputFromJson(importText)
       // Stored with "NaN"/"Infinity" as strings, which the loader turns back into numbers.
       localStorage.setItem(
         IMPORTED_STORAGE_KEY,
@@ -188,14 +188,14 @@ export function StrutShapeDebug() {
 
     ;(async () => {
       try {
-        const [{ ensureReplicadReady, meshDrawing }, { computeStrutBoundaryManual }] = await Promise.all([
+        const [{ ensureReplicadReady, meshDrawing }, { computeStrutBoundary }] = await Promise.all([
           import('../lib/replicadCad'),
-          import('../lib/strutGeometryManual'),
+          import('../lib/strutGeometry'),
         ])
         await ensureReplicadReady()
         if (cancelled) return
 
-        let call: StrutBoundaryManualInput
+        let call: StrutBoundaryInput
         if (imported) {
           call = imported
         } else {
@@ -249,7 +249,7 @@ export function StrutShapeDebug() {
           }
         }
 
-        const result = computeStrutBoundaryManual(
+        const result = computeStrutBoundary(
           new THREE.Vector3(...call.a),
           new THREE.Vector3(...call.b),
           new THREE.Vector3(...call.center),
@@ -324,8 +324,8 @@ export function StrutShapeDebug() {
           </button>
         </div>
         <p className="hint">
-          Renders whatever <code>computeStrutBoundaryManual</code> in{' '}
-          <code>src/lib/strutGeometryManual.ts</code> returns. Edit that file and save - this page
+          Renders whatever <code>computeStrutBoundary</code> in{' '}
+          <code>src/lib/strutGeometry.ts</code> returns. Edit that file and save - this page
           reloads automatically.
         </p>
 
@@ -345,7 +345,7 @@ export function StrutShapeDebug() {
             </>
           ) : (
             <p className="hint">
-              If <code>computeStrutBoundaryManual</code> throws elsewhere in the app, it logs a JSON
+              If <code>computeStrutBoundary</code> throws elsewhere in the app, it logs a JSON
               dump to the console. Paste it here to reproduce that exact call.
             </p>
           )}
@@ -493,10 +493,10 @@ export function StrutShapeDebug() {
           />
         )}
         {state.status === 'loading' && <div className="hud">Loading CAD engine…</div>}
-        {state.status === 'empty' && <div className="hud">computeStrutBoundaryManual returned nothing to show.</div>}
+        {state.status === 'empty' && <div className="hud">computeStrutBoundary returned nothing to show.</div>}
         {state.status === 'error' && (
           <div className="hud" style={{ color: '#ff6b6b', maxWidth: 420, textAlign: 'right' }}>
-            computeStrutBoundaryManual threw:
+            computeStrutBoundary threw:
             <br />
             {state.message}
           </div>

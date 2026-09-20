@@ -29,7 +29,7 @@ export interface StrutGeometryEntry {
   // needed to build the solid itself; DomeMesh uses it to pick the strut's preview color.
   thicknessOverride: number | undefined
   // Braces lying on this strut's A / B end (empty lists = none) - passed on to
-  // computeStrutBoundaryManual.
+  // computeStrutBoundary.
   braces: StrutBraces
 }
 

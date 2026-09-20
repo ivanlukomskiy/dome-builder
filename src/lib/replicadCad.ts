@@ -114,7 +114,7 @@ function buildCenteredSolidFromDrawing(drawing: Drawing, plane: StrutPlane, thic
 }
 
 // Builds one strut's solid from a flat `Drawing` already in the strut's own 2D coordinates (see
-// strutGeometryManual.ts's `computeStrutBoundaryManual`), extruded and tessellated for rendering.
+// strutGeometry.ts's `computeStrutBoundary`), extruded and tessellated for rendering.
 // `ensureReplicadReady` must have resolved before calling this.
 export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): StrutMesh | null {
   const centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
@@ -152,7 +152,7 @@ export function buildStrutStepFromDrawing(
 }
 
 // Meshes an arbitrary flat `Drawing` (e.g. from replicad's own `draw()`/boolean-op primitives -
-// see strutGeometryManual.ts and the "Strut Shape Debug" tool) directly, without extruding: puts
+// see strutGeometry.ts and the "Strut Shape Debug" tool) directly, without extruding: puts
 // it on the default XY plane, turns it into a face, and tessellates. Returns null for an empty
 // drawing (e.g. a `.cut()`/`.intersect()` that leaves nothing). `ensureReplicadReady` must have
 // resolved before calling this.

@@ -1,8 +1,8 @@
 import type { Point2D } from "replicad";
 
 // Pure, dependency-free 2D vector math shared by every module that works with flat (replicad or
-// hand-rolled) 2D geometry - strutGeometry.ts, strutGeometryManual.ts, and flangeGeometry.ts all
-// need the same handful of primitives.
+// hand-rolled) 2D geometry - strutGeometry.ts and flangeGeometry.ts both need the same handful
+// of primitives.
 
 export function add2(p: Point2D, q: Point2D): Point2D {
   return [p[0] + q[0], p[1] + q[1]];

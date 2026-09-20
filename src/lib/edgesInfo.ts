@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { Face, SceneData } from './polyhedra'
 import { buildVertexAdjacency, computeVertexHubMetrics, computeVertexTangentPlane } from './polyhedra'
-import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometryManual'
+import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometry'
 import type { FlangeShapeParams } from './flangeGeometry'
 
 type Vec3Tuple = [number, number, number]
@@ -19,7 +19,7 @@ export interface EdgeInfo {
   // modifier) - the same value fed into precalculateStrutEnd for the live Preview solids.
   offsetMm: number
   // The shouldered-tenon layout for this strut end, computed exactly as it is for the real
-  // Preview solids (see precalculateStrutEnd in strutGeometryManual.ts).
+  // Preview solids (see precalculateStrutEnd in strutGeometry.ts).
   strutEnd: StrutEndMeasurements
   // This edge's own direction, projected onto the vertex's tangent plane and measured as an
   // angle (degrees, 0-360) from the plane's e1 axis toward e2.
@@ -62,7 +62,7 @@ export interface ComputeEdgesInfoParams {
   data: SceneData
   transformedVertices: ReadonlyMap<number, THREE.Vector3>
   edgeThicknessOf: (edgeId: number) => number
-  // Strut-end params - see precalculateStrutEnd in strutGeometryManual.ts.
+  // Strut-end params - see precalculateStrutEnd in strutGeometry.ts.
   cornerLength: number
   // Per-vertex corner length overrides, keyed by vertex id; a vertex without one uses
   // `cornerLength`.

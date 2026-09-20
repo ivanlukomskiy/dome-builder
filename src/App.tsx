@@ -109,7 +109,7 @@ const DEFAULT_EXTRUDE_DISTANCE = 125
 const DEFAULT_THICKNESS = 30
 const DEFAULT_CORNER_LENGTH = 200
 const DEFAULT_OFFSET_MODIFIER = 0
-// See the "Grooves" section in Sidebar and computeStrutBoundaryManual's shoulder/tenon params.
+// See the "Grooves" section in Sidebar and computeStrutBoundary's shoulder/tenon params.
 const DEFAULT_END_GROOVE_LENGTH_PERCENT = 15
 const DEFAULT_MID_GROOVE_LENGTH_PERCENT = 15
 const DEFAULT_GROOVE_DEPTH = 30

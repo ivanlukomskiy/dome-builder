@@ -3,12 +3,12 @@ import { Drawing, type Point2D } from "replicad";
 import type {
   HelperDrawing,
   StrutEndMeasurements,
-} from "./strutGeometryManual";
+} from "./strutGeometry";
 import { add2, sub2, length2 } from "./vec2";
 
 // A sandbox for hand-building the "flange" part - a flat connector plate at a hub vertex,
 // covering the wedges between struts that have no face between them (see get_edges_info's
-// hasFaceToNextEdge). Same idea as strutGeometryManual.ts's computeStrutBoundaryManual2D, just
+// hasFaceToNextEdge). Same idea as strutGeometry.ts's computeStrutBoundary2D, just
 // centered on a vertex instead of running the length of one strut. See flange-shape-debug
 // (`npm run flange-shape-debug`) - edit computeFlangeBoundary2D and save to see the result there.
 //
@@ -24,7 +24,7 @@ export interface FlangeEdgeInput {
   // The miter offset this end is trimmed back by - same value precalculateStrutEnd was given.
   offsetMm: number;
   // The shouldered-tenon layout for this strut end (see precalculateStrutEnd in
-  // strutGeometryManual.ts) - effectiveCornerLength is the one that matters here: how far out
+  // strutGeometry.ts) - effectiveCornerLength is the one that matters here: how far out
   // this strut's own material actually reaches from the vertex.
   strutEnd: StrutEndMeasurements;
   // This edge's direction, projected onto the vertex's tangent plane, as an angle (degrees,
@@ -68,7 +68,7 @@ export interface FlangeShapeParams {
   // thinner than this).
   minSide: number;
   // Diameter (mm) of the relief circle tucked into the plate's own inside corners, same idea as
-  // strutGeometryManual.ts's precalculateStrutEnd - clears room for a round end mill at a square
+  // strutGeometry.ts's precalculateStrutEnd - clears room for a round end mill at a square
   // notch.
   millingDiameter: number;
 }

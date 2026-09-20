@@ -294,7 +294,7 @@ export function bracePlatePlane(
   }
 }
 
-// Where a brace plate's two end points (see StrutBoundaryManualResult.bracePlateEndsA/B) sit in
+// Where a brace plate's two end points (see StrutBoundaryResult.bracePlateEndsA/B) sit in
 // 3D: the strut's 2D coordinates put on its plane, then moved out along the plane's normal, toward
 // the side the brace's other edge is on, by half the strut's thickness plus the plate's thickness -
 // i.e. onto the plate's outer face.

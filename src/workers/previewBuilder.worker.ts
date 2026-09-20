@@ -1,7 +1,6 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
-import { computeStrutPlane } from '../lib/strutGeometry'
-import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
+import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
@@ -10,7 +9,7 @@ import type { BracePoints } from '../lib/braceSolid'
 import type { Drawing } from 'replicad'
 
 // Owns every heavy, WASM-backed step of building the Preview solids: the 2D shoulder-tenon and
-// flange-plate drawings (computeStrutBoundaryManual/computeFlangeBoundary2D - both build their
+// flange-plate drawings (computeStrutBoundary/computeFlangeBoundary2D - both build their
 // outline via replicad's own draw()/.fuse()/.cut() primitives, which are backed by opencascade's
 // 2D boolean ops, not plain JS math) and the extrude+mesh step that turns each into a solid
 // (buildStrutMeshFromDrawing). All of that needs `ensureReplicadReady()`'s WASM module loaded
@@ -83,7 +82,7 @@ async function buildPreview(
   req.strutJobs.forEach((job, i) => {
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
-    const boundary = computeStrutBoundaryManual(
+    const boundary = computeStrutBoundary(
       posA,
       posB,
       center,
