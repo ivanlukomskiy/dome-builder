@@ -42,6 +42,12 @@ export interface HelperDrawing {
   name: string;
 }
 
+export interface StrutMark {
+  end: "A" | "B";
+  point: Point2D;
+  axis: Point2D;
+}
+
 export interface StrutBoundaryManualResult {
   // The actual strut sketch outline - what would eventually replace computeStrutBoundary's
   // return value. Null while you don't have one yet (helpers alone still render).
@@ -55,6 +61,11 @@ export interface StrutBoundaryManualResult {
   // coordinates - same brace as bracePlateA / bracePlateB, null when there's no plate.
   bracePlateEndsA: [Point2D, Point2D] | null;
   bracePlateEndsB: [Point2D, Point2D] | null;
+  // Reference spots for labeling, in the strut's 2D coordinates. `endMarks`: one per strut end,
+  // on the strut's axis in the middle of its tenon; `braceMarks`: the center of every brace on the
+  // strut. `axis` is the unit direction along the strut there (labels are written along it).
+  endMarks: StrutMark[];
+  braceMarks: (StrutMark & { braceId: number })[];
   // Construction lines, reference points turned into tiny shapes, anything else worth seeing
   // while building `main` up. Purely visual - never fed into the real pipeline.
   helpers: HelperDrawing[];
@@ -685,6 +696,21 @@ export function computeStrutBoundaryManual2D(
   let bracePlateB: Drawing | null = null;
   let bracePlateEndsA: [Point2D, Point2D] | null = null;
   let bracePlateEndsB: [Point2D, Point2D] | null = null;
+  const braceMarks: (StrutMark & { braceId: number })[] = [];
+  // Middle of each end's tenon, on the strut's axis - where the vertex label goes.
+  const endMarks: StrutMark[] = (
+    [
+      ["A", a, endA, tangentDirection2D(a, b, center)],
+      ["B", b, endB, tangentDirection2D(b, a, center)],
+    ] as const
+  ).map(([end, origin, measurements, axis]) => ({
+    end,
+    axis,
+    point: add2(
+      origin,
+      scale2(axis, (measurements.tenonStart + measurements.tenonEnd) / 2),
+    ),
+  }));
   for (const [end, origin, dir, endBraces] of braceEnds) {
     for (const [braceIndex, brace] of endBraces.entries()) {
       const braceCenterNoRounding = add2(
@@ -718,6 +744,15 @@ export function computeStrutBoundaryManual2D(
       // at the brace.
       if (braceInn && braceExt) {
         const braceCenter = scale2(add2(braceInn, braceExt), 0.5);
+        braceMarks.push({
+          braceId: brace.braceId,
+          end: end as "A" | "B",
+          point: braceCenter,
+          axis:
+            end === "A"
+              ? tangentDirection2D(a, b, center)
+              : tangentDirection2D(b, a, center),
+        });
         helpers.push({
           drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
           color: "magenta",
@@ -806,6 +841,8 @@ export function computeStrutBoundaryManual2D(
     bracePlateB,
     bracePlateEndsA,
     bracePlateEndsB,
+    endMarks,
+    braceMarks,
     helpers,
   };
 }

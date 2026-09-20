@@ -110,7 +110,7 @@ async function buildStepExports(
       if (!brace) continue
       if (ends) {
         const [p, q] = bracePlateEndPoints3D(plane, job.beamThickness, brace, [ends[0], ends[1]])
-        bracePoints.push({ braceId: brace.braceId, thickness: brace.params.thickness, points: [p.toArray(), q.toArray()] })
+        bracePoints.push({ braceId: brace.braceId, edgeId: job.index, thickness: brace.params.thickness, points: [p.toArray(), q.toArray()] })
       }
       if (!plate || brace.params.plateThickness <= 0) continue
       try {

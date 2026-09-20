@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutDxfParts, writeDxf, type DxfPart } from './dxf'
+import { layoutDxfParts, readableAngle, writeDxf, type DxfPart } from './dxf'
 import type { DxfPolyline } from './dxfExport'
 
 const rect = (w: number, h: number, x = 0, y = 0): DxfPolyline => ({
@@ -114,5 +114,40 @@ describe('writeDxf', () => {
     expect(text.includes('LAYER\n2\nSTRUTS\n70\n0\n62\n7\n')).toBe(true)
     // Every group is a code/value line pair.
     expect(lines.length % 2).toBe(1) // trailing newline leaves one empty element
+  })
+})
+
+describe('helper labels', () => {
+  const withHelper: DxfPart = {
+    ...part('flange-1 (x2)', 'flange', 60, 40, 100, -50),
+    helpers: [{ text: 'S7', x: 130, y: -30, angleDeg: 200, height: 5 }],
+  }
+
+  it('moves and scales helpers along with their part', () => {
+    const [placed] = layoutDxfParts([withHelper], { scale: 2 })
+    const b = bbox(placed.loops)
+    // (130, -30) is the part's center: 30 across and 20 up from its (100, -50) corner.
+    expect(placed.helpers[0].x).toBeCloseTo(b.minX + 60, 5)
+    expect(placed.helpers[0].y).toBeCloseTo(b.minY + 40, 5)
+    expect(placed.helpers[0].height).toBe(10)
+  })
+
+  it('writes them green, centered, and right-side up', () => {
+    const text = writeDxf(layoutDxfParts([withHelper], { scale: 1 }))
+    expect(text.includes('LAYER\n2\nHELPERS\n70\n0\n62\n3\n')).toBe(true)
+    const entity = text.split('\n0\nTEXT\n').find((t) => t.startsWith('8\nHELPERS'))!
+    expect(entity.includes('\n1\nS7\n')).toBe(true)
+    expect(entity.includes('\n50\n20.0000\n')).toBe(true) // 200 degrees is upside down -> 20
+    expect(entity.includes('\n72\n1\n')).toBe(true)
+    expect(entity.includes('\n73\n2\n')).toBe(true)
+  })
+
+  it('readableAngle keeps text within (-90, 90]', () => {
+    expect(readableAngle(0)).toBe(0)
+    expect(readableAngle(90)).toBe(90)
+    expect(readableAngle(180)).toBeCloseTo(0)
+    expect(readableAngle(-90)).toBe(90)
+    expect(readableAngle(270)).toBe(90)
+    expect(readableAngle(135)).toBeCloseTo(-45)
   })
 })

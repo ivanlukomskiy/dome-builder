@@ -13,9 +13,23 @@ export interface DxfPart {
   name: string
   kind: DxfPartKind
   loops: DxfPolyline[]
+  // Green annotations about how the part connects to the others (which vertex/strut/brace goes
+  // where), in the part's own 2D coordinates - not part of its outline.
+  helpers?: DxfHelperText[]
+}
+
+// A short text centered on (x, y), written along `angleDeg` and `height` mm tall (both before the
+// sheet scale is applied).
+export interface DxfHelperText {
+  text: string
+  x: number
+  y: number
+  angleDeg: number
+  height: number
 }
 
 export interface PlacedDxfPart extends DxfPart {
+  helpers: DxfHelperText[]
   // Label position (left/baseline) and height, in sheet coordinates.
   label: { x: number; y: number; height: number }
 }
@@ -29,6 +43,7 @@ export const DXF_LAYERS: { name: string; color: number }[] = [
   { name: 'BRACE_PLATES', color: 7 },
   { name: 'BRACES', color: 7 },
   { name: 'LABELS', color: 1 },
+  { name: 'HELPERS', color: 3 },
 ]
 
 const LAYER_OF_KIND: Record<DxfPartKind, string> = {
@@ -125,6 +140,7 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
     loops: DxfPolyline[]
     width: number
     height: number
+    helpers: DxfHelperText[]
     slotWidth: number
   }
 
@@ -137,7 +153,13 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
     const width = (box.maxX - box.minX) * scale
     const height = (box.maxY - box.minY) * scale
     const labelWidth = part.name.length * labelHeight * CHAR_WIDTH
-    items.push({ part, loops, width, height, slotWidth: Math.max(width, labelWidth) })
+    const helpers = (part.helpers ?? []).map((h) => ({
+      ...h,
+      x: (h.x - box.minX) * scale,
+      y: (h.y - box.minY) * scale,
+      height: h.height * scale,
+    }))
+    items.push({ part, loops, helpers, width, height, slotWidth: Math.max(width, labelWidth) })
   }
   items.sort((a, b) => KIND_ORDER.indexOf(a.part.kind) - KIND_ORDER.indexOf(b.part.kind))
 
@@ -167,12 +189,22 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
     placed.push({
       ...item.part,
       loops: transformLoops(item.loops, x, rowY + labelBlock, 1),
+      helpers: item.helpers.map((h) => ({ ...h, x: h.x + x, y: h.y + rowY + labelBlock })),
       label: { x, y: rowY + labelHeight * 0.4, height: labelHeight },
     })
     x += item.slotWidth + gap
     rowHeight = Math.max(rowHeight, item.height + labelBlock)
   }
   return placed
+}
+
+// The text angle in (-90, 90]: a label written "backwards" (pointing left) is turned around.
+export function readableAngle(angleDeg: number): number {
+  let a = ((angleDeg % 360) + 360) % 360
+  if (a > 180) a -= 360
+  if (a > 90) a -= 180
+  else if (a <= -90) a += 180
+  return a
 }
 
 const num = (n: number) => (Math.abs(n) < 5e-5 ? '0' : n.toFixed(4))
@@ -220,6 +252,25 @@ export function writeDxf(parts: PlacedDxfPart[]): string {
       pair(30, 0) +
       pair(40, num(part.label.height)) +
       pair(1, part.name)
+    for (const h of part.helpers) {
+      // Centered on its point (horizontal/vertical alignment 1/2, whose reference point is the
+      // 11/21 pair), turned so it never reads upside down.
+      const angle = readableAngle(h.angleDeg)
+      out +=
+        pair(0, 'TEXT') +
+        pair(8, 'HELPERS') +
+        pair(10, num(h.x)) +
+        pair(20, num(h.y)) +
+        pair(30, 0) +
+        pair(40, num(h.height)) +
+        pair(1, h.text) +
+        pair(50, num(angle)) +
+        pair(72, 1) +
+        pair(11, num(h.x)) +
+        pair(21, num(h.y)) +
+        pair(31, 0) +
+        pair(73, 2)
+    }
   }
   out += pair(0, 'ENDSEC') + pair(0, 'EOF')
   return out

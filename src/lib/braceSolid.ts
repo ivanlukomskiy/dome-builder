@@ -10,6 +10,8 @@ export type Vec3 = [number, number, number]
 // One strut's contribution to a brace: which brace, and its plate's two end points in 3D.
 export interface BracePoints {
   braceId: number
+  // The strut (edge) these plate end points are on.
+  edgeId: number
   // Brace thickness, mm.
   thickness: number
   points: [Vec3, Vec3]
@@ -87,6 +89,17 @@ export function braceQuadPoints2D(
   })
 }
 
+// A 3D point (on the quad's plane, or projected onto it) in the frame's own 2D coordinates.
+export function projectToFrame2D(
+  frame: NonNullable<ReturnType<typeof braceQuadFrame>>,
+  p: Vec3,
+): [number, number] {
+  const { origin, normal, xDir } = frame.plane
+  const yDir = new THREE.Vector3().crossVectors(normal, xDir)
+  const d = new THREE.Vector3(p[0], p[1], p[2]).sub(origin)
+  return [d.dot(xDir), d.dot(yDir)]
+}
+
 // The prism: the quad extruded `thickness / 2` each way along its normal. Flat-shaded (every face
 // has its own vertices/normal), triangles wound counter-clockwise seen from outside. Null if the
 // quad is degenerate or the thickness isn't positive.
@@ -139,6 +152,9 @@ export function buildBraceSolidMesh(
 export interface BraceBody {
   braceId: number
   thickness: number
+  // The two struts the brace goes into, and each one's plate end points.
+  edgeIdA: number
+  edgeIdB: number
   a: [Vec3, Vec3]
   b: [Vec3, Vec3]
 }
@@ -153,7 +169,14 @@ export function pairBracePoints(parts: BracePoints[]): BraceBody[] {
   const bodies: BraceBody[] = []
   for (const [braceId, list] of byBrace) {
     if (list.length !== 2) continue
-    bodies.push({ braceId, thickness: list[0].thickness, a: list[0].points, b: list[1].points })
+    bodies.push({
+      braceId,
+      thickness: list[0].thickness,
+      edgeIdA: list[0].edgeId,
+      edgeIdB: list[1].edgeId,
+      a: list[0].points,
+      b: list[1].points,
+    })
   }
   return bodies
 }

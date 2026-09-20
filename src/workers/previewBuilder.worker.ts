@@ -131,6 +131,7 @@ async function buildPreview(
       const [p, q] = bracePlateEndPoints3D(plane, job.beamThickness, brace, ends)
       bracePoints.push({
         braceId: brace.braceId,
+        edgeId: job.index,
         thickness: brace.params.thickness,
         points: [p.toArray(), q.toArray()],
       })

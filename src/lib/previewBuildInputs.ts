@@ -13,6 +13,9 @@ import { computeStrutBraces, indexBracesByEdge, type StrutBraces } from './brace
 
 export interface StrutGeometryEntry {
   index: number
+  // The vertices at the A / B end of this edge (posA / posB are their positions).
+  vertexA: number
+  vertexB: number
   posA: [number, number, number]
   posB: [number, number, number]
   offsetA: number
@@ -81,6 +84,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     const override = edgeThickness.get(index)
     return {
       index,
+      vertexA: a,
+      vertexB: b,
       posA: [posA.x, posA.y, posA.z],
       posB: [posB.x, posB.y, posB.z],
       offsetA: (offsets.get(index)?.get(a) ?? 0) + offsetModifier,

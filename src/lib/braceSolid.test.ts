@@ -63,7 +63,7 @@ describe('orderBraceQuad', () => {
 
 describe('buildBraceSolids', () => {
   it('needs exactly two struts per brace', () => {
-    const pts = (braceId: number, y: number) => ({ braceId, thickness: 2, points: [[0, y, 0], [10, y, 0]] as [Vec3, Vec3] })
+    const pts = (braceId: number, y: number) => ({ braceId, edgeId: y, thickness: 2, points: [[0, y, 0], [10, y, 0]] as [Vec3, Vec3] })
     expect(buildBraceSolids([pts(1, 0), pts(1, 4), pts(2, 0)]).map((s) => s.braceId)).toEqual([1])
   })
 })
@@ -105,7 +105,7 @@ describe('braceQuadFrame / pairBracePoints', () => {
   })
 
   it('pairs a brace\'s two struts and drops the incomplete ones', () => {
-    const part = (braceId: number) => ({ braceId, thickness: 3, points: [[0, 0, 0], [1, 0, 0]] as [Vec3, Vec3] })
+    const part = (braceId: number) => ({ braceId, edgeId: braceId * 10, thickness: 3, points: [[0, 0, 0], [1, 0, 0]] as [Vec3, Vec3] })
     const bodies = pairBracePoints([part(1), part(2), part(1)])
     expect(bodies.map((b) => b.braceId)).toEqual([1])
     expect(bodies[0].thickness).toBe(3)

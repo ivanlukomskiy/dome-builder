@@ -8,7 +8,7 @@ import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D } from '../lib/braces'
 import type { BracePoints } from '../lib/braceSolid'
 import { drawingToPolylines } from '../lib/dxfExport'
-import type { DxfPart } from '../lib/dxf'
+import type { DxfHelperText, DxfPart } from '../lib/dxf'
 
 // The DXF-export counterpart to stepExportWorker.ts: builds the same 2D drawings (strut outlines,
 // flange plates, brace plates) but, instead of extruding them, reads their outlines back as
@@ -39,6 +39,13 @@ export type DxfExportWorkerMessage =
   | { type: 'progress'; requestId: number; phase: DxfExportPhase; done: number; total: number }
   | { type: 'result'; requestId: number; parts: DxfPart[]; bracePoints: BracePoints[] }
   | { type: 'error'; requestId: number; message: string }
+
+// Height (mm at scale 1) of the green connection labels.
+const HELPER_HEIGHT = 5
+
+function axisAngleDeg(axis: [number, number]): number {
+  return (Math.atan2(axis[1], axis[0]) * 180) / Math.PI
+}
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(t[0], t[1], t[2])
@@ -79,7 +86,18 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     } satisfies DxfExportWorkerMessage)
 
     try {
-      if (boundary.main) parts.push({ name: `strut-${job.index}`, kind: 'strut', loops: drawingToPolylines(boundary.main) })
+      if (boundary.main) {
+        // Connection info in green: the vertex at each end, and the brace (if any) at its center.
+        const helpers: DxfHelperText[] = []
+        for (const mark of boundary.endMarks) {
+          const vertexId = mark.end === 'A' ? job.vertexA : job.vertexB
+          helpers.push({ text: `V${vertexId}`, x: mark.point[0], y: mark.point[1], angleDeg: axisAngleDeg(mark.axis), height: HELPER_HEIGHT })
+        }
+        for (const mark of boundary.braceMarks) {
+          helpers.push({ text: `B${mark.braceId}`, x: mark.point[0], y: mark.point[1], angleDeg: axisAngleDeg(mark.axis), height: HELPER_HEIGHT })
+        }
+        parts.push({ name: `strut-${job.index}`, kind: 'strut', loops: drawingToPolylines(boundary.main), helpers })
+      }
     } catch (err) {
       console.error(`Failed to read strut outline for edge ${job.index}`, err)
     }
@@ -93,7 +111,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       if (!brace) continue
       if (ends) {
         const [p, q] = bracePlateEndPoints3D(plane, job.beamThickness, brace, [ends[0], ends[1]])
-        bracePoints.push({ braceId: brace.braceId, thickness: brace.params.thickness, points: [p.toArray(), q.toArray()] })
+        bracePoints.push({ braceId: brace.braceId, edgeId: job.index, thickness: brace.params.thickness, points: [p.toArray(), q.toArray()] })
       }
       if (!plate) continue
       try {
@@ -123,7 +141,15 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     if (!boundary.main) return
     try {
       // The outer and inner plate of a vertex share this one shape.
-      parts.push({ name: `flange-${vertex.vertexId} (x2)`, kind: 'flange', loops: drawingToPolylines(boundary.main) })
+      // Which strut goes into each rectangular hole, in green along the hole.
+      const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => ({
+        text: `S${mark.edgeId}`,
+        x: mark.center[0],
+        y: mark.center[1],
+        angleDeg: mark.angleDeg,
+        height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
+      }))
+      parts.push({ name: `flange-${vertex.vertexId} (x2)`, kind: 'flange', loops: drawingToPolylines(boundary.main), helpers })
     } catch (err) {
       console.error(`Failed to read flange outline for vertex ${vertex.vertexId}`, err)
     }

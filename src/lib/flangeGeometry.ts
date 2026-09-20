@@ -84,8 +84,18 @@ export const DEFAULT_FLANGE_SHAPE_PARAMS: FlangeShapeParams = {
   millingDiameter: 5,
 };
 
+// The middle of one strut's rectangular tenon hole in the flange plate: which strut (edge), where,
+// the direction along the hole (degrees) and how wide the hole is across it.
+export interface FlangeEdgeMark {
+  edgeId: number;
+  center: Point2D;
+  angleDeg: number;
+  holeWidth: number;
+}
+
 export interface FlangeBoundaryResult {
   main: Drawing | null;
+  edgeMarks: FlangeEdgeMark[];
   helpers: HelperDrawing[];
 }
 
@@ -655,6 +665,7 @@ export function computeFlangeBoundary2D(
   params: FlangeShapeParams,
 ): FlangeBoundaryResult {
   let helpers: HelperDrawing[] = [];
+  const edgeMarks: FlangeEdgeMark[] = [];
 
   // Shapes fused into `main`, kept in separate buckets so the final assembly below can fuse them
   // in a fixed order - fusing in a different order sometimes trips up opencascade's boolean ops,
@@ -671,7 +682,7 @@ export function computeFlangeBoundary2D(
     negativeShapes.push(drawing);
   };
 
-  if (vertex.edges.length === 0) return { main: null, helpers };
+  if (vertex.edges.length === 0) return { main: null, edgeMarks: [], helpers };
 
   vertex.edges.forEach((edge, i) => {
     const next = vertex.edges[(i + 1) % vertex.edges.length];
@@ -734,6 +745,15 @@ export function computeFlangeBoundary2D(
     const rectCut = computeRectCut(edge, params);
     helpers.push({ drawing: rectCut, color: "cyan", name: `rect cut ${edge.edgeId}` });
     addNegative(rectCut);
+    edgeMarks.push({
+      edgeId: edge.edgeId,
+      center: polar(
+        edge.projectedAngleDeg,
+        (edge.strutEnd.tenonStart + edge.strutEnd.tenonEnd) / 2,
+      ),
+      angleDeg: edge.projectedAngleDeg,
+      holeWidth: edge.thicknessMm + 2 * params.toleranceTransverse,
+    });
 
     computeTenonCornerMillingCuts(edge, params).forEach((cutDrawing) => {
       helpers.push({ drawing: cutDrawing, color: "red", name: `milling cut ${edge.edgeId}` });
@@ -763,7 +783,7 @@ export function computeFlangeBoundary2D(
     main = main.cut(s);
   });
 
-  return { main, helpers };
+  return { main, edgeMarks, helpers };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and
