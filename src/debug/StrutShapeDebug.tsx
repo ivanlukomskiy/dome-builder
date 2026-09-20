@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { NumberField } from '../components/Sidebar'
 import { drawingToDXF } from '../lib/dxfExport'
 import type { StrutMesh } from '../lib/replicadCad'
-import { clampBraceShift, type StrutBraces } from '../lib/braces'
+import { clampBraceShift, DEFAULT_BRACE_PARAMS, type StrutBraceEnd, type StrutBraces } from '../lib/braces'
 import { StrutShapeScene, type StrutShapeViewport } from './StrutShapeScene'
 
 const DEG2RAD = Math.PI / 180
@@ -23,8 +23,12 @@ interface Params {
   // A brace at end A / B of the strut (see braces.ts), `shift` being its fraction of the A-B length.
   braceAEnabled: boolean
   braceAShift: number
+  braceAWidth: number
+  braceAMaxPlateWidth: number
   braceBEnabled: boolean
   braceBShift: number
+  braceBWidth: number
+  braceBMaxPlateWidth: number
 }
 
 type NumberParamKey = { [K in keyof Params]: Params[K] extends number ? K : never }[keyof Params]
@@ -43,9 +47,13 @@ const DEFAULT_PARAMS: Params = {
   millingDiameter: 8,
   chamferLength: 6,
   braceAEnabled: false,
-  braceAShift: 0.5,
+  braceAShift: DEFAULT_BRACE_PARAMS.shift,
+  braceAWidth: DEFAULT_BRACE_PARAMS.width,
+  braceAMaxPlateWidth: DEFAULT_BRACE_PARAMS.maxPlateWidth,
   braceBEnabled: false,
-  braceBShift: 0.5,
+  braceBShift: DEFAULT_BRACE_PARAMS.shift,
+  braceBWidth: DEFAULT_BRACE_PARAMS.width,
+  braceBMaxPlateWidth: DEFAULT_BRACE_PARAMS.maxPlateWidth,
 }
 
 const DEFAULT_SHOW_HELPER_POINTS = true
@@ -154,8 +162,12 @@ export function StrutShapeDebug() {
           chamferLength,
           braceAEnabled,
           braceAShift,
+          braceAWidth,
+          braceAMaxPlateWidth,
           braceBEnabled,
           braceBShift,
+          braceBWidth,
+          braceBMaxPlateWidth,
         } = params
         const center = new THREE.Vector3(0, 0, 0)
         const angleRad = angleDeg * DEG2RAD
@@ -163,13 +175,20 @@ export function StrutShapeDebug() {
         const b = new THREE.Vector3(radius * Math.cos(angleRad), radius * Math.sin(angleRad), 0)
 
         const chord = a.distanceTo(b)
+        const braceEnd = (
+          braceId: number,
+          shift: number,
+          width: number,
+          maxPlateWidth: number,
+        ): StrutBraceEnd => ({
+          braceId,
+          params: { ...DEFAULT_BRACE_PARAMS, shift, width, maxPlateWidth },
+          distanceFromVertex: shift * chord,
+          otherEdgeId: braceId,
+        })
         const braces: StrutBraces = {
-          a: braceAEnabled
-            ? [{ braceId: 0, shift: braceAShift, distanceFromVertex: braceAShift * chord, otherEdgeId: 0 }]
-            : [],
-          b: braceBEnabled
-            ? [{ braceId: 1, shift: braceBShift, distanceFromVertex: braceBShift * chord, otherEdgeId: 1 }]
-            : [],
+          a: braceAEnabled ? [braceEnd(0, braceAShift, braceAWidth, braceAMaxPlateWidth)] : [],
+          b: braceBEnabled ? [braceEnd(1, braceBShift, braceBWidth, braceBMaxPlateWidth)] : [],
         }
 
         const result = computeStrutBoundaryManual(
@@ -350,6 +369,19 @@ export function StrutShapeDebug() {
               onCommit={setParam('braceAShift')}
             />
           </div>
+          <div className="transform-field">
+            <label>Brace width A (mm)</label>
+            <NumberField value={params.braceAWidth} step={5} min={0} onCommit={setParam('braceAWidth')} />
+          </div>
+          <div className="transform-field">
+            <label>Max plate width A (mm)</label>
+            <NumberField
+              value={params.braceAMaxPlateWidth}
+              step={5}
+              min={0}
+              onCommit={setParam('braceAMaxPlateWidth')}
+            />
+          </div>
           <label className="checkbox-field">
             <input
               type="checkbox"
@@ -368,10 +400,24 @@ export function StrutShapeDebug() {
               onCommit={setParam('braceBShift')}
             />
           </div>
+          <div className="transform-field">
+            <label>Brace width B (mm)</label>
+            <NumberField value={params.braceBWidth} step={5} min={0} onCommit={setParam('braceBWidth')} />
+          </div>
+          <div className="transform-field">
+            <label>Max plate width B (mm)</label>
+            <NumberField
+              value={params.braceBMaxPlateWidth}
+              step={5}
+              min={0}
+              onCommit={setParam('braceBMaxPlateWidth')}
+            />
+          </div>
           <p className="hint">
-            Each enabled brace adds a <code>braceCenter</code> helper point: midway across the
+            Each enabled brace adds a <code>braceCenter</code> helper point (midway across the
             strut&rsquo;s width, where the ray from the center through the brace&rsquo;s position
-            along the strut crosses it.
+            along the strut crosses it) and the 4 corners of its plate rectangle: brace width long
+            along the strut, as wide as fits between the arcs across it, up to the max plate width.
           </p>
         </section>
       </aside>

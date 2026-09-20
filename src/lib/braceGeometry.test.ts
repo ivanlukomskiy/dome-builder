@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   arcPointAtAngle,
   isInsideArcBand,
-  maxRectInArcBand,
+  braceRectInArcBand,
   rectCorners,
   rectFitsInBand,
   type ArcEndpoints,
@@ -45,76 +45,51 @@ describe("arcPointAtAngle", () => {
   });
 });
 
-describe("maxRectInArcBand", () => {
-  const cases: { name: string; ends: ArcEndpoints; c: Pt; u: Pt }[] = [
-    {
-      name: "axis tangent at the brace",
-      ends: concentricBand(2500, 60, 0.4),
-      c: [2500, 0],
-      u: [0, 1],
-    },
-    {
-      name: "axis tilted away from the tangent",
-      ends: concentricBand(2500, 60, 0.4),
-      c: [2500 * Math.cos(0.1), 2500 * Math.sin(0.1)],
-      u: [Math.sin(-0.3), Math.cos(-0.3)],
-    },
-    {
-      name: "band whose radius changes along the strut",
-      ends: {
-        innA: [2440 * Math.cos(-0.4), 2440 * Math.sin(-0.4)],
-        innB: [2300 * Math.cos(0.4), 2300 * Math.sin(0.4)],
-        extA: [2560 * Math.cos(-0.4), 2560 * Math.sin(-0.4)],
-        extB: [2420 * Math.cos(0.4), 2420 * Math.sin(0.4)],
-      },
-      c: [2450 * Math.cos(0.05), 2450 * Math.sin(0.05)],
-      u: [-Math.sin(-0.35), Math.cos(-0.35)],
-    },
-  ];
+describe("braceRectInArcBand", () => {
+  const ends = concentricBand(2500, 60, 0.4);
+  const c: Pt = [2500, 0];
+  const u: Pt = [0, 1];
 
-  it.each(cases.map((c) => [c] as [(typeof cases)[number]]))("fits and can't grow: %j", (tc) => {
-    const rect = maxRectInArcBand(tc.c, tc.u, origin, tc.ends, 1000)!;
-    expect(rect).not.toBeNull();
+  // half extents of a rect built around c with axis u
+  const halfExtents = (rect: Pt[], axis: Pt, center: Pt): [number, number] => {
+    const v: Pt = [-axis[1], axis[0]];
+    const rel: Pt = [rect[0][0] - center[0], rect[0][1] - center[1]];
+    return [Math.abs(rel[0] * axis[0] + rel[1] * axis[1]), Math.abs(rel[0] * v[0] + rel[1] * v[1])];
+  };
 
-    // half extents recovered from the corners
-    const v: Pt = [-tc.u[1], tc.u[0]];
-    const rel = (pt: Pt): Pt => [pt[0] - tc.c[0], pt[1] - tc.c[1]];
-    const p = Math.abs(rel(rect[0])[0] * tc.u[0] + rel(rect[0])[1] * tc.u[1]);
-    const q = Math.abs(rel(rect[0])[0] * v[0] + rel(rect[0])[1] * v[1]);
-    expect(p).toBeGreaterThan(0);
-    expect(q).toBeGreaterThan(0);
-
-    for (const corner of rect) expect(isInsideArcBand(corner, origin, tc.ends)).toBe(true);
-    expect(rectFitsInBand(tc.c, tc.u, p, q, origin, tc.ends)).toBe(true);
-    // Growing either side by 2% leaves the band.
-    expect(rectFitsInBand(tc.c, tc.u, p * 1.02, q, origin, tc.ends) &&
-      rectFitsInBand(tc.c, tc.u, p, q * 1.02, origin, tc.ends)).toBe(false);
-
-    // Compare with a brute-force search over (p, q) for the largest area.
-    let best = 0;
-    for (let pi = 1; pi <= 200; pi++) {
-      const pp = (pi / 200) * 1000;
-      for (let qi = 1; qi <= 100; qi++) {
-        const qq = (qi / 100) * 120;
-        if (pp * qq > best && rectFitsInBand(tc.c, tc.u, pp, qq, origin, tc.ends)) best = pp * qq;
-      }
-    }
-    expect(p * q).toBeGreaterThan(best * 0.98);
+  it("is `width` long along the axis and capped at the max width across it", () => {
+    const rect = braceRectInArcBand(c, u, origin, ends, 50, 50)!;
+    const [p, q] = halfExtents(rect, u, c);
+    expect(p).toBeCloseTo(25, 6);
+    expect(q).toBeCloseTo(25, 6);
+    for (const corner of rect) expect(isInsideArcBand(corner, origin, ends)).toBe(true);
   });
 
-  it("has sides parallel and perpendicular to the axis", () => {
-    const u: Pt = [Math.sin(-0.3), Math.cos(-0.3)];
-    const rect = maxRectInArcBand([2500, 0], u, origin, concentricBand(2500, 60, 0.4), 1000)!;
+  it("is as wide as fits between the arcs when the cap allows more", () => {
+    const rect = braceRectInArcBand(c, u, origin, ends, 50, 500)!;
+    const [p, q] = halfExtents(rect, u, c);
+    expect(p).toBeCloseTo(25, 6);
+    // the band is 120 wide, so at most 60 each side, and a bit less because of the curvature
+    expect(q).toBeGreaterThan(50);
+    expect(q).toBeLessThan(60.0001);
+    expect(rectFitsInBand(c, u, p, q, origin, ends)).toBe(true);
+    expect(rectFitsInBand(c, u, p, q * 1.02, origin, ends)).toBe(false);
+  });
+
+  it("keeps its sides parallel / perpendicular to a tilted axis", () => {
+    const tilted: Pt = [Math.sin(-0.3), Math.cos(-0.3)];
+    const rect = braceRectInArcBand(c, tilted, origin, ends, 50, 500)!;
     const side: Pt = [rect[1][0] - rect[0][0], rect[1][1] - rect[0][1]];
     const other: Pt = [rect[2][0] - rect[1][0], rect[2][1] - rect[1][1]];
-    // one side along u, the other perpendicular to it
-    expect(Math.abs(side[0] * u[1] - side[1] * u[0]) < 1e-6 ||
-      Math.abs(other[0] * u[1] - other[1] * u[0]) < 1e-6).toBe(true);
-    expect(Math.abs(side[0] * other[0] + side[1] * other[1])).toBeLessThan(1e-6);
-    expect(rectCorners([0, 0], u, 1, 1)).toHaveLength(4);
+    // `side` runs along the strut (parallel to the axis), `other` across it (perpendicular)
+    expect(Math.abs(side[0] * tilted[1] - side[1] * tilted[0])).toBeLessThan(1e-6);
+    expect(Math.abs(other[0] * tilted[0] + other[1] * tilted[1])).toBeLessThan(1e-6);
+    expect(Math.hypot(side[0], side[1])).toBeCloseTo(50, 6);
+    expect(rectCorners(origin, tilted, 1, 1)).toHaveLength(4);
   });
 
-  it("returns null when the center isn't in the band", () => {
-    expect(maxRectInArcBand([100, 0], [0, 1], origin, concentricBand(2500, 60, 0.4), 1000)).toBeNull();
+  it("returns null when the width can't fit, or the center isn't in the band", () => {
+    expect(braceRectInArcBand(c, u, origin, ends, 5000, 50)).toBeNull();
+    expect(braceRectInArcBand([100, 0], u, origin, ends, 50, 50)).toBeNull();
   });
 });

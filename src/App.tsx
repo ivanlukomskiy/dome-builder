@@ -22,7 +22,14 @@ import {
   scaleToRadius,
   SHAPE_AXES,
 } from './lib/polyhedra'
-import { addBrace, deleteBraces, resolveBracePair, setBraceShift } from './lib/braces'
+import {
+  addBrace,
+  BRACE_PARAM_FIELDS,
+  deleteBraces,
+  resolveBracePair,
+  setBraceParam,
+  type BraceParams,
+} from './lib/braces'
 import { Sidebar } from './components/Sidebar'
 import { Viewport } from './components/Viewport'
 import type { DomeConfig, DomeState } from './lib/config'
@@ -395,25 +402,30 @@ function App() {
     setSelectedBraceIndices(new Set())
   }
 
-  // null when the selected braces don't all share the same shift.
-  const braceShiftValue = useMemo(() => {
-    let value: number | null = null
-    let first = true
-    for (const id of liveSelectedBraceIndices) {
-      const shift = sceneData.braces.get(id)!.params.shift
-      if (first) {
-        value = shift
-        first = false
-      } else if (shift !== value) {
-        return null
+  // Each brace property's value if all the selected braces share it, else null.
+  const braceParamValues = useMemo(() => {
+    const values = {} as Record<keyof BraceParams, number | null>
+    for (const { key } of BRACE_PARAM_FIELDS) {
+      let value: number | null = null
+      let first = true
+      for (const id of liveSelectedBraceIndices) {
+        const v = sceneData.braces.get(id)!.params[key]
+        if (first) {
+          value = v
+          first = false
+        } else if (v !== value) {
+          value = null
+          break
+        }
       }
+      values[key] = value
     }
-    return value
+    return values
   }, [liveSelectedBraceIndices, sceneData.braces])
 
-  const handleBraceShiftChange = (value: number) => {
+  const handleBraceParamChange = (key: keyof BraceParams, value: number) => {
     if (liveSelectedBraceIndices.size === 0) return
-    sceneHistory.commit(setBraceShift(sceneData, liveSelectedBraceIndices, value))
+    sceneHistory.commit(setBraceParam(sceneData, liveSelectedBraceIndices, key, value))
   }
 
   const handleDeleteSelectedFaces = () => {
@@ -865,8 +877,8 @@ function App() {
         canAddBrace={canAddBrace}
         onAddBrace={handleAddBrace}
         selectedBraceCount={liveSelectedBraceIndices.size}
-        braceShiftValue={braceShiftValue}
-        onBraceShiftChange={handleBraceShiftChange}
+        braceParamValues={braceParamValues}
+        onBraceParamChange={handleBraceParamChange}
         onDeleteSelectedBraces={handleDeleteSelectedBraces}
         selectedFaceCount={selectedFaceIndices.size}
         onDeleteSelectedFaces={handleDeleteSelectedFaces}

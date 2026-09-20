@@ -8,7 +8,8 @@ import {
   deleteBraces,
   indexBracesByEdge,
   resolveBracePair,
-  setBraceShift,
+  setBraceParam,
+  DEFAULT_BRACE_PARAMS,
 } from "./braces";
 import { deleteEdges, deleteVertices, type SceneData } from "./polyhedra";
 
@@ -44,8 +45,9 @@ describe("addBrace", () => {
     expect(scene.braces.get(0)).toEqual({
       vertexId: 0,
       edgeIds: [0, 1],
-      params: { shift: DEFAULT_BRACE_SHIFT },
+      params: DEFAULT_BRACE_PARAMS,
     });
+    expect(scene.braces.get(0)!.params.shift).toBe(DEFAULT_BRACE_SHIFT);
     expect(scene.nextBraceId).toBe(1);
   });
 
@@ -67,9 +69,12 @@ describe("brace editing and cascades", () => {
   const withBraces = () => addBrace(addBrace(makeScene(), new Set([0, 1])), new Set([1, 2]));
 
   it("clamps shift strictly inside (0, 1)", () => {
-    const scene = setBraceShift(withBraces(), new Set([0]), 5);
+    const scene = setBraceParam(withBraces(), new Set([0]), "shift", 5);
     expect(scene.braces.get(0)!.params.shift).toBeLessThan(1);
-    expect(setBraceShift(scene, new Set([0]), -1).braces.get(0)!.params.shift).toBeGreaterThan(0);
+    expect(setBraceParam(scene, new Set([0]), "shift", -1).braces.get(0)!.params.shift).toBeGreaterThan(0);
+    // other properties only need to be non-negative
+    expect(setBraceParam(scene, new Set([0]), "width", -3).braces.get(0)!.params.width).toBe(0);
+    expect(setBraceParam(scene, new Set([0]), "width", 80).braces.get(0)!.params.width).toBe(80);
   });
 
   it("deleteBraces removes only the given braces", () => {
@@ -98,7 +103,7 @@ describe("brace editing and cascades", () => {
 describe("computeBraceEndpoints", () => {
   it("puts each point shift * edge length from the shared vertex", () => {
     let scene = addBrace(makeScene(), new Set([0, 1]));
-    scene = setBraceShift(scene, new Set([0]), 0.25);
+    scene = setBraceParam(scene, new Set([0]), "shift", 0.25);
     const [p1, p2] = computeBraceEndpoints(
       scene.braces.get(0)!,
       scene.edges,
@@ -132,12 +137,12 @@ describe("computeStrutBraces", () => {
 
     // edge 0 is 0-1: brace 0 sits at A (vertex 0), brace 1 at B (vertex 1)
     const both = strut(0, 10);
-    expect(both.a).toEqual([{ braceId: 0, shift: 0.5, distanceFromVertex: 5, otherEdgeId: 1 }]);
-    expect(both.b).toEqual([{ braceId: 1, shift: 0.5, distanceFromVertex: 5, otherEdgeId: 3 }]);
+    expect(both.a).toEqual([{ braceId: 0, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 5, otherEdgeId: 1 }]);
+    expect(both.b).toEqual([{ braceId: 1, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 5, otherEdgeId: 3 }]);
 
     // edge 1 is 0-2: only brace 0, at A
     expect(strut(1, 20)).toEqual({
-      a: [{ braceId: 0, shift: 0.5, distanceFromVertex: 10, otherEdgeId: 0 }],
+      a: [{ braceId: 0, params: DEFAULT_BRACE_PARAMS, distanceFromVertex: 10, otherEdgeId: 0 }],
       b: [],
     });
     // edge 3 is 1-2: only brace 1, at A (vertex 1)

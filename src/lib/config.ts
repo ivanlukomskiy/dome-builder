@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
-import type { Brace } from './braces'
+import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
 import { downloadJson } from './download'
 
 // A saved config captures the *result* of picking a shape in the "New" tab - the concrete,
@@ -135,7 +135,13 @@ export function deserializeConfig(config: DomeConfig): DomeState {
       nextVertexId: config.nextVertexId,
       nextEdgeId: config.nextEdgeId,
       nextFaceId: config.nextFaceId,
-      braces: new Map(config.braces ?? []),
+      // Braces saved before a property existed get its default.
+      braces: new Map(
+        (config.braces ?? []).map(([id, brace]) => [
+          id,
+          { ...brace, params: { ...DEFAULT_BRACE_PARAMS, ...brace.params } },
+        ]),
+      ),
       nextBraceId: config.nextBraceId ?? 0,
     },
     selectionMode: config.selectionMode,

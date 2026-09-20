@@ -5,7 +5,7 @@ import { computeStrutPlane } from "./strutGeometry";
 import { NO_STRUT_BRACES, type StrutBraces } from "./braces";
 import {
   arcPointAtAngle,
-  maxRectInArcBand,
+  braceRectInArcBand,
   type ArcEndpoints,
 } from "./braceGeometry";
 
@@ -633,7 +633,7 @@ export function computeStrutBoundaryManual2D(
     for (const brace of endBraces) {
       const braceCenterNoRounding = add2(
         origin,
-        scale2(dir, brace.shift * chordLength),
+        scale2(dir, brace.params.shift * chordLength),
       );
       // Construction points (braceCenterNoRounding, braceInn, braceExt) aren't shown as helpers
       // any more - only the final braceCenter below is. Re-add a helpers.push() for any of them
@@ -668,19 +668,21 @@ export function computeStrutBoundaryManual2D(
           name: `braceCenter ${end} (brace ${brace.braceId})`,
         });
 
-        // The biggest rectangle around braceCenter that stays between the inn / ext arcs, its
-        // sides parallel / perpendicular to this strut end's axis (the tangent at that end -
-        // strutA / strutB above are drawn with their length along it). Shown as its 4 corners.
+        // The brace plate's rectangle around braceCenter: `width` long along this strut end's
+        // axis (the tangent at that end - strutA / strutB above are drawn with their length along
+        // it), and as wide as fits between the inn / ext arcs across it, up to `maxPlateWidth`.
+        // Shown as its 4 corners.
         const endAxis =
           end === "A"
             ? tangentDirection2D(a, b, center)
             : tangentDirection2D(b, a, center);
-        const rect = maxRectInArcBand(
+        const rect = braceRectInArcBand(
           braceCenter,
           endAxis,
           center,
           arcEnds,
-          chordLength / 2,
+          brace.params.width,
+          brace.params.maxPlateWidth,
         );
         rect?.forEach((corner, i) => {
           helpers.push({

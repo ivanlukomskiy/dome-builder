@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import type { StepExportProgress } from '../lib/stepExportRunner'
-import { clampBraceShift, MIN_BRACE_SHIFT } from '../lib/braces'
+import { BRACE_PARAM_FIELDS, sanitizeBraceParam, type BraceParams } from '../lib/braces'
 import type {
   AxisType,
   PolyhedronData,
@@ -79,9 +79,9 @@ interface SidebarProps {
   canAddBrace: boolean
   onAddBrace: () => void
   selectedBraceCount: number
-  // null when the selected braces don't all share the same shift.
-  braceShiftValue: number | null
-  onBraceShiftChange: (value: number) => void
+  // Each brace property's value if all the selected braces share it, else null.
+  braceParamValues: Record<keyof BraceParams, number | null>
+  onBraceParamChange: (key: keyof BraceParams, value: number) => void
   onDeleteSelectedBraces: () => void
   selectedFaceCount: number
   onDeleteSelectedFaces: () => void
@@ -261,8 +261,8 @@ export function Sidebar({
   canAddBrace,
   onAddBrace,
   selectedBraceCount,
-  braceShiftValue,
-  onBraceShiftChange,
+  braceParamValues,
+  onBraceParamChange,
   onDeleteSelectedBraces,
   selectedFaceCount,
   onDeleteSelectedFaces,
@@ -908,19 +908,24 @@ export function Sidebar({
 
       {mode === 'edit' && editTarget === 'braces' && selectedBraceCount > 0 && (
         <section className="control-group">
-          <h2>Brace Shift</h2>
-          <div className="transform-field">
-            <label>Shift (fraction of edge length, 0-1)</label>
-            <NumberField
-              value={braceShiftValue}
-              step={0.05}
-              min={MIN_BRACE_SHIFT}
-              placeholder={braceShiftValue === null ? 'Mixed' : undefined}
-              clamp={clampBraceShift}
-              onCommit={onBraceShiftChange}
-            />
-          </div>
-          <p className="hint">Where the brace meets each edge, measured from their shared vertex.</p>
+          <h2>Brace Properties</h2>
+          {BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
+            <div className="transform-field" key={key}>
+              <label>{label}</label>
+              <NumberField
+                value={braceParamValues[key]}
+                step={step}
+                min={0}
+                placeholder={braceParamValues[key] === null ? 'Mixed' : undefined}
+                clamp={(n) => sanitizeBraceParam(key, n)}
+                onCommit={(value) => onBraceParamChange(key, value)}
+              />
+            </div>
+          ))}
+          <p className="hint">
+            Shift is where the brace meets each edge, measured from their shared vertex. The plate
+            settings after the first two aren&rsquo;t used yet.
+          </p>
         </section>
       )}
 

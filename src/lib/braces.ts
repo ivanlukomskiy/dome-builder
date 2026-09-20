@@ -3,12 +3,43 @@ import type { Edge, SceneData } from './polyhedra'
 
 // A brace is a cross-link between two struts that meet at the same vertex: a straight line from
 // a point on one edge to a point on the other, each at `shift * edge length` from that shared
-// vertex. Tunable properties live under `params` (just `shift` for now) so new ones can be added
-// there without touching the brace's topology (`vertexId`, `edgeIds`).
+// vertex. Tunable properties live under `params` so new ones can be added there without touching
+// the brace's topology (`vertexId`, `edgeIds`).
 export interface BraceParams {
   // Fraction of each edge's length, measured from the brace's vertex: 0 < shift < 1.
   shift: number
+  // Brace width, mm: the plate's length along the strut, at the brace.
+  width: number
+  // Cap, mm, on the plate's size across the strut (which is otherwise as wide as fits between the
+  // strut's two curved sides).
+  maxPlateWidth: number
+  // Not used yet:
+  plateRadius: number
+  plateHoleDiameter: number
+  plateHoleOffsetLongitudinal: number
+  plateHoleOffsetTransverse: number
 }
+
+export const DEFAULT_BRACE_PARAMS: BraceParams = {
+  shift: 0.5,
+  width: 50,
+  maxPlateWidth: 50,
+  plateRadius: 5,
+  plateHoleDiameter: 5,
+  plateHoleOffsetLongitudinal: 7,
+  plateHoleOffsetTransverse: 7,
+}
+
+// How each brace property is presented when editing it.
+export const BRACE_PARAM_FIELDS: { key: keyof BraceParams; label: string; step: number }[] = [
+  { key: 'shift', label: 'Shift (fraction of edge length, 0-1)', step: 0.05 },
+  { key: 'width', label: 'Brace width (mm)', step: 5 },
+  { key: 'maxPlateWidth', label: 'Max plate width (mm)', step: 5 },
+  { key: 'plateRadius', label: 'Plate radius (mm)', step: 1 },
+  { key: 'plateHoleDiameter', label: 'Plate hole diameter (mm)', step: 1 },
+  { key: 'plateHoleOffsetLongitudinal', label: 'Plate hole offset, longitudinal (mm)', step: 1 },
+  { key: 'plateHoleOffsetTransverse', label: 'Plate hole offset, transverse (mm)', step: 1 },
+]
 
 export interface Brace {
   // The vertex both edges are connected to.
@@ -17,13 +48,18 @@ export interface Brace {
   params: BraceParams
 }
 
-export const DEFAULT_BRACE_SHIFT = 0.5
+export const DEFAULT_BRACE_SHIFT = DEFAULT_BRACE_PARAMS.shift
 // 0 < shift < 1 is exclusive, so editing clamps just inside the bounds.
 export const MIN_BRACE_SHIFT = 0.01
 export const MAX_BRACE_SHIFT = 0.99
 
 export function clampBraceShift(shift: number): number {
   return Math.min(Math.max(shift, MIN_BRACE_SHIFT), MAX_BRACE_SHIFT)
+}
+
+// Keeps an edited value legal: shift strictly inside (0, 1), every other property non-negative.
+export function sanitizeBraceParam(key: keyof BraceParams, value: number): number {
+  return key === 'shift' ? clampBraceShift(value) : Math.max(value, 0)
 }
 
 // The one vertex two edges share, or null if they share none (or - degenerate duplicate edges -
@@ -58,7 +94,7 @@ export function addBrace(scene: SceneData, selectedEdgeIds: ReadonlySet<number>)
   if (!pair) return scene
   const vertexId = sharedVertex(scene.edges.get(pair[0])!, scene.edges.get(pair[1])!)!
   const braces = new Map(scene.braces)
-  braces.set(scene.nextBraceId, { vertexId, edgeIds: pair, params: { shift: DEFAULT_BRACE_SHIFT } })
+  braces.set(scene.nextBraceId, { vertexId, edgeIds: pair, params: { ...DEFAULT_BRACE_PARAMS } })
   return { ...scene, braces, nextBraceId: scene.nextBraceId + 1 }
 }
 
@@ -68,13 +104,18 @@ export function deleteBraces(scene: SceneData, ids: ReadonlySet<number>): SceneD
   return { ...scene, braces }
 }
 
-export function setBraceShift(scene: SceneData, ids: ReadonlySet<number>, shift: number): SceneData {
+export function setBraceParam(
+  scene: SceneData,
+  ids: ReadonlySet<number>,
+  key: keyof BraceParams,
+  value: number,
+): SceneData {
   if (ids.size === 0) return scene
-  const clamped = clampBraceShift(shift)
+  const sanitized = sanitizeBraceParam(key, value)
   const braces = new Map(scene.braces)
   for (const id of ids) {
     const brace = braces.get(id)
-    if (brace) braces.set(id, { ...brace, params: { ...brace.params, shift: clamped } })
+    if (brace) braces.set(id, { ...brace, params: { ...brace.params, [key]: sanitized } })
   }
   return { ...scene, braces }
 }
@@ -110,7 +151,8 @@ export function computeBraceEndpoints(
 // What the strut builder needs to know about one brace lying on one end of a strut.
 export interface StrutBraceEnd {
   braceId: number
-  shift: number
+  // All of the brace's properties (shift, width, plate settings, ...).
+  params: BraceParams
   // shift * the strut's (chord) length, in mm, measured from this end's vertex.
   distanceFromVertex: number
   // The other edge the brace runs to.
@@ -154,7 +196,7 @@ export function computeStrutBraces(
   for (const { braceId, brace } of bracesByEdge.get(edgeId) ?? []) {
     const entry: StrutBraceEnd = {
       braceId,
-      shift: brace.params.shift,
+      params: brace.params,
       distanceFromVertex: brace.params.shift * length,
       otherEdgeId: brace.edgeIds[0] === edgeId ? brace.edgeIds[1] : brace.edgeIds[0],
     }

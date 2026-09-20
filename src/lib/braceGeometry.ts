@@ -91,59 +91,33 @@ export function rectFitsInBand(c: Pt, u: Pt, p: number, q: number, center: Pt, e
   return true;
 }
 
-// The largest half-height q such that the rectangle with half-extents (p, q) fits (0 if even a
-// flat segment of half-length p doesn't).
-function maxHalfHeight(c: Pt, u: Pt, p: number, center: Pt, ends: ArcEndpoints, qLimit: number): number {
-  if (!rectFitsInBand(c, u, p, 0, center, ends)) return 0;
-  let lo = 0;
-  let hi = qLimit;
-  for (let i = 0; i < 30; i++) {
-    const mid = (lo + hi) / 2;
-    if (rectFitsInBand(c, u, p, mid, center, ends)) lo = mid;
-    else hi = mid;
-  }
-  return lo;
-}
-
-// The rectangle of greatest area centered at `c` with one pair of sides parallel to `u` that stays
-// inside the band between the inn and ext arcs. Fitting is monotone (shrink a fitting rectangle
-// about its center and it still fits), so for each half-length p there's a largest half-height,
-// and this searches p for the biggest product. `maxHalfLength` caps the search. Returns the 4
-// corners, or null if nothing fits (e.g. `c` isn't inside the band).
-export function maxRectInArcBand(
+// The brace plate's rectangle: centered at `c`, `width` long along `u` (the strut end's axis, i.e.
+// the direction of the strut) and as wide as possible across it (perpendicular to `u`) while
+// staying inside the band between the inn and ext arcs, capped at `maxAcrossWidth`. Returns its
+// 4 corners, or null if even a zero-width sliver `width` long doesn't fit (or `c` isn't in the
+// band).
+export function braceRectInArcBand(
   c: Pt,
   u: Pt,
   center: Pt,
   ends: ArcEndpoints,
-  maxHalfLength: number,
+  width: number,
+  maxAcrossWidth: number,
 ): [Pt, Pt, Pt, Pt] | null {
-  if (!isInsideArcBand(c, center, ends)) return null;
+  const p = width / 2;
+  if (!isInsideArcBand(c, center, ends) || !rectFitsInBand(c, u, p, 0, center, ends)) return null;
 
-  // No rectangle can be taller than the band is wide at its widest.
-  const qLimit = Math.max(len(sub(ends.innA, ends.extA)), len(sub(ends.innB, ends.extB)));
+  const qCap = Math.max(maxAcrossWidth, 0) / 2;
+  if (rectFitsInBand(c, u, p, qCap, center, ends)) return rectCorners(c, u, p, qCap);
 
-  let bestP = 0;
-  let bestQ = 0;
-  let bestArea = 0;
-  const consider = (p: number) => {
-    const q = maxHalfHeight(c, u, p, center, ends, qLimit);
-    if (p * q > bestArea) {
-      bestArea = p * q;
-      bestP = p;
-      bestQ = q;
-    }
-  };
-
-  const coarseSteps = 64;
-  const coarseStep = maxHalfLength / coarseSteps;
-  for (let i = 1; i <= coarseSteps; i++) consider(i * coarseStep);
-  if (bestArea === 0) return null;
-
-  // Refine around the best coarse sample.
-  const lo = Math.max(bestP - coarseStep, 0);
-  const hi = bestP + coarseStep;
-  const fineSteps = 64;
-  for (let i = 0; i <= fineSteps; i++) consider(lo + ((hi - lo) * i) / fineSteps);
-
-  return rectCorners(c, u, bestP, bestQ);
+  // Fitting is monotone (shrink a fitting rectangle about its center and it still fits), so the
+  // widest fit can be bisected.
+  let lo = 0;
+  let hi = qCap;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (rectFitsInBand(c, u, p, mid, center, ends)) lo = mid;
+    else hi = mid;
+  }
+  return rectCorners(c, u, p, lo);
 }
