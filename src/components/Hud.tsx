@@ -1,6 +1,7 @@
 import type { EditTarget, ViewMode } from '../App'
 import type { PreviewProgress } from './DomeMesh'
 import type { HubEdgeMetric, ModelStats } from '../lib/polyhedra'
+import { useI18n, type Translator } from '../lib/i18n'
 
 export interface HudHubEdgeMetric extends HubEdgeMetric {
   // Whether a (visible) face fills the wedge between this edge and the next one in angular
@@ -23,8 +24,8 @@ interface HudProps {
   previewProgress: PreviewProgress | null
 }
 
-function formatMm(value: number): string {
-  return `${Math.round(value)} mm`
+function formatMm(value: number, t: Translator['t']): string {
+  return t('{value} mm', { value: Math.round(value) })
 }
 
 const PREVIEW_PHASE_LABEL: Record<PreviewProgress['phase'], string> = {
@@ -34,7 +35,8 @@ const PREVIEW_PHASE_LABEL: Record<PreviewProgress['phase'], string> = {
 }
 
 function PreviewProgressBar({ progress }: { progress: PreviewProgress }) {
-  const label = PREVIEW_PHASE_LABEL[progress.phase]
+  const { t } = useI18n()
+  const label = t(PREVIEW_PHASE_LABEL[progress.phase])
   if (progress.total === 0) {
     return <div className="hud-progress-label">{label}</div>
   }
@@ -63,22 +65,26 @@ export function Hud({
   selectedVertexHubMetrics,
   previewProgress,
 }: HudProps) {
+  const { t, tn } = useI18n()
   let selectionLine: string | null = null
   if (mode === 'edit') {
     if (editTarget === 'vertices' && selectedVertexCount > 0) {
       selectionLine =
         selectedVertexCount === 1 && selectedVertexElevation !== null
-          ? `1 vertex selected — id ${selectedVertexId} — elevation ${formatMm(selectedVertexElevation)}`
-          : `${selectedVertexCount} vertices selected`
+          ? t('1 vertex selected — id {id} — elevation {elevation}', {
+              id: selectedVertexId ?? '',
+              elevation: formatMm(selectedVertexElevation, t),
+            })
+          : tn(selectedVertexCount, '{n} vertex selected', '{n} vertices selected')
     } else if (editTarget === 'edges' && selectedEdgeCount > 0) {
       selectionLine =
         selectedEdgeCount === 1 && selectedEdgeId !== null
-          ? `1 edge selected — id ${selectedEdgeId}`
-          : `${selectedEdgeCount} edges selected`
+          ? t('1 edge selected — id {id}', { id: selectedEdgeId })
+          : tn(selectedEdgeCount, '{n} edge selected', '{n} edges selected')
     } else if (editTarget === 'faces' && selectedFaceCount > 0) {
-      selectionLine = `${selectedFaceCount} face${selectedFaceCount === 1 ? '' : 's'} selected`
+      selectionLine = tn(selectedFaceCount, '{n} face selected', '{n} faces selected')
     } else if (editTarget === 'braces' && selectedBraceCount > 0) {
-      selectionLine = `${selectedBraceCount} brace${selectedBraceCount === 1 ? '' : 's'} selected`
+      selectionLine = tn(selectedBraceCount, '{n} brace selected', '{n} braces selected')
     }
   }
 
@@ -88,9 +94,18 @@ export function Hud({
         <div>{selectionLine}</div>
         {selectedVertexHubMetrics.length > 0 && (
           <div className="hud-hub">
-            <div>{`hub — ${selectedVertexHubMetrics.length} edge${selectedVertexHubMetrics.length === 1 ? '' : 's'}`}</div>
+            <div>{tn(selectedVertexHubMetrics.length, 'hub — {n} edge', 'hub — {n} edges')}</div>
             {selectedVertexHubMetrics.map((m, i) => (
-              <div key={m.edgeId}>{`#${i + 1} id ${m.edgeId} ${formatMm(m.thicknessMm)} — ${Math.round(m.angleToNextDeg)}° to next (${m.hasFaceToNextEdge ? 'face' : 'no face'}) — offset ${formatMm(m.offsetMm)}`}</div>
+              <div key={m.edgeId}>
+                {t('#{index} id {id} {thickness} — {angle}° to next ({face}) — offset {offset}', {
+                  index: i + 1,
+                  id: m.edgeId,
+                  thickness: formatMm(m.thicknessMm, t),
+                  angle: Math.round(m.angleToNextDeg),
+                  face: m.hasFaceToNextEdge ? t('face') : t('no face'),
+                  offset: formatMm(m.offsetMm, t),
+                })}
+              </div>
             ))}
           </div>
         )}
@@ -106,8 +121,8 @@ export function Hud({
   return (
     <div className="hud">
       {previewProgress && <PreviewProgressBar progress={previewProgress} />}
-      <div>{`${formatMm(width)} × ${formatMm(depth)} × ${formatMm(height)}`}</div>
-      <div>{`${stats.faceCount} faces, ${stats.edgeCount} edges`}</div>
+      <div>{`${formatMm(width, t)} × ${formatMm(depth, t)} × ${formatMm(height, t)}`}</div>
+      <div>{t('{faces}, {edges}', { faces: tn(stats.faceCount, '{n} face', '{n} faces'), edges: tn(stats.edgeCount, '{n} edge', '{n} edges') })}</div>
     </div>
   )
 }

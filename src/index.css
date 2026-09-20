@@ -43,6 +43,11 @@ body,
   overflow-y: auto;
 }
 
+.lang-switch {
+  width: 96px;
+  margin-bottom: 16px;
+}
+
 .sidebar h1 {
   font-size: 18px;
   margin: 0 0 20px;

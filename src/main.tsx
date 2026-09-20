@@ -2,6 +2,7 @@ import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { LanguageProvider } from './components/LanguageProvider.tsx'
 
 // Lazy so neither debug page's dependencies (replicad, for the strut-shape one) end up in the
 // main app's bundle for everyone else.
@@ -24,8 +25,10 @@ function Page() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Suspense fallback={null}>
-      <Page />
-    </Suspense>
+    <LanguageProvider>
+      <Suspense fallback={null}>
+        <Page />
+      </Suspense>
+    </LanguageProvider>
   </StrictMode>,
 )
