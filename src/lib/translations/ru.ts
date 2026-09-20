@@ -44,6 +44,7 @@ export const ru: Dictionary = {
   "New dome": "Новый купол",
   "Diameter": "Диаметр",
   "Diameter (mm)": "Диаметр (мм)",
+  "Resizes the whole dome around its center, keeping its shape.": "Изменяет размер всего купола относительно его центра, сохраняя форму.",
   "Shape": "Форма",
   "Main axis": "Главная ось",
   "Subdivisions": "Разбиения",

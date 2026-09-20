@@ -7,6 +7,8 @@ import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
 import type { BracePoints } from '../lib/braceSolid'
 import type { Drawing } from 'replicad'
+import { createWorkerProfiler, type WorkerProfile } from '../lib/previewProfile'
+import { installReplicadProfiler, snapshotReplicadStats } from '../lib/replicadProfiler'
 
 // Owns every heavy, WASM-backed step of building the Preview solids: the 2D shoulder-tenon and
 // flange-plate drawings (computeStrutBoundary/computeFlangeBoundary2D - both build their
@@ -40,11 +42,25 @@ export interface PreviewBuildRequest {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
-  vertices: VertexEdgesInfo[]
+  // Flanges to build, one per group of identical hubs (see flangeInstances.ts) - the main thread
+  // places the resulting mesh at every vertex of the group.
+  flangeJobs: FlangeBuildJob[]
   flangeParams: FlangeShapeParams
-  flangeColor: [number, number, number]
-  // Flanges at a vertex with any override of its own (corner length or flange parameters).
-  flangeOverrideColor: [number, number, number]
+  // Opt-in profiling (see previewProfile.ts): the worker times its steps and returns them.
+  profile?: boolean
+}
+
+export interface FlangeBuildJob {
+  // Signature of the group this flange stands for - echoed back so the main thread can match it.
+  key: string
+  vertex: VertexEdgesInfo
+}
+
+// One flange plate, meshed in the canonical local frame (origin at 0, normal +z, xDir +x, extrusion
+// centered on z = 0). `mesh` is null when the outline came out empty.
+export interface FlangeMeshResult {
+  key: string
+  mesh: { positions: Float32Array; normals: Float32Array; indices: Uint32Array } | null
 }
 
 export interface PreviewPiece {
@@ -59,7 +75,14 @@ export type PreviewBuildPhase = 'struts' | 'flanges'
 export type PreviewWorkerMessage =
   | { type: 'ready'; requestId: number }
   | { type: 'progress'; requestId: number; phase: PreviewBuildPhase; done: number; total: number }
-  | { type: 'result'; requestId: number; pieces: PreviewPiece[]; bracePoints: BracePoints[] }
+  | {
+      type: 'result'
+      requestId: number
+      pieces: PreviewPiece[]
+      bracePoints: BracePoints[]
+      flangeMeshes: FlangeMeshResult[]
+      profile?: WorkerProfile
+    }
   | { type: 'error'; requestId: number; message: string }
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
@@ -68,9 +91,23 @@ function toVector3(t: [number, number, number]): THREE.Vector3 {
 
 async function buildPreview(
   req: PreviewBuildRequest,
-): Promise<{ pieces: PreviewPiece[]; bracePoints: BracePoints[] }> {
+): Promise<{
+  pieces: PreviewPiece[]
+  bracePoints: BracePoints[]
+  flangeMeshes: FlangeMeshResult[]
+  profile?: WorkerProfile
+}> {
+  const prof = req.profile ? createWorkerProfiler() : null
+  // Runs a step, timing it when profiling; returns the same value either way.
+  const timed = <T>(label: string, fn: () => T): T => (prof ? prof.time(label, fn) : fn())
+  const lastMs = () => prof?.lastMs ?? 0
+
+  const initStart = performance.now()
   const { ensureReplicadReady, buildStrutMeshFromDrawing } = await import('../lib/replicadCad')
   await ensureReplicadReady()
+  if (prof) installReplicadProfiler()
+  const initMs = performance.now() - initStart
+  const buildStart = performance.now()
   self.postMessage({ type: 'ready', requestId: req.requestId } satisfies PreviewWorkerMessage)
 
   const center = new THREE.Vector3(0, 0, 0)
@@ -82,22 +119,26 @@ async function buildPreview(
   req.strutJobs.forEach((job, i) => {
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
-    const boundary = computeStrutBoundary(
-      posA,
-      posB,
-      center,
-      job.offsetA,
-      job.offsetB,
-      job.cornerLengthA,
-      job.cornerLengthB,
-      req.halfWidth,
-      req.endGrooveLengthPercent,
-      req.midGrooveLengthPercent,
-      req.grooveDepth,
-      req.millingDiameter,
-      req.chamferLength,
-      job.braces,
+    const boundary = timed('strutBoundary2D', () =>
+      computeStrutBoundary(
+        posA,
+        posB,
+        center,
+        job.offsetA,
+        job.offsetB,
+        job.cornerLengthA,
+        job.cornerLengthB,
+        req.halfWidth,
+        req.endGrooveLengthPercent,
+        req.midGrooveLengthPercent,
+        req.grooveDepth,
+        req.millingDiameter,
+        req.chamferLength,
+        job.braces,
+      ),
     )
+    const strutBoundaryMs = lastMs()
+    let strutSolidMs = 0
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
@@ -107,9 +148,13 @@ async function buildPreview(
     } satisfies PreviewWorkerMessage)
     const plane = computeStrutPlane(posA, posB, center)
 
-    if (boundary.main) {
+    const mainDrawing = boundary.main
+    if (mainDrawing) {
       try {
-        const strut = buildStrutMeshFromDrawing(boundary.main, plane, job.beamThickness)
+        const strut = timed('strutSolid (sketch+extrude+mesh)', () =>
+          buildStrutMeshFromDrawing(mainDrawing, plane, job.beamThickness),
+        )
+        strutSolidMs += lastMs()
         if (strut) {
           pieces.push({ positions: strut.positions, normals: strut.normals, indices: strut.indices, color: job.color })
         }
@@ -139,11 +184,10 @@ async function buildPreview(
     for (const [plate, brace] of plates) {
       if (!plate || !brace || brace.params.plateThickness <= 0) continue
       try {
-        const mesh = buildStrutMeshFromDrawing(
-          plate,
-          bracePlatePlane(plane, job.beamThickness, brace),
-          brace.params.plateThickness,
+        const mesh = timed('bracePlateSolid', () =>
+          buildStrutMeshFromDrawing(plate, bracePlatePlane(plane, job.beamThickness, brace), brace.params.plateThickness),
         )
+        strutSolidMs += lastMs()
         if (mesh) {
           pieces.push({ positions: mesh.positions, normals: mesh.normals, indices: mesh.indices, color: BRACE_PLATE_COLOR })
         }
@@ -151,68 +195,82 @@ async function buildPreview(
         console.error(`Failed to build brace plate ${brace.braceId} for edge ${job.index}`, err)
       }
     }
+    prof?.items.push({ kind: 'strut', id: job.index, boundaryMs: strutBoundaryMs, solidMs: strutSolidMs })
   })
 
-  // Each flange plate is `grooveDepth` thick and seated flush in the shoulder notch cut into the
-  // struts' own ends - one plate's outer face level with the struts' own outer surface
-  // (halfWidth from the vertex), the other's inner face level with their inner surface, both
-  // parallel to the vertex's own tangent plane. `buildStrutMeshFromDrawing` centers its extrusion
-  // on the plane it's given, so each plane sits at the midpoint of its plate's span -
-  // `halfWidth - grooveDepth / 2` out from the vertex, one on either side. See DomeMesh.tsx.
-  const flangeSpan = req.halfWidth - req.grooveDepth / 2
+  // Each flange is built once, in the canonical local frame, as a plate `grooveDepth` thick
+  // centered on z = 0 (`buildStrutMeshFromDrawing` centers its extrusion on the plane it's given).
+  // The main thread then places it on every vertex it stands for - two plates each, seated flush
+  // in the shoulder notch cut into the struts' own ends, one with its outer face level with the
+  // struts' outer surface (halfWidth from the vertex), the other with its inner face level with
+  // their inner surface - see DomeMesh.tsx.
+  const localPlane = {
+    origin: new THREE.Vector3(0, 0, 0),
+    normal: new THREE.Vector3(0, 0, 1),
+    xDir: new THREE.Vector3(1, 0, 0),
+  }
+  const flangeMeshes: FlangeMeshResult[] = []
 
-  req.vertices.forEach((vertex, i) => {
-    const boundary = computeFlangeBoundary2D(
-      { vertexId: vertex.vertexId, edges: vertex.edges },
-      resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
+  req.flangeJobs.forEach((job, i) => {
+    const { vertex } = job
+    const boundary = timed('flangeBoundary2D', () =>
+      computeFlangeBoundary2D(
+        { vertexId: vertex.vertexId, edges: vertex.edges },
+        resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
+      ),
     )
+    const flangeBoundaryMs = lastMs()
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
       phase: 'flanges',
       done: i + 1,
-      total: req.vertices.length,
+      total: req.flangeJobs.length,
     } satisfies PreviewWorkerMessage)
-    if (!boundary.main) return
 
-    const vertexPos = toVector3(vertex.position)
-    const normal = toVector3(vertex.tangentPlane.normal)
-    const xDir = toVector3(vertex.tangentPlane.e1)
+    const flangeDrawing = boundary.main
+    if (!flangeDrawing) {
+      flangeMeshes.push({ key: job.key, mesh: null })
+      prof?.items.push({ kind: 'flange', id: vertex.vertexId, boundaryMs: flangeBoundaryMs, solidMs: 0 })
+      return
+    }
 
+    let mesh: FlangeMeshResult['mesh'] = null
+    let flangeSolidMs = 0
     try {
-      for (const sign of [1, -1] as const) {
-        const plane = {
-          origin: vertexPos.clone().addScaledVector(normal, sign * flangeSpan),
-          normal,
-          xDir,
-        }
-        const flange = buildStrutMeshFromDrawing(boundary.main, plane, req.grooveDepth)
-        if (!flange) continue
-        pieces.push({
-          positions: flange.positions,
-          normals: flange.normals,
-          indices: flange.indices,
-          color:
-            vertex.cornerLengthOverride !== undefined || vertex.flangeOverrides !== undefined
-              ? req.flangeOverrideColor
-              : req.flangeColor,
-        })
-      }
+      mesh = timed('flangeSolid (sketch+extrude+mesh)', () =>
+        buildStrutMeshFromDrawing(flangeDrawing, localPlane, req.grooveDepth),
+      )
+      flangeSolidMs = lastMs()
     } catch (err) {
       console.error(`Failed to build flange solid for vertex ${vertex.vertexId}`, err)
     }
+    flangeMeshes.push({ key: job.key, mesh })
+    prof?.items.push({ kind: 'flange', id: vertex.vertexId, boundaryMs: flangeBoundaryMs, solidMs: flangeSolidMs })
   })
 
-  return { pieces, bracePoints }
+  const profile: WorkerProfile | undefined = prof
+    ? {
+        initMs,
+        buildMs: performance.now() - buildStart,
+        stages: prof.stages,
+        items: prof.items,
+        replicad: snapshotReplicadStats(),
+      }
+    : undefined
+  return { pieces, bracePoints, flangeMeshes, profile }
 }
 
 self.onmessage = (event: MessageEvent<PreviewBuildRequest>) => {
   const req = event.data
   buildPreview(req).then(
-    ({ pieces, bracePoints }) => {
+    ({ pieces, bracePoints, flangeMeshes, profile }) => {
       const transfer: Transferable[] = []
       for (const p of pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
-      self.postMessage({ type: 'result', requestId: req.requestId, pieces, bracePoints } satisfies PreviewWorkerMessage, {
+      for (const f of flangeMeshes) {
+        if (f.mesh) transfer.push(f.mesh.positions.buffer, f.mesh.normals.buffer, f.mesh.indices.buffer)
+      }
+      self.postMessage({ type: 'result', requestId: req.requestId, pieces, bracePoints, flangeMeshes, profile } satisfies PreviewWorkerMessage, {
         transfer,
       })
     },

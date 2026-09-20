@@ -10,8 +10,7 @@ import { downloadJson } from './download'
 // worth persisting).
 export interface DomeConfig {
   version: 16
-  // The shape recipe's own size (also what the viewport's marker sizes scale to) - kept here
-  // (rather than left to reset to its hardcoded default) since it's live, user-facing state.
+  // The dome's sphere diameter in mm (SceneData.diameter).
   diameter: number
   // Polar coordinates about the origin: [r (mm), azimuth (rad), elevation (rad)] - see PolarCoord.
   vertices: [number, [number, number, number]][]
@@ -65,7 +64,6 @@ export interface DomeConfig {
 // The subset of App's state a config captures - plain data in, plain data out, so App can
 // build one straight from its own state variables and apply one straight back onto them.
 export interface DomeState {
-  diameter: number
   sceneData: SceneData
   selectionMode: SelectionMode
   extrudeDistance: number
@@ -94,7 +92,7 @@ export interface DomeState {
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
     version: 16,
-    diameter: state.diameter,
+    diameter: state.sceneData.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
       id,
       [v.r, v.azimuth, v.elevation],
@@ -133,8 +131,8 @@ export function serializeConfig(state: DomeState): DomeConfig {
 
 export function deserializeConfig(config: DomeConfig): DomeState {
   return {
-    diameter: config.diameter,
     sceneData: {
+      diameter: config.diameter,
       vertices: new Map(config.vertices.map(([id, [r, azimuth, elevation]]) => [id, { r, azimuth, elevation }])),
       edges: new Map(config.edges),
       faces: new Map(config.faces),

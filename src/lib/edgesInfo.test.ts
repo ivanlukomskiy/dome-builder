@@ -30,6 +30,7 @@ describe("buildFaceNeighborPairs with Add Points faces", () => {
       nextEdgeId: 0,
       nextFaceId: 0,
       braces: new Map(),
+      diameter: 10,
       nextBraceId: 0,
     };
     const canonical = applyVertexTransforms(vertices, new Map());

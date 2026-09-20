@@ -264,6 +264,8 @@ export interface PolyhedronData {
   faces: Face[]
   edges: Edge[]
   layers: Layer[] // sorted top (index 0) to bottom
+  // The diameter (mm) of the sphere the vertices were generated on.
+  diameter: number
 }
 
 const HEIGHT_EPS = 1e-4
@@ -347,7 +349,7 @@ export function computePolyhedron(
     v.clone().applyQuaternion(quat).multiplyScalar(scale),
   )
 
-  return { vertices, faces, edges, layers: computeLayers(vertices) }
+  return { vertices, faces, edges, layers: computeLayers(vertices), diameter }
 }
 
 // A point in spherical (polar) coordinates about the dome's center, which is the origin. Y is up,
@@ -384,6 +386,10 @@ export function polarToCartesian(p: PolarCoord): THREE.Vector3 {
 // edgeThickness/selection (all keyed by id, and deliberately outside the undo snapshot - see
 // useHistory) survive undo/redo without any remapping.
 export interface SceneData {
+  // The dome's sphere diameter in mm: the size its vertices were generated at, and what the
+  // sidebar's Diameter field shows and edits (see scaleSceneDiameter). Part of the scene so an
+  // undo brings it back in step with the vertices.
+  diameter: number
   // Stored in polar coordinates about the origin (see PolarCoord); everything downstream that
   // needs xyz positions works on the Cartesian map applyVertexTransforms derives from these.
   vertices: Map<number, PolarCoord>
@@ -433,7 +439,17 @@ export function pruneToLayerCount(data: PolyhedronData, layerCount: number): Sce
     faces.set(nextFaceId++, face.map((i) => idMap.get(i)!))
   }
 
-  return { vertices, edges, faces, nextVertexId, nextEdgeId, nextFaceId, braces: new Map(), nextBraceId: 0 }
+  return {
+    diameter: data.diameter,
+    vertices,
+    edges,
+    faces,
+    nextVertexId,
+    nextEdgeId,
+    nextFaceId,
+    braces: new Map(),
+    nextBraceId: 0,
+  }
 }
 
 // Every vertex among `candidateIds` on the same layer (same height) as the given vertex.
@@ -493,6 +509,18 @@ export function findRotationalSymmetryGroup(
     if (bestId !== null && bestDist < 1e-3) group.add(bestId)
   }
   return Array.from(group)
+}
+
+// Resizes the whole dome to a new sphere diameter: every vertex keeps its direction from the
+// center and its distance from it is scaled by newDiameter / oldDiameter, so the shape stays
+// exactly the same, just bigger or smaller. Per-vertex transforms are offsets from the (now
+// scaled) default positions and are left as they are.
+export function scaleSceneDiameter(scene: SceneData, diameter: number): SceneData {
+  if (!(diameter > 0) || !(scene.diameter > 0) || diameter === scene.diameter) return scene
+  const factor = diameter / scene.diameter
+  const vertices = new Map<number, PolarCoord>()
+  for (const [id, p] of scene.vertices) vertices.set(id, { ...p, r: p.r * factor })
+  return { ...scene, diameter, vertices }
 }
 
 // Per-vertex adjustment away from its default (canonical) position, as a diff in polar
@@ -847,6 +875,7 @@ export function addMidpointsBetween(
   }
 
   return {
+    diameter: scene.diameter,
     vertices,
     edges,
     faces,

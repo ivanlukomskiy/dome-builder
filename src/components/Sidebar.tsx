@@ -461,15 +461,18 @@ export function Sidebar({
         </>
       )}
 
-      {mode === 'new' && (
-        <section className="control-group">
-          <h2>{t('Diameter')}</h2>
-          <div className="transform-field">
-            <label>{t('Diameter (mm)')}</label>
-            <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
-          </div>
-        </section>
-      )}
+      <section className="control-group">
+        <h2>{t('Diameter')}</h2>
+        <div className="transform-field">
+          <label>{t('Diameter (mm)')}</label>
+          <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
+        </div>
+        {mode !== 'new' && (
+          <p className="hint">
+            {t('Resizes the whole dome around its center, keeping its shape.')}
+          </p>
+        )}
+      </section>
 
       {mode === 'new' && (
         <section className="control-group">

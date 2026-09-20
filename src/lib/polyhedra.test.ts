@@ -7,6 +7,7 @@ import {
   computePolyhedron,
   polarToCartesian,
   pruneToLayerCount,
+  scaleSceneDiameter,
 } from "./polyhedra";
 
 const close = (a: THREE.Vector3, b: THREE.Vector3) => expect(a.distanceTo(b)).toBeLessThan(1e-6);
@@ -55,8 +56,39 @@ describe("applyVertexTransform", () => {
 describe("computePolyhedron -> SceneData", () => {
   it("bakes vertices onto the requested sphere, in polar form", () => {
     const scene = pruneToLayerCount(computePolyhedron("icosahedron", "vertex", 2, 4000), 100);
+    expect(scene.diameter).toBe(4000);
     for (const p of scene.vertices.values()) expect(p.r).toBeCloseTo(2000, 6);
     const xyz = applyVertexTransforms(scene.vertices, new Map());
     for (const v of xyz.values()) expect(v.length()).toBeCloseTo(2000, 6);
+  });
+});
+
+describe("scaleSceneDiameter", () => {
+  const base = () => pruneToLayerCount(computePolyhedron("icosahedron", "vertex", 2, 4000), 100);
+
+  it("scales every vertex's distance from the center, keeping its direction", () => {
+    const scene = base();
+    const scaled = scaleSceneDiameter(scene, 1000);
+    expect(scaled.diameter).toBe(1000);
+    for (const [id, p] of scene.vertices) {
+      const q = scaled.vertices.get(id)!;
+      expect(q.r).toBeCloseTo(p.r / 4, 6);
+      expect(q.azimuth).toBe(p.azimuth);
+      expect(q.elevation).toBe(p.elevation);
+    }
+  });
+
+  it("does not touch the original scene and round-trips", () => {
+    const scene = base();
+    const back = scaleSceneDiameter(scaleSceneDiameter(scene, 700), 4000);
+    for (const [id, p] of scene.vertices) expect(back.vertices.get(id)!.r).toBeCloseTo(p.r, 6);
+    expect(scene.diameter).toBe(4000);
+  });
+
+  it("ignores a non-positive or unchanged diameter", () => {
+    const scene = base();
+    expect(scaleSceneDiameter(scene, 0)).toBe(scene);
+    expect(scaleSceneDiameter(scene, -5)).toBe(scene);
+    expect(scaleSceneDiameter(scene, 4000)).toBe(scene);
   });
 });

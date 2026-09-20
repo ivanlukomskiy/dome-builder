@@ -6,10 +6,19 @@ import type { EditTarget, ViewMode } from '../App'
 import type { SceneData } from '../lib/polyhedra'
 import { computeBraceEndpoints } from '../lib/braces'
 import { buildBraceSolids, type BracePoints } from '../lib/braceSolid'
-import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
+import { createPreviewProfileRecorder, isPreviewProfilingEnabled } from '../lib/previewProfile'
 import type { FlangeShapeParams } from '../lib/flangeGeometry'
+import {
+  flangeFrame,
+  flangeMeshCache,
+  flangeSignatureContext,
+  groupFlanges,
+  placeMesh,
+  type LocalFlange,
+} from '../lib/flangeInstances'
 import type {
+  FlangeBuildJob,
   PreviewBuildPhase,
   PreviewBuildRequest,
   PreviewPiece,
@@ -17,11 +26,15 @@ import type {
   StrutBuildJob,
 } from '../workers/previewBuilder.worker'
 
-// How many struts (or flange vertices) one worker builds before it's torn down and a fresh one
+// How many struts (or flange outlines) one worker builds before it's torn down and a fresh one
 // takes over - see the preview-build effect's runBatch. Small enough to keep a bound on how much
 // opencascade garbage any one instance accumulates, large enough that most domes don't pay the
 // WASM-reinit cost more than a handful of times.
 const BATCH_SIZE = 12
+// How many workers (each with its own opencascade heap) may build batches at once. Batches are
+// independent, so the build time scales down almost linearly with this; it's capped because
+// every live worker holds a full WASM instance in memory.
+const MAX_WORKERS = 4
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = []
@@ -225,13 +238,17 @@ export function DomeMesh({
   // also reclaims that worker's whole opencascade heap on its own, rather than relying on every
   // intermediate shape being individually .delete()'d.
   const [previewGeometry, setPreviewGeometry] = useState<THREE.BufferGeometry | null>(null)
-  const workerRef = useRef<Worker | null>(null)
+  const workersRef = useRef<Set<Worker>>(new Set())
   const nextRequestIdRef = useRef(0)
 
   useEffect(() => {
+    const terminateWorkers = () => {
+      for (const worker of workersRef.current) worker.terminate()
+      workersRef.current.clear()
+    }
+
     if (mode !== 'preview') {
-      workerRef.current?.terminate()
-      workerRef.current = null
+      terminateWorkers()
       onPreviewProgress(null)
       return
     }
@@ -239,24 +256,31 @@ export function DomeMesh({
     const requestId = ++nextRequestIdRef.current
     onPreviewProgress({ phase: 'loading', done: 0, total: 0 })
 
+    // Opt-in (`?profile` in the URL, see previewProfile.ts): times every stage of this build and
+    // logs a report at the end.
+    const profiler = isPreviewProfilingEnabled() ? createPreviewProfileRecorder() : null
+    const timedMain = <T,>(label: string, fn: () => T): T => (profiler ? profiler.mainStep(label, fn) : fn())
+
     // Each edge's offsets and angular layout - all cheap, pure-JS work shared with the
     // "Download STEP Archive" export (see previewBuildInputs.ts).
-    const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs({
-      data,
-      transformedVertices,
-      edgeThickness,
-      thickness,
-      extrudeDistance,
-      cornerLength,
-      vertexCornerLength,
-      vertexFlangeParams,
-      offsetModifier,
-      endGrooveLengthPercent,
-      midGrooveLengthPercent,
-      grooveDepth,
-      millingDiameter,
-      chamferLength,
-    })
+    const { strutEntries, vertices, halfWidth } = timedMain('computePreviewBuildInputs', () =>
+      computePreviewBuildInputs({
+        data,
+        transformedVertices,
+        edgeThickness,
+        thickness,
+        extrudeDistance,
+        cornerLength,
+        vertexCornerLength,
+        vertexFlangeParams,
+        offsetModifier,
+        endGrooveLengthPercent,
+        midGrooveLengthPercent,
+        grooveDepth,
+        millingDiameter,
+        chamferLength,
+      }),
+    )
 
     // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
     // the same thing (thickness override, and by how much) in both places.
@@ -285,35 +309,76 @@ export function DomeMesh({
       millingDiameter,
       chamferLength,
       flangeParams,
-      flangeColor: [FLANGE_COLOR.r, FLANGE_COLOR.g, FLANGE_COLOR.b] as [number, number, number],
-      flangeOverrideColor: [CORNER_OVERRIDE_COLOR.r, CORNER_OVERRIDE_COLOR.g, CORNER_OVERRIDE_COLOR.b] as [
-        number,
-        number,
-        number,
-      ],
     }
 
-    // Runs one batch (a handful of struts, or of flange vertices - never both) in its own fresh
+    // Flanges: hubs with identical inputs (up to rotation about their normal) share one built
+    // mesh, and meshes built earlier are reused as they are - see flangeInstances.ts. Only the
+    // groups without a cached mesh are sent to the workers.
+    const flangeGroups = timedMain('groupFlanges', () =>
+      groupFlanges(vertices, flangeSignatureContext(flangeParams, grooveDepth)),
+    )
+    const builtFlanges = new Map<string, LocalFlange>()
+    const flangesToBuild: FlangeBuildJob[] = []
+    let cachedVertexCount = 0
+    for (const group of flangeGroups) {
+      const cached = flangeMeshCache.get(group.key)
+      if (cached) {
+        builtFlanges.set(group.key, cached)
+        cachedVertexCount += group.members.length
+      } else {
+        flangesToBuild.push({ key: group.key, vertex: group.representative.vertex })
+      }
+    }
+    const flangeGroupByKey = new Map(flangeGroups.map((g) => [g.key, g]))
+
+    const poolSize = Math.max(1, Math.min(MAX_WORKERS, (navigator.hardwareConcurrency || 2) - 1))
+
+    // Progress, in units the user recognizes: struts, and vertices (a built flange counts for
+    // every vertex it stands for). Batches run concurrently, so each reports into shared counters.
+    const progress = { struts: 0, flanges: cachedVertexCount }
+    const strutTotal = strutJobs.length
+    const flangeTotal = vertices.length
+    const emitProgress = () => {
+      // Flange batches are scheduled first (they're the long ones), so show them while any remain.
+      if (progress.flanges < flangeTotal) {
+        onPreviewProgress({ phase: 'flanges', done: progress.flanges, total: flangeTotal })
+      } else {
+        onPreviewProgress({ phase: 'struts', done: progress.struts, total: strutTotal })
+      }
+    }
+
+    // Runs one batch (a handful of struts, or of flange outlines - never both) in its own fresh
     // worker, terminated the moment its result comes back. A single opencascade instance building
     // *everything* for a large dome in one go is what was running out of memory - splitting the
     // work across many short-lived instances instead means no single one ever has to hold more
     // than one batch's worth of accumulated geometry before its whole heap gets reclaimed.
+    // `weights[k]` is how many progress units the batch's k-th item is worth.
     const runBatch = (
-      jobs: StrutBuildJob[],
-      vertices: VertexEdgesInfo[],
+      batch: { strutJobs: StrutBuildJob[]; flangeJobs: FlangeBuildJob[] },
       phase: PreviewBuildPhase,
-      doneBefore: number,
-      total: number,
-    ): Promise<{ pieces: PreviewPiece[]; bracePoints: BracePoints[] }> =>
+      weights: number[],
+    ): Promise<Extract<PreviewWorkerMessage, { type: 'result' }>> =>
       new Promise((resolve, reject) => {
+        const createdAt = performance.now()
+        let readyAt = createdAt
         const worker = new Worker(new URL('../workers/previewBuilder.worker.ts', import.meta.url), {
           type: 'module',
         })
-        workerRef.current = worker
+        workersRef.current.add(worker)
+
+        // Progress units already reported for this batch.
+        let reported = 0
+        const report = (itemsDone: number) => {
+          let units = 0
+          for (let k = 0; k < itemsDone; k++) units += weights[k]
+          progress[phase] += units - reported
+          reported = units
+          emitProgress()
+        }
 
         const settle = (fn: () => void) => {
           worker.terminate()
-          if (workerRef.current === worker) workerRef.current = null
+          workersRef.current.delete(worker)
           fn()
         }
 
@@ -321,10 +386,20 @@ export function DomeMesh({
           const msg = event.data
           if (msg.requestId !== requestId) return
 
-          if (msg.type === 'progress') {
-            onPreviewProgress({ phase, done: doneBefore + msg.done, total })
+          if (msg.type === 'ready') {
+            readyAt = performance.now()
+          } else if (msg.type === 'progress') {
+            report(msg.done)
           } else if (msg.type === 'result') {
-            settle(() => resolve({ pieces: msg.pieces, bracePoints: msg.bracePoints }))
+            report(weights.length)
+            profiler?.addBatch({
+              phase,
+              items: weights.length,
+              createToReadyMs: readyAt - createdAt,
+              readyToResultMs: performance.now() - readyAt,
+              worker: msg.profile ?? null,
+            })
+            settle(() => resolve(msg))
           } else if (msg.type === 'error') {
             settle(() => reject(new Error(msg.message)))
           }
@@ -333,7 +408,12 @@ export function DomeMesh({
           settle(() => reject(new Error(event.message)))
         }
 
-        const request: PreviewBuildRequest = { ...sharedRequestFields, strutJobs: jobs, vertices }
+        const request: PreviewBuildRequest = {
+          ...sharedRequestFields,
+          strutJobs: batch.strutJobs,
+          flangeJobs: batch.flangeJobs,
+          profile: profiler !== null,
+        }
         worker.postMessage(request)
       })
 
@@ -343,55 +423,118 @@ export function DomeMesh({
       // Every strut's brace plate end points, across all batches - a brace's two struts can land
       // in different batches, so its body is only built once they're all in.
       const allBracePoints: BracePoints[] = []
-      try {
-        onPreviewProgress({ phase: 'struts', done: 0, total: strutJobs.length })
-        const strutBatches = chunk(strutJobs, BATCH_SIZE)
-        for (let i = 0; i < strutBatches.length; i++) {
-          if (cancelled) return
-          const { pieces, bracePoints } = await runBatch(
-            strutBatches[i],
-            [],
-            'struts',
-            i * BATCH_SIZE,
-            strutJobs.length,
-          )
-          allPieces.push(...pieces)
-          allBracePoints.push(...bracePoints)
-        }
+      const strutResults: Extract<PreviewWorkerMessage, { type: 'result' }>[] = []
 
-        onPreviewProgress({ phase: 'flanges', done: 0, total: vertices.length })
-        const vertexBatches = chunk(vertices, BATCH_SIZE)
-        for (let i = 0; i < vertexBatches.length; i++) {
-          if (cancelled) return
-          const batch = vertexBatches[i]
+      // Independent batches, longest first. A batch failing to build flanges shouldn't sink the
+      // whole preview (a degenerate wedge angle, an opencascade edge case, ...): log which vertices
+      // were in it and skip them, same as a single strut failing to build. A failing strut batch
+      // fails the build.
+      const flangeBatchSize = Math.max(1, Math.min(BATCH_SIZE, Math.ceil(flangesToBuild.length / poolSize)))
+      const tasks: (() => Promise<void>)[] = []
+      for (const jobs of chunk(flangesToBuild, flangeBatchSize)) {
+        tasks.push(async () => {
           try {
-            const { pieces } = await runBatch([], batch, 'flanges', i * BATCH_SIZE, vertices.length)
-            allPieces.push(...pieces)
+            const weights = jobs.map((job) => flangeGroupByKey.get(job.key)?.members.length ?? 1)
+            const result = await runBatch({ strutJobs: [], flangeJobs: jobs }, 'flanges', weights)
+            for (const { key, mesh } of result.flangeMeshes) {
+              const group = flangeGroupByKey.get(key)
+              if (!mesh || !group) continue
+              const local: LocalFlange = { mesh, startAngleDeg: group.representative.startAngleDeg }
+              builtFlanges.set(key, local)
+              flangeMeshCache.set(key, local)
+            }
           } catch (err) {
-            // A single vertex's flange geometry failing (a degenerate wedge angle, an
-            // opencascade edge case, ...) shouldn't sink the whole preview - log which vertices
-            // were in the failing batch and skip them, same as a single strut failing to build.
-            console.error(`Failed to build flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
+            console.error(
+              `Failed to build flanges for vertices ${jobs.map((j) => j.vertex.vertexId).join(', ')}`,
+              err,
+            )
+          }
+        })
+      }
+      chunk(strutJobs, BATCH_SIZE).forEach((jobs, i) => {
+        tasks.push(async () => {
+          strutResults[i] = await runBatch(
+            { strutJobs: jobs, flangeJobs: [] },
+            'struts',
+            jobs.map(() => 1),
+          )
+        })
+      })
+
+      try {
+        emitProgress()
+        let next = 0
+        const runner = async () => {
+          while (!cancelled) {
+            const task = tasks[next++]
+            if (!task) return
+            await task()
           }
         }
+        await Promise.all(Array.from({ length: Math.min(poolSize, tasks.length) }, runner))
 
         if (cancelled) return
-        for (const { braceId, mesh } of buildBraceSolids(allBracePoints)) {
+        for (const result of strutResults) {
+          allPieces.push(...result.pieces)
+          allBracePoints.push(...result.bracePoints)
+        }
+
+        // Both plates of every hub: the group's mesh, turned to this vertex's orientation and
+        // pushed out `flangeSpan` either way along its normal. Each plate is `grooveDepth` thick
+        // and seated flush in the shoulder notch cut into the struts' own ends - one plate's outer
+        // face level with the struts' own outer surface (halfWidth from the vertex), the other's
+        // inner face level with their inner surface. The local mesh is centered on z = 0, so each
+        // plate sits at the midpoint of its span, `halfWidth - grooveDepth / 2` out from the vertex.
+        timedMain('placeFlanges', () => {
+          const flangeSpan = halfWidth - grooveDepth / 2
+          for (const group of flangeGroups) {
+            const built = builtFlanges.get(group.key)
+            if (!built) continue
+            for (const { vertex, startAngleDeg } of group.members) {
+              const color =
+                vertex.cornerLengthOverride !== undefined || vertex.flangeOverrides !== undefined
+                  ? CORNER_OVERRIDE_COLOR
+                  : FLANGE_COLOR
+              for (const sign of [1, -1] as const) {
+                const placed = placeMesh(
+                  built.mesh,
+                  flangeFrame(vertex, startAngleDeg - built.startAngleDeg, sign * flangeSpan),
+                )
+                allPieces.push({ ...placed, color: [color.r, color.g, color.b] })
+              }
+            }
+          }
+        })
+
+        for (const { braceId, mesh } of timedMain('buildBraceSolids', () => buildBraceSolids(allBracePoints))) {
           try {
             allPieces.push({ ...mesh, color: BRACE_BODY_COLOR })
           } catch (err) {
             console.error(`Failed to build brace ${braceId}`, err)
           }
         }
-        const geometries = allPieces.map(buildColoredGeometry)
-        const merged = geometries.length > 0 ? mergeGeometries(geometries, false) : null
-        geometries.forEach((g) => g.dispose())
+        const merged = timedMain('buildColoredGeometry + mergeGeometries', () => {
+          const geometries = allPieces.map(buildColoredGeometry)
+          const result = geometries.length > 0 ? mergeGeometries(geometries, false) : null
+          geometries.forEach((g) => g.dispose())
+          return result
+        })
         setPreviewGeometry((prev) => {
           prev?.dispose()
           return merged
         })
+        profiler?.finish({
+          struts: strutJobs.length,
+          vertices: vertices.length,
+          poolSize,
+          flangeGroups: flangeGroups.length,
+          flangeGroupsBuilt: flangesToBuild.length,
+          flangeGroupsCached: flangeGroups.length - flangesToBuild.length,
+        })
       } catch (err) {
         console.error('Failed to build preview', err)
+        // Batches still running would only build a preview nobody is waiting for.
+        terminateWorkers()
       } finally {
         if (!cancelled) onPreviewProgress(null)
       }
@@ -399,8 +542,7 @@ export function DomeMesh({
 
     return () => {
       cancelled = true
-      workerRef.current?.terminate()
-      workerRef.current = null
+      terminateWorkers()
     }
   }, [
     mode,

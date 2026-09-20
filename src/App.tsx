@@ -18,6 +18,7 @@ import {
   findRotationalSymmetryGroup,
   isDefaultVertexTransform,
   pruneToLayerCount,
+  scaleSceneDiameter,
   SHAPE_AXES,
 } from './lib/polyhedra'
 import {
@@ -139,11 +140,13 @@ function App() {
   const [shape, setShape] = useState<ShapeType>(DEFAULT_SHAPE)
   const [axis, setAxis] = useState<AxisType>(DEFAULT_AXIS)
   const [subdivisions, setSubdivisions] = useState(DEFAULT_SUBDIVISIONS)
-  const [diameter, setDiameter] = useState(initial?.diameter ?? DEFAULT_DIAMETER_MM)
+  // The recipe's own diameter, while choosing a shape in "New"; once a dome exists its size is
+  // sceneData.diameter (see below).
+  const [newDiameter, setNewDiameter] = useState(initial?.sceneData.diameter ?? DEFAULT_DIAMETER_MM)
 
   const previewData = useMemo(
-    () => computePolyhedron(shape, axis, subdivisions, diameter),
-    [shape, axis, subdivisions, diameter],
+    () => computePolyhedron(shape, axis, subdivisions, newDiameter),
+    [shape, axis, subdivisions, newDiameter],
   )
 
   const [layerCount, setLayerCount] = useState(DEFAULT_LAYER_COUNT)
@@ -167,22 +170,28 @@ function App() {
     setShape(nextShape)
     setAxis(nextAxis)
     setSubdivisions(nextSubdivisions)
-    setDiameter(nextDiameter)
+    setNewDiameter(nextDiameter)
     const next = computePolyhedron(nextShape, nextAxis, nextSubdivisions, nextDiameter)
     setLayerCount(Math.ceil(next.layers.length / 2))
   }
-  const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions, diameter)
-  const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions, diameter)
-  const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s, diameter)
-  // The diameter is part of the shape recipe (regenerates the preview and marks it dirty to
-  // commit) - it's only editable in "New".
-  const handleDiameterChange = (d: number) => setNewShapeParams(shape, axis, subdivisions, d)
+  const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions, newDiameter)
+  const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions, newDiameter)
+  const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s, newDiameter)
+  // In "New" the diameter is part of the shape recipe (regenerates the preview and marks it dirty
+  // to commit). Once a dome exists, changing it resizes the committed dome (an undoable edit, see
+  // scaleSceneDiameter) - defined below, next to the scene it edits.
 
   // The committed geometry actually being edited/previewed - vertices, edges, and faces, plain
   // and concrete, with bounded undo/redo over every structural edit (delete/add). Only reset
   // (wiping undo history) when a "New" tab pick is committed or a config is loaded.
   const sceneHistory = useHistory<SceneData>(initial?.sceneData ?? DEFAULT_SCENE_DATA, 50)
   const sceneData = sceneHistory.value
+
+  const handleDiameterChange = (d: number) => {
+    if (!(d > 0)) return
+    if (mode === 'new') setNewShapeParams(shape, axis, subdivisions, d)
+    else if (d !== sceneData.diameter) sceneHistory.commit(scaleSceneDiameter(sceneData, d))
+  }
 
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(
     initial?.selectionMode ?? 'symmetric',
@@ -631,7 +640,11 @@ function App() {
   // "New" opens from a button now, rather than living in the Edit/Preview switcher - remember
   // where to come back to when it closes.
   const handleOpenNew = () => {
-    if (mode !== 'new') setPreNewMode(mode)
+    if (mode !== 'new') {
+      setPreNewMode(mode)
+      // Start from the current dome's size.
+      setNewDiameter(sceneData.diameter)
+    }
     setMode('new')
   }
 
@@ -696,7 +709,6 @@ function App() {
   }
 
   const applyConfig = (state: DomeState) => {
-    setDiameter(state.diameter)
     sceneHistory.reset(state.sceneData)
     setSelectionMode(state.selectionMode)
     setExtrudeDistance(state.extrudeDistance)
@@ -750,7 +762,6 @@ function App() {
 
   const buildConfig = (): DomeConfig =>
     serializeConfig({
-      diameter,
       sceneData,
       selectionMode,
       extrudeDistance,
@@ -780,7 +791,6 @@ function App() {
   useEffect(() => {
     saveConfigToLocalStorage(buildConfig())
   }, [
-    diameter,
     sceneData,
     selectionMode,
     extrudeDistance,
@@ -931,7 +941,7 @@ function App() {
         onAxisChange={handleAxisChange}
         subdivisions={subdivisions}
         onSubdivisionsChange={handleSubdivisionsChange}
-        diameter={diameter}
+        diameter={isNew ? newDiameter : sceneData.diameter}
         onDiameterChange={handleDiameterChange}
         layerCount={layerCount}
         onLayerCountChange={setLayerCount}
@@ -1018,7 +1028,7 @@ function App() {
       <Viewport
         mode={mode}
         editTarget={editTarget}
-        diameter={diameter}
+        diameter={isNew ? newDiameter : sceneData.diameter}
         data={isNew ? previewSceneData : sceneData}
         transformedVertices={isNew ? previewVertices : transformedVertices}
         selectedVertexIndices={isNew ? EMPTY_INDEX_SET : selectedVertexIndices}

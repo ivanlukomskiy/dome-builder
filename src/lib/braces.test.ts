@@ -44,6 +44,7 @@ function makeScene(): SceneData {
     nextEdgeId: 4,
     nextFaceId: 0,
     braces: new Map(),
+    diameter: 20,
     nextBraceId: 0,
   };
 }
