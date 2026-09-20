@@ -1,0 +1,1 @@
+var e=`/dome-builder/assets/replicad_single-Bfna5t8r.wasm`;export{e as default};

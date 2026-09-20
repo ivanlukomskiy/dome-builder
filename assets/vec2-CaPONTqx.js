@@ -1,0 +1,1 @@
+function e(e,t){return[e[0]+t[0],e[1]+t[1]]}function t(e,t){return[e[0]-t[0],e[1]-t[1]]}function n(e,t){return[e[0]*t,e[1]*t]}function r(e,t){return e[0]*t[0]+e[1]*t[1]}function i(e,t){return e[0]*t[1]-e[1]*t[0]}function a(e){return Math.hypot(e[0],e[1])}function o(e){let t=a(e);return t<1e-9?[1,0]:[e[0]/t,e[1]/t]}export{o as a,a as i,i as n,n as o,r,t as s,e as t};
