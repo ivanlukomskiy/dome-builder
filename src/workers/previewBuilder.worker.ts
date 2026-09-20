@@ -5,7 +5,8 @@ import { computeStrutBoundaryManual } from '../lib/strutGeometryManual'
 import { computeFlangeBoundary2D, type FlangeShapeParams } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
-import { bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
+import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
+import type { BracePoints } from '../lib/braceSolid'
 import type { Drawing } from 'replicad'
 
 // Owns every heavy, WASM-backed step of building the Preview solids: the 2D shoulder-tenon and
@@ -59,20 +60,25 @@ export type PreviewBuildPhase = 'struts' | 'flanges'
 export type PreviewWorkerMessage =
   | { type: 'ready'; requestId: number }
   | { type: 'progress'; requestId: number; phase: PreviewBuildPhase; done: number; total: number }
-  | { type: 'result'; requestId: number; pieces: PreviewPiece[] }
+  | { type: 'result'; requestId: number; pieces: PreviewPiece[]; bracePoints: BracePoints[] }
   | { type: 'error'; requestId: number; message: string }
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(t[0], t[1], t[2])
 }
 
-async function buildPreview(req: PreviewBuildRequest): Promise<PreviewPiece[]> {
+async function buildPreview(
+  req: PreviewBuildRequest,
+): Promise<{ pieces: PreviewPiece[]; bracePoints: BracePoints[] }> {
   const { ensureReplicadReady, buildStrutMeshFromDrawing } = await import('../lib/replicadCad')
   await ensureReplicadReady()
   self.postMessage({ type: 'ready', requestId: req.requestId } satisfies PreviewWorkerMessage)
 
   const center = new THREE.Vector3(0, req.centerY, 0)
   const pieces: PreviewPiece[] = []
+  // Each strut's brace plate end points, in 3D - the main thread pairs them up per brace and builds
+  // the brace solids (see braceSolid.ts).
+  const bracePoints: BracePoints[] = []
 
   req.strutJobs.forEach((job, i) => {
     const posA = toVector3(job.posA)
@@ -118,6 +124,17 @@ async function buildPreview(req: PreviewBuildRequest): Promise<PreviewPiece[]> {
       [boundary.bracePlateA, job.braces.a[0]],
       [boundary.bracePlateB, job.braces.b[0]],
     ]
+    const plateEnds = [boundary.bracePlateEndsA, boundary.bracePlateEndsB]
+    plates.forEach(([, brace], k) => {
+      const ends = plateEnds[k]
+      if (!brace || !ends) return
+      const [p, q] = bracePlateEndPoints3D(plane, job.beamThickness, brace, ends)
+      bracePoints.push({
+        braceId: brace.braceId,
+        thickness: brace.params.thickness,
+        points: [p.toArray(), q.toArray()],
+      })
+    })
     for (const [plate, brace] of plates) {
       if (!plate || !brace || brace.params.plateThickness <= 0) continue
       try {
@@ -182,16 +199,16 @@ async function buildPreview(req: PreviewBuildRequest): Promise<PreviewPiece[]> {
     }
   })
 
-  return pieces
+  return { pieces, bracePoints }
 }
 
 self.onmessage = (event: MessageEvent<PreviewBuildRequest>) => {
   const req = event.data
   buildPreview(req).then(
-    (pieces) => {
+    ({ pieces, bracePoints }) => {
       const transfer: Transferable[] = []
       for (const p of pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
-      self.postMessage({ type: 'result', requestId: req.requestId, pieces } satisfies PreviewWorkerMessage, {
+      self.postMessage({ type: 'result', requestId: req.requestId, pieces, bracePoints } satisfies PreviewWorkerMessage, {
         transfer,
       })
     },

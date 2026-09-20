@@ -5,6 +5,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { SceneData } from '../lib/polyhedra'
 import { computeBraceEndpoints } from '../lib/braces'
+import { buildBraceSolids, type BracePoints } from '../lib/braceSolid'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
 import type { FlangeShapeParams } from '../lib/flangeGeometry'
@@ -63,6 +64,9 @@ function edgeMarkerColor(override: number | undefined, isSelected: boolean): str
 // vertex color - shared by strut and flange solids alike, since both merge into the same preview
 // geometry (see the preview-build effect below) and mergeGeometries needs every piece to carry
 // the same set of attributes.
+// The brace bodies (bars between the struts' brace plates) - distinct from the plates' magenta.
+const BRACE_BODY_COLOR: [number, number, number] = [0.96, 0.62, 0.13]
+
 function buildColoredGeometry(piece: PreviewPiece): THREE.BufferGeometry {
   const geom = new THREE.BufferGeometry()
   geom.setAttribute('position', new THREE.Float32BufferAttribute(piece.positions, 3))
@@ -291,7 +295,7 @@ export function DomeMesh({
       phase: PreviewBuildPhase,
       doneBefore: number,
       total: number,
-    ): Promise<PreviewPiece[]> =>
+    ): Promise<{ pieces: PreviewPiece[]; bracePoints: BracePoints[] }> =>
       new Promise((resolve, reject) => {
         const worker = new Worker(new URL('../workers/previewBuilder.worker.ts', import.meta.url), {
           type: 'module',
@@ -311,7 +315,7 @@ export function DomeMesh({
           if (msg.type === 'progress') {
             onPreviewProgress({ phase, done: doneBefore + msg.done, total })
           } else if (msg.type === 'result') {
-            settle(() => resolve(msg.pieces))
+            settle(() => resolve({ pieces: msg.pieces, bracePoints: msg.bracePoints }))
           } else if (msg.type === 'error') {
             settle(() => reject(new Error(msg.message)))
           }
@@ -327,13 +331,23 @@ export function DomeMesh({
     let cancelled = false
     ;(async () => {
       const allPieces: PreviewPiece[] = []
+      // Every strut's brace plate end points, across all batches - a brace's two struts can land
+      // in different batches, so its body is only built once they're all in.
+      const allBracePoints: BracePoints[] = []
       try {
         onPreviewProgress({ phase: 'struts', done: 0, total: strutJobs.length })
         const strutBatches = chunk(strutJobs, BATCH_SIZE)
         for (let i = 0; i < strutBatches.length; i++) {
           if (cancelled) return
-          const pieces = await runBatch(strutBatches[i], [], 'struts', i * BATCH_SIZE, strutJobs.length)
+          const { pieces, bracePoints } = await runBatch(
+            strutBatches[i],
+            [],
+            'struts',
+            i * BATCH_SIZE,
+            strutJobs.length,
+          )
           allPieces.push(...pieces)
+          allBracePoints.push(...bracePoints)
         }
 
         onPreviewProgress({ phase: 'flanges', done: 0, total: vertices.length })
@@ -342,7 +356,7 @@ export function DomeMesh({
           if (cancelled) return
           const batch = vertexBatches[i]
           try {
-            const pieces = await runBatch([], batch, 'flanges', i * BATCH_SIZE, vertices.length)
+            const { pieces } = await runBatch([], batch, 'flanges', i * BATCH_SIZE, vertices.length)
             allPieces.push(...pieces)
           } catch (err) {
             // A single vertex's flange geometry failing (a degenerate wedge angle, an
@@ -353,6 +367,13 @@ export function DomeMesh({
         }
 
         if (cancelled) return
+        for (const { braceId, mesh } of buildBraceSolids(allBracePoints)) {
+          try {
+            allPieces.push({ ...mesh, color: BRACE_BODY_COLOR })
+          } catch (err) {
+            console.error(`Failed to build brace ${braceId}`, err)
+          }
+        }
         const geometries = allPieces.map(buildColoredGeometry)
         const merged = geometries.length > 0 ? mergeGeometries(geometries, false) : null
         geometries.forEach((g) => g.dispose())

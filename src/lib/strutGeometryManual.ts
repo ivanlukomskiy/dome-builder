@@ -50,6 +50,11 @@ export interface StrutBoundaryManualResult {
   // null if there's no brace there. If several braces sit on one end, it's the first one's.
   bracePlateA: Drawing | null;
   bracePlateB: Drawing | null;
+  // The two points where the line through the brace's center along the strut end's axis crosses
+  // the plate's two short sides (the ones perpendicular to that axis), in the strut's 2D
+  // coordinates - same brace as bracePlateA / bracePlateB, null when there's no plate.
+  bracePlateEndsA: [Point2D, Point2D] | null;
+  bracePlateEndsB: [Point2D, Point2D] | null;
   // Construction lines, reference points turned into tiny shapes, anything else worth seeing
   // while building `main` up. Purely visual - never fed into the real pipeline.
   helpers: HelperDrawing[];
@@ -678,6 +683,8 @@ export function computeStrutBoundaryManual2D(
   const strutHoles: [Point2D, number][] = [];
   let bracePlateA: Drawing | null = null;
   let bracePlateB: Drawing | null = null;
+  let bracePlateEndsA: [Point2D, Point2D] | null = null;
+  let bracePlateEndsB: [Point2D, Point2D] | null = null;
   for (const [end, origin, dir, endBraces] of braceEnds) {
     for (const [braceIndex, brace] of endBraces.entries()) {
       const braceCenterNoRounding = add2(
@@ -753,21 +760,27 @@ export function computeStrutBoundaryManual2D(
         }
         // Where the line through braceCenter along the strut end's axis crosses the plate's two
         // sides perpendicular to that axis (its ends) - shown as helper points.
-        if (rect) {
-          placeInPlateFrame(braceCenter, endAxis, [
-            [rect.halfAlong, 0],
-            [-rect.halfAlong, 0],
-          ]).forEach((point, i) => {
-            helpers.push({
-              drawing: drawPointMarker(point, MARKER_RADIUS),
-              color: "lime",
-              name: `bracePlateEnd ${end} point ${i + 1} (brace ${brace.braceId})`,
-            });
+        const plateEnds = rect
+          ? placeInPlateFrame(braceCenter, endAxis, [
+              [rect.halfAlong, 0],
+              [-rect.halfAlong, 0],
+            ])
+          : null;
+        plateEnds?.forEach((point, i) => {
+          helpers.push({
+            drawing: drawPointMarker(point, MARKER_RADIUS),
+            color: "lime",
+            name: `bracePlateEnd ${end} point ${i + 1} (brace ${brace.braceId})`,
           });
-        }
+        });
         if (plate && braceIndex === 0) {
           if (end === "A") bracePlateA = plate.clone();
           else bracePlateB = plate.clone();
+          if (plateEnds) {
+            const ends: [Point2D, Point2D] = [plateEnds[0], plateEnds[1]];
+            if (end === "A") bracePlateEndsA = ends;
+            else bracePlateEndsB = ends;
+          }
         }
         if (plate) {
           helpers.push({
@@ -787,7 +800,14 @@ export function computeStrutBoundaryManual2D(
     main = main.cut(drawCircle(holeRadius).translate(holeCenter));
   }
 
-  return { main: main, bracePlateA, bracePlateB, helpers };
+  return {
+    main: main,
+    bracePlateA,
+    bracePlateB,
+    bracePlateEndsA,
+    bracePlateEndsB,
+    helpers,
+  };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and

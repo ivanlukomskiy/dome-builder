@@ -19,6 +19,9 @@ export interface BraceParams {
   plateHoleOffsetTransverse: number
   // How thick the plate is, mm - extruded out from the strut's side face.
   plateThickness: number
+  // How thick the brace itself is, mm - the bar running between the two struts' plates, extruded
+  // symmetrically (half each way) from the quadrilateral through the plates' end points.
+  thickness: number
 }
 
 // Everything but `shift` - the properties of a brace's plate, which are the same for every brace
@@ -34,6 +37,7 @@ export const DEFAULT_BRACE_PARAMS: BraceParams = {
   plateHoleOffsetLongitudinal: 7,
   plateHoleOffsetTransverse: 7,
   plateThickness: 5,
+  thickness: 10,
 }
 
 export const DEFAULT_BRACE_PLATE_PARAMS: BracePlateParams = (() => {
@@ -51,6 +55,7 @@ export const BRACE_PARAM_FIELDS: { key: keyof BraceParams; label: string; step: 
   { key: 'plateHoleOffsetLongitudinal', label: 'Plate hole offset, longitudinal (mm)', step: 1 },
   { key: 'plateHoleOffsetTransverse', label: 'Plate hole offset, transverse (mm)', step: 1 },
   { key: 'plateThickness', label: 'Plate thickness (mm)', step: 1 },
+  { key: 'thickness', label: 'Brace thickness (mm)', step: 1 },
 ]
 
 export const BRACE_PLATE_PARAM_FIELDS = BRACE_PARAM_FIELDS.filter((f) => f.key !== 'shift') as {
@@ -287,4 +292,30 @@ export function bracePlatePlane(
     normal: strutPlane.normal.clone(),
     xDir: strutPlane.xDir.clone(),
   }
+}
+
+// Where a brace plate's two end points (see StrutBoundaryManualResult.bracePlateEndsA/B) sit in
+// 3D: the strut's 2D coordinates put on its plane, then moved out along the plane's normal, toward
+// the side the brace's other edge is on, by half the strut's thickness plus the plate's thickness -
+// i.e. onto the plate's outer face.
+export function bracePlateEndPoints3D(
+  strutPlane: { origin: THREE.Vector3; normal: THREE.Vector3; xDir: THREE.Vector3 },
+  strutThickness: number,
+  brace: StrutBraceEnd,
+  ends: [{ x: number; y: number } | [number, number], { x: number; y: number } | [number, number]],
+): [THREE.Vector3, THREE.Vector3] {
+  const toOther = new THREE.Vector3(...brace.otherEdgeDirection)
+  const side = strutPlane.normal.dot(toOther) < 0 ? -1 : 1
+  const offset = side * (strutThickness / 2 + brace.params.plateThickness)
+  // replicad's Plane: local y = normal x xDir.
+  const yDir = new THREE.Vector3().crossVectors(strutPlane.normal, strutPlane.xDir)
+  const place = (p: { x: number; y: number } | [number, number]) => {
+    const [x, y] = Array.isArray(p) ? p : [p.x, p.y]
+    return strutPlane.origin
+      .clone()
+      .addScaledVector(strutPlane.xDir, x)
+      .addScaledVector(yDir, y)
+      .addScaledVector(strutPlane.normal, offset)
+  }
+  return [place(ends[0]), place(ends[1])]
 }
