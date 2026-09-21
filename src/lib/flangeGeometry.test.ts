@@ -380,6 +380,39 @@ describe("computeFlangeOutline", () => {
   });
 });
 
+describe("computeFlangeOutline reflex open wedge", () => {
+  // Two struts 90 deg apart with a face between them, and nothing across the 270 deg the other way
+  // round. The plate's two outer sides (57.5 mm = half a strut + minSide from each strut's axis)
+  // run along x = -57.5 and y = -57.5; the wedge's bisector points at 225 deg, so beams at 205 and
+  // 245 deg hit them at (-57.5, -57.5 * tan 25) and (-57.5 * tan 25, -57.5), and the plate is
+  // closed off with a straight line between those two.
+  const reflexVertex: FlangeVertexInput = {
+    vertexId: 1003,
+    edges: [
+      { ...VERTEX_0.edges[0], angleToNextEdgeDeg: 90 },
+      { ...VERTEX_0.edges[1], angleToNextEdgeDeg: 270, hasFaceToNextEdge: false, faceIdToNextEdge: null },
+    ],
+  };
+  const sideOffset = VERTEX_0.edges[0].thicknessMm / 2 + DEFAULT_FLANGE_SHAPE_PARAMS.minSide;
+  const hit = sideOffset * Math.tan((25 * Math.PI) / 180);
+  const outline = computeFlangeOutline(reflexVertex.edges, DEFAULT_FLANGE_SHAPE_PARAMS);
+  const hasPoint = (x: number, y: number) =>
+    outline.some((p) => Math.hypot(p[0] - x, p[1] - y) < 1e-6);
+
+  it("closes the wedge with a straight line between the two beam hits", () => {
+    expect(hasPoint(-sideOffset, -hit)).toBe(true);
+    expect(hasPoint(-hit, -sideOffset)).toBe(true);
+    const i = outline.findIndex((p) => Math.hypot(p[0] + sideOffset, p[1] + hit) < 1e-6);
+    const next = outline[(i + 1) % outline.length];
+    expect(Math.hypot(next[0] + hit, next[1] + sideOffset)).toBeLessThan(1e-6);
+  });
+
+  it("stays within the two plate sides", () => {
+    expect(Math.min(...outline.map((p) => p[0]))).toBeCloseTo(-sideOffset, 6);
+    expect(Math.min(...outline.map((p) => p[1]))).toBeCloseTo(-sideOffset, 6);
+  });
+});
+
 describe("computeFlangeBoundary2D plate shape", () => {
   // Plate areas (mm^2) of the previous implementation, which fused a stack of overlapping pieces
   // together - the outline rewrite must still draw the same plate. The 0.05% slack covers the

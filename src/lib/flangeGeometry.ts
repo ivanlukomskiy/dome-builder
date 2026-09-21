@@ -4,7 +4,7 @@ import type {
   HelperDrawing,
   StrutEndMeasurements,
 } from "./strutGeometry";
-import { add2, sub2, length2 } from "./vec2";
+import { add2, length2 } from "./vec2";
 
 // A sandbox for hand-building the "flange" part - a flat connector plate at a hub vertex,
 // covering the wedges between struts that have no face between them (see get_edges_info's
@@ -161,42 +161,6 @@ function rotate2D(p: Point2D, degrees: number): Point2D {
   return [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos];
 }
 
-function calculateArcPoints(
-  start: Point2D,
-  end: Point2D,
-  center: Point2D,
-  steps: number,
-  direction: "cw" | "ccw",
-): Point2D[] {
-  const a = sub2(start, center);
-  const b = sub2(end, center);
-
-  const rA = length2(a);
-  const rB = length2(b);
-
-  const angleA = Math.atan2(a[1], a[0]);
-  const angleB = Math.atan2(b[1], b[0]);
-
-  let delta = angleB - angleA;
-
-  if (direction === "ccw") {
-    while (delta < 0) delta += 2 * Math.PI;
-  } else {
-    while (delta > 0) delta -= 2 * Math.PI;
-  }
-
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const phase = i / steps
-    const angle = angleA + delta * phase;
-    const r = rA + (rB - rA) * phase
-
-    return [
-      center[0] + Math.cos(angle) * r,
-      center[1] + Math.sin(angle) * r,
-    ];
-  });
-}
-
 function lineIntersection(
   a1: Point2D,
   a2: Point2D,
@@ -339,6 +303,11 @@ function computeWedgeCornerMillingCuts(
 // about minSide, so this is plenty smooth (sagitta well below 0.1 mm).
 const EAR_ARC_SEGMENTS = 24;
 
+// A reflex open wedge is closed off behind the vertex by a straight line between two points on the
+// plate's two sides. They're found by casting a beam from the vertex on either side of the wedge's
+// bisector, this many degrees away from it, and seeing where each hits its side.
+const WEDGE_BEAM_SPREAD_DEG = 20;
+
 // Two outline points closer than this (mm) are the same point.
 const OUTLINE_POINT_TOLERANCE = 1e-6;
 
@@ -469,6 +438,21 @@ function computeWedgeRoundingPoints(
   });
 }
 
+// Where a beam cast from the vertex at `beamAngleDeg` meets the straight plate side that passes
+// through `sidePoint` heading along `sideDirection`. Null if they're parallel.
+function beamHitPoint(
+  beamAngleDeg: number,
+  sidePoint: Point2D,
+  sideDirection: Point2D,
+): Point2D | null {
+  return lineIntersection(
+    [0, 0],
+    polar(beamAngleDeg, 1),
+    sidePoint,
+    add2(sidePoint, sideDirection),
+  );
+}
+
 // The plate's boundary across the wedge between `edge` and `next`, from `edge`'s +y corner (where
 // its arm ends) around to `next`'s -y corner.
 //
@@ -476,7 +460,8 @@ function computeWedgeRoundingPoints(
 // flares out sideways into a wide plate side with a rounded corner ("ear") at its end, and the
 // space between the two sides is then bridged:
 //   - acute wedge (< 180 deg): by a bezier that rounds off the corner between the two sides,
-//   - reflex wedge (> 180 deg): by an arc around the vertex itself,
+//   - reflex wedge (> 180 deg): by a straight line across the back of the vertex, between the
+//     points where two beams cast from the vertex either side of the wedge's bisector hit the sides,
 //   - exactly straight (180 deg): by nothing - the two sides simply meet.
 function computeWedgePoints(
   edge: FlangeEdgeInput,
@@ -516,7 +501,18 @@ function computeWedgePoints(
 
   let bridge: Point2D[];
   if (edge.angleToNextEdgeDeg > 180) {
-    bridge = calculateArcPoints(sideOneInner, sideTwoInner, [0, 0], SEGMENTS_COUNT, "ccw");
+    const bisectorAngle = edgeAngle + edge.angleToNextEdgeDeg / 2;
+    const sideOneHit = beamHitPoint(
+      bisectorAngle - WEDGE_BEAM_SPREAD_DEG,
+      earOne[earOne.length - 1],
+      polar(edgeAngle, 1),
+    );
+    const sideTwoHit = beamHitPoint(
+      bisectorAngle + WEDGE_BEAM_SPREAD_DEG,
+      earTwo[0],
+      polar(nextAngle, 1),
+    );
+    bridge = sideOneHit && sideTwoHit ? [sideOneHit, sideTwoHit] : [sideOneInner, sideTwoInner];
   } else {
     bridge =
       (edge.angleToNextEdgeDeg < 180 && computeWedgeRoundingPoints(edge, next, params)) || [
