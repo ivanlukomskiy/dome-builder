@@ -1,4 +1,4 @@
-import { draw, drawCircle, DrawingPen } from "replicad";
+import { draw, drawCircle } from "replicad";
 import { Drawing, type Point2D } from "replicad";
 import type {
   HelperDrawing,
@@ -197,31 +197,6 @@ function calculateArcPoints(
   });
 }
 
-// Traces a closed polygon through `points`, then back to the origin - the shared shape of the
-// wedge-boundary arcs (connection edge / connection sector) below.
-function closedFanFromOrigin(points: Point2D[]): Drawing {
-  let pen = draw();
-  points.forEach((p, i) => {
-    if (i === 0) {
-      pen = pen.movePointerTo(p);
-    } else {
-      pen = pen.lineTo(p);
-    }
-  });
-  pen = pen.lineTo([0, 0]);
-  return pen.close();
-}
-
-function quadCircle(
-  pen: DrawingPen,
-  rad: number,
-  dx: 1 | -1,
-  dy: 1 | -1,
-  sign: 1 | -1,
-): DrawingPen {
-  return pen.bulgeArc(rad * dx, rad * dy, sign * (Math.SQRT2 - 1));
-}
-
 function lineIntersection(
   a1: Point2D,
   a2: Point2D,
@@ -272,11 +247,6 @@ export function perpendicularFoot(center: Point2D, a: Point2D, b: Point2D): Poin
 
 const SEGMENTS_COUNT = 50;
 const HOLE_COLOR = "#12141a";
-
-function addToMain(main: Drawing | null, drawing: Drawing): Drawing | null {
-  if (main == null) return drawing;
-  return main.fuse(drawing);
-}
 
 // Side bolt holes flanking this strut's own centerline, at its real (non-overshot) end.
 function computeSideHoles(
@@ -348,21 +318,58 @@ function computeWedgeCornerMillingCuts(
   return { millingCutA, millingCutB };
 }
 
-// The wedge between `edge` and `next` when a face already fills it - a pie slice from the
-// origin out to `start` and `end`, arcing between them.
-function computeConnectionEdgeShape(
+// ---------------------------------------------------------------------------------------------
+// The plate's outline
+//
+// The plate itself is one simple closed shape with no holes in it (everything that is cut out of
+// it - bolt holes, tenon slots, mill reliefs - is subtracted afterwards as a "negative"). So
+// instead of building it out of overlapping pieces and fusing them, we walk once around its
+// boundary, counter-clockwise, collecting points, and draw the whole thing in one go.
+//
+// Going around, every edge (strut arm) contributes two runs of points, in this order:
+//   1. computeTipPoints: the end of its arm, from the corner on its clockwise (-y) side to the one
+//      on its counter-clockwise (+y) side.
+//   2. computeWedgePoints: the boundary of the wedge between it and the next edge, from its own
+//      +y corner over to the next edge's -y corner.
+// Both are in world (vertex-centered) coordinates. Neighbouring runs share their corner points;
+// computeFlangeOutline drops the duplicates.
+// ---------------------------------------------------------------------------------------------
+
+// Segments per rounded corner ("ear") at the end of a wedge side - a quarter circle of radius
+// about minSide, so this is plenty smooth (sagitta well below 0.1 mm).
+const EAR_ARC_SEGMENTS = 24;
+
+// Two outline points closer than this (mm) are the same point.
+const OUTLINE_POINT_TOLERANCE = 1e-6;
+
+// Points on a circle, from `fromDeg` to `toDeg` (counter-clockwise when toDeg > fromDeg), both
+// ends included.
+function circleArcPoints(
+  center: Point2D,
+  radius: number,
+  fromDeg: number,
+  toDeg: number,
+  steps: number,
+): Point2D[] {
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const p = polar(fromDeg + ((toDeg - fromDeg) * i) / steps, radius);
+    return [center[0] + p[0], center[1] + p[1]] as Point2D;
+  });
+}
+
+// The plate's boundary across the wedge between `edge` and `next` when a face already fills it,
+// as points from `start` to `end` (both in `edge`'s own local frame, see computeWedgeBoundary).
+function computeConnectionCurvePoints(
   start: Point2D,
   end: Point2D,
   edge: FlangeEdgeInput,
   params: FlangeShapeParams,
-): Drawing {
-  // const points = calculateArcPoints(start, end, [0, 0], SEGMENTS_COUNT, "ccw");
-
+): Point2D[] {
   const rStart = length2(start);
-  const rEnd = length2(end)
+  const rEnd = length2(end);
 
   const angleA = Math.atan2(start[1], start[0]);
-  const angleB = Math.atan2(end[1],end[0]);
+  const angleB = Math.atan2(end[1], end[0]);
 
   let delta = angleB - angleA;
 
@@ -372,255 +379,213 @@ function computeConnectionEdgeShape(
   // the goal is to achieve a nice smooth transition between the edges connected via a face
   // and shortcut to an arc when the angle is small
 
-  let midR = (rStart + rEnd) / 2 * 0.75
+  let midR = ((rStart + rEnd) / 2) * 0.75;
 
-  const minStraight = Math.atan2(edge.thicknessMm / 2 + params.toleranceTransverse, (rStart + rEnd) / 2)
+  const minStraight = Math.atan2(
+    edge.thicknessMm / 2 + params.toleranceTransverse,
+    (rStart + rEnd) / 2,
+  );
 
-  const hit0Angle = Math.PI * 0.75
-  const a0 = 1 / (minStraight * 3 - hit0Angle)
-  const b0 = - hit0Angle * a0
-  const minRadius = (rStart + rEnd) / 2 * Math.min(a0 * delta + b0, 1)
+  const hit0Angle = Math.PI * 0.75;
+  const a0 = 1 / (minStraight * 3 - hit0Angle);
+  const b0 = -hit0Angle * a0;
+  const minRadius = ((rStart + rEnd) / 2) * Math.min(a0 * delta + b0, 1);
 
-  midR = Math.max(midR, minRadius)
+  midR = Math.max(midR, minRadius);
 
-  const phaseOffset = minStraight / delta
+  const phaseOffset = minStraight / delta;
 
-  const a = 1 / (1 - 2 * phaseOffset)
-  const b = - phaseOffset * a
-
-  const points = Array.from({ length: SEGMENTS_COUNT + 1 }, (_, i) => {
-    const phase = i / SEGMENTS_COUNT
-    const angle = angleA + delta * phase;
-
-    let phaseCorrected = 0
-    if (phase < phaseOffset) {
-      phaseCorrected = 0
-    } else if (phase > 1 - phaseOffset) {
-      phaseCorrected =  1
-    } else {
-      phaseCorrected = a * phase + b
-    }
-
-    let radiusI = 0
-    if (phase < 0.5) {
-      radiusI = rStart + (midR - rStart) * Math.sin(phaseCorrected * Math.PI)
-    } else {
-      radiusI = rEnd + (midR - rEnd) * Math.sin(phaseCorrected * Math.PI)
-    }
-
-    return [
-      Math.cos(angle) * radiusI,
-      Math.sin(angle) * radiusI,
-    ] as Point2D;
-  });
-
-  return closedFanFromOrigin(points).rotate(edge.projectedAngleDeg);
-}
-
-// The wedge between `edge` and `next` when a face already fills it - a pie slice from the
-// origin out to `start` and `end`, arcing between them.
-export function computeConnectionEdgeShapeNoFace(
-  start: Point2D,
-  end: Point2D,
-  edge: FlangeEdgeInput,
-  params: FlangeShapeParams,
-): Drawing {
-  // const points = calculateArcPoints(start, end, [0, 0], SEGMENTS_COUNT, "ccw");
-
-  const rStart = length2(start);
-  const rEnd = length2(end)
-
-  const angleA = Math.atan2(start[1], start[0]);
-  const angleB = Math.atan2(end[1],end[0]);
-
-  let delta = angleB - angleA;
-
-  while (delta < 0) delta += 2 * Math.PI;
-
-  // here come some obscure curve calculations
-  // the goal is to achieve a nice smooth transition between the edges connected via a face
-  // and shortcut to an arc when the angle is small
-
-  let midR = (rStart + rEnd) / 2 * 0.5
-
-  const minStraight = Math.atan2(edge.thicknessMm / 2 + params.toleranceTransverse, (rStart + rEnd) / 2)
-
-  const hit0Angle = Math.PI * 0.75
-  const a0 = 1 / (minStraight * 3 - hit0Angle)
-  const b0 = - hit0Angle * a0
-  const minRadius = (rStart + rEnd) / 2 * Math.min(a0 * delta + b0, 1)
-
-  midR = Math.max(midR, minRadius)
-
-  const phaseOffset = minStraight / delta
-
-  const a = 1 / (1 - 2 * phaseOffset)
-  const b = - phaseOffset * a
+  const a = 1 / (1 - 2 * phaseOffset);
+  const b = -phaseOffset * a;
 
   const points = Array.from({ length: SEGMENTS_COUNT + 1 }, (_, i) => {
-    const phase = i / SEGMENTS_COUNT
+    const phase = i / SEGMENTS_COUNT;
     const angle = angleA + delta * phase;
 
-    let phaseCorrected = 0
+    let phaseCorrected = 0;
     if (phase < phaseOffset) {
-      phaseCorrected = 0
+      phaseCorrected = 0;
     } else if (phase > 1 - phaseOffset) {
-      phaseCorrected =  1
+      phaseCorrected = 1;
     } else {
-      phaseCorrected = a * phase + b
+      phaseCorrected = a * phase + b;
     }
 
-    let radiusI = 0
+    let radiusI = 0;
     if (phase < 0.5) {
-      radiusI = rStart + (midR - rStart) * Math.sin(phaseCorrected * Math.PI)
+      radiusI = rStart + (midR - rStart) * Math.sin(phaseCorrected * Math.PI);
     } else {
-      radiusI = rEnd + (midR - rEnd) * Math.sin(phaseCorrected * Math.PI)
+      radiusI = rEnd + (midR - rEnd) * Math.sin(phaseCorrected * Math.PI);
     }
 
-    return [
-      Math.cos(angle) * radiusI,
-      Math.sin(angle) * radiusI,
-    ] as Point2D;
+    return [Math.cos(angle) * radiusI, Math.sin(angle) * radiusI] as Point2D;
   });
 
-  return closedFanFromOrigin(points).rotate(edge.projectedAngleDeg);
+  // Land exactly on the two corners, so they line up with the neighbouring runs of the outline.
+  points[0] = start;
+  points[points.length - 1] = end;
+  return points;
 }
 
-// The two straight plate edges running along each side of the open wedge between `edge` and
-// `next` (used when no face already fills it), each with a quarter-circle relief bulging into
-// the plate at its outer corner.
-function computeEdgeSides(
-  start: Point2D,
-  nextLocalStart: Point2D,
-  edge: FlangeEdgeInput,
-  params: FlangeShapeParams,
-): { sideOne: Drawing; sideTwo: Drawing } {
-  const rad = params.minSide - params.toleranceTransverse;
-
-  let sideOnePen = draw().movePointerTo(start);
-  sideOnePen = quadCircle(sideOnePen, rad, -1, 1, 1);
-  sideOnePen = sideOnePen.hLineTo(0).vLineTo(start[1]);
-  const sideOne = sideOnePen.close().rotate(edge.projectedAngleDeg);
-
-  let sideTwoPen = draw().movePointerTo(nextLocalStart);
-  sideTwoPen = quadCircle(sideTwoPen, rad, -1, -1, -1);
-  sideTwoPen = sideTwoPen.hLineTo(0).vLineTo(nextLocalStart[1]);
-  const sideTwo = sideTwoPen
-    .close()
-    .rotate(edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
-
-  return { sideOne, sideTwo };
-}
-
-// Fills the acute (< 180 deg) open wedge between `edge` and `next`'s own plate sides with a
-// rounded corner: finds where the two sides' outer edges would cross, then rounds that corner
-// off at `params.minSide` radius. Returns null if the two sides turn out to be parallel (no
-// crossing) - shouldn't happen for real dome geometry.
-function computeWedgeRoundingShape(
+// The plate's boundary across an acute (< 180 deg) open wedge between `edge` and `next`: a
+// quadratic bezier that starts on `edge`'s outer side line, ends on `next`'s, and is pulled towards
+// the point where those two side lines would cross - which rounds that corner off. Returns null if
+// the two side lines turn out to be parallel (no crossing) - shouldn't happen for real dome
+// geometry.
+function computeWedgeRoundingPoints(
   edge: FlangeEdgeInput,
   next: FlangeEdgeInput,
   params: FlangeShapeParams,
-): Drawing | null {
+): Point2D[] | null {
   const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
   const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+  const nextAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg;
+
   const edge1p1 = rotate2D([100, h1], edge.projectedAngleDeg);
   const edge1p2 = rotate2D([0, h1], edge.projectedAngleDeg);
-  const edge2p1 = rotate2D(
-    [100, -h2],
-    edge.projectedAngleDeg + edge.angleToNextEdgeDeg,
-  );
-  const edge2p2 = rotate2D(
-    [0, -h2],
-    edge.projectedAngleDeg + edge.angleToNextEdgeDeg,
-  );
+  const edge2p1 = rotate2D([100, -h2], nextAngle);
+  const edge2p2 = rotate2D([0, -h2], nextAngle);
   const intersection = lineIntersection(edge1p1, edge1p2, edge2p1, edge2p2);
   if (intersection == null) return null;
 
-  const start = rotate2D([edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1], edge.projectedAngleDeg);
-  const end = rotate2D([edge.strutEnd.cornerLength + params.overshoot  - params.minSide, -h2], edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
+  const start = rotate2D(
+    [edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1],
+    edge.projectedAngleDeg,
+  );
+  const end = rotate2D(
+    [next.strutEnd.cornerLength + params.overshoot - params.minSide, -h2],
+    nextAngle,
+  );
 
-  return draw().movePointerTo(start).bezierCurveTo(end, intersection).lineTo([0,0]).close()
-
-  // const roundingCenter = moveAwayFromOrigin(intersection, params.minSide);
-  // const projection1 = perpendicularFoot(roundingCenter, edge1p1, edge1p2);
-  // const projection2 = perpendicularFoot(roundingCenter, edge2p1, edge2p2);
-
-  // const roundingPoints = calculateArcPoints(
-  //   projection1,
-  //   projection2,
-  //   roundingCenter,
-  //   SEGMENTS_COUNT,
-  //   "cw",
-  // );
-  // let rounding = draw();
-  // roundingPoints.forEach((p, i) => {
-  //   if (i == 0) {
-  //     rounding = rounding.movePointerTo(p);
-  //   } else {
-  //     rounding = rounding.lineTo(p);
-  //   }
-  // });
-  // rounding.lineTo(intersection);
-  // return rounding.close();
+  return Array.from({ length: SEGMENTS_COUNT + 1 }, (_, i) => {
+    const t = i / SEGMENTS_COUNT;
+    const w0 = (1 - t) * (1 - t);
+    const w1 = 2 * (1 - t) * t;
+    const w2 = t * t;
+    return [
+      w0 * start[0] + w1 * intersection[0] + w2 * end[0],
+      w0 * start[1] + w1 * intersection[1] + w2 * end[1],
+    ] as Point2D;
+  });
 }
 
-// Fills the reflex (> 180 deg) open wedge between `edge` and `next`'s own plate sides with a
-// pie slice arcing around the vertex itself.
-function computeConnectionSectorShape(
+// The plate's boundary across the wedge between `edge` and `next`, from `edge`'s +y corner (where
+// its arm ends) around to `next`'s -y corner.
+//
+// With a face in the wedge that's just the connection curve. Without one, each of the two arms
+// flares out sideways into a wide plate side with a rounded corner ("ear") at its end, and the
+// space between the two sides is then bridged:
+//   - acute wedge (< 180 deg): by a bezier that rounds off the corner between the two sides,
+//   - reflex wedge (> 180 deg): by an arc around the vertex itself,
+//   - exactly straight (180 deg): by nothing - the two sides simply meet.
+function computeWedgePoints(
   edge: FlangeEdgeInput,
   next: FlangeEdgeInput,
   params: FlangeShapeParams,
-): Drawing {
+): Point2D[] {
+  const { start, end, nextLocalStart } = computeWedgeBoundary(edge, next, params);
+  const edgeAngle = edge.projectedAngleDeg;
+  const nextAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg;
 
+  if (edge.hasFaceToNextEdge) {
+    return computeConnectionCurvePoints(start, end, edge, params).map((p) =>
+      rotate2D(p, edgeAngle),
+    );
+  }
 
-  // const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
-  // const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+  // How far the plate sides reach past their arm's own (tolerance-widened) edge.
+  const rad = Math.max(params.minSide - params.toleranceTransverse, 0);
 
-  // const start = rotate2D([edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1], edge.projectedAngleDeg);
-  // const end = rotate2D([edge.strutEnd.cornerLength + params.overshoot  - params.minSide, -h2], edge.projectedAngleDeg + edge.angleToNextEdgeDeg);
-
-  // return draw().movePointerTo(start).bezierCurveTo(end, intersection).lineTo([0,0]).close()
-
-
-  const connPoint1 = rotate2D(
-    [0, params.minSide + edge.thicknessMm / 2],
-    edge.projectedAngleDeg,
+  // Each ear is a quarter circle: `edge`'s runs from its tip corner `start` up to the top of its
+  // side, `next`'s from the top of its side down to its own tip corner.
+  const earOne = circleArcPoints([start[0] - rad, start[1]], rad, 0, 90, EAR_ARC_SEGMENTS).map(
+    (p) => rotate2D(p, edgeAngle),
   );
-  const connPoint2 = rotate2D(
-    [0, -params.minSide - next.thicknessMm / 2],
-    next.projectedAngleDeg,
-  );
+  const earTwo = circleArcPoints(
+    [nextLocalStart[0] - rad, nextLocalStart[1]],
+    rad,
+    -90,
+    0,
+    EAR_ARC_SEGMENTS,
+  ).map((p) => rotate2D(p, nextAngle));
 
-  const points = calculateArcPoints(
-    connPoint1,
-    connPoint2,
-    [0, 0],
-    SEGMENTS_COUNT,
-    "ccw",
-  );
+  // Where the two plate sides run into the vertex's own neighbourhood - the inner ends of their
+  // outer edges.
+  const sideOneInner = rotate2D([0, params.minSide + edge.thicknessMm / 2], edgeAngle);
+  const sideTwoInner = rotate2D([0, -params.minSide - next.thicknessMm / 2], nextAngle);
 
-  let pen = draw();
-  points.forEach((p, i) => {
-    if (i === 0) {
-      pen = pen.movePointerTo(p);
-    } else {
-      pen = pen.lineTo(p);
-    }
-  });
-  pen = pen.lineTo([0,0])
-  return pen.close();
+  let bridge: Point2D[];
+  if (edge.angleToNextEdgeDeg > 180) {
+    bridge = calculateArcPoints(sideOneInner, sideTwoInner, [0, 0], SEGMENTS_COUNT, "ccw");
+  } else {
+    bridge =
+      (edge.angleToNextEdgeDeg < 180 && computeWedgeRoundingPoints(edge, next, params)) || [
+        sideOneInner,
+        sideTwoInner,
+      ];
+  }
+
+  return [...earOne, ...bridge, ...earTwo];
 }
 
-// The main rectangular plate patch running along this strut's own centerline, from the vertex
-// out to its (tolerance-adjusted) reach.
-function computeRectPatch(edge: FlangeEdgeInput, params: FlangeShapeParams): Drawing {
-  return draw()
-    .movePointerTo([0, edge.thicknessMm / 2 + params.toleranceTransverse])
-    .hLineTo(edge.strutEnd.cornerLength - (params.overshoot > 0 ? params.toleranceLongitudinal : 0))
-    .vLineTo(-edge.thicknessMm / 2 - params.toleranceTransverse)
-    .hLineTo(0)
-    .close()
-    .rotate(edge.projectedAngleDeg);
+// The end of `edge`'s arm, from its -y corner to its +y corner. Normally that's a straight cut
+// across the arm. With an overshoot, the plate's corners reach past the arm's own (tolerance-
+// shortened) end, so the arm's flat end steps back from them - along the plate side if there's no
+// face in that wedge, or along the ray from the vertex to the corner if there is one.
+function computeTipPoints(
+  edge: FlangeEdgeInput,
+  prevHasFace: boolean,
+  nextHasFace: boolean,
+  params: FlangeShapeParams,
+): Point2D[] {
+  const halfWidth = edge.thicknessMm / 2 + params.toleranceTransverse;
+  const cornerX = edge.strutEnd.cornerLength + params.overshoot;
+  const armEndX =
+    edge.strutEnd.cornerLength - (params.overshoot > 0 ? params.toleranceLongitudinal : 0);
+  const rayY = params.overshoot > 0 ? (halfWidth * armEndX) / cornerX : halfWidth;
+
+  const local: Point2D[] = [
+    [cornerX, -halfWidth],
+    [armEndX, prevHasFace ? -rayY : -halfWidth],
+    [armEndX, nextHasFace ? rayY : halfWidth],
+    [cornerX, halfWidth],
+  ];
+  return local.map((p) => rotate2D(p, edge.projectedAngleDeg));
+}
+
+// The whole plate's outline: counter-clockwise points around it, no repeated points, not closed
+// (the last point implicitly connects back to the first).
+export function computeFlangeOutline(edges: FlangeEdgeInput[], params: FlangeShapeParams): Point2D[] {
+  const outline: Point2D[] = [];
+  const isSamePoint = (a: Point2D, b: Point2D) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1]) <= OUTLINE_POINT_TOLERANCE;
+  const addPoint = (p: Point2D) => {
+    if (outline.length === 0 || !isSamePoint(outline[outline.length - 1], p)) outline.push(p);
+  };
+
+  edges.forEach((edge, i) => {
+    const prev = edges[(i - 1 + edges.length) % edges.length];
+    const next = edges[(i + 1) % edges.length];
+
+    computeTipPoints(edge, prev.hasFaceToNextEdge, edge.hasFaceToNextEdge, params).forEach(
+      addPoint,
+    );
+    computeWedgePoints(edge, next, params).forEach(addPoint);
+  });
+
+  while (outline.length > 1 && isSamePoint(outline[0], outline[outline.length - 1])) {
+    outline.pop();
+  }
+  return outline;
+}
+
+// A closed drawing tracing straight lines through `points`, in order.
+function drawPolygon(points: Point2D[]): Drawing {
+  let pen = draw().movePointerTo(points[0]);
+  for (let i = 1; i < points.length; i++) {
+    pen = pen.lineTo(points[i]);
+  }
+  return pen.close();
 }
 
 // The cutout across this strut's own tenon span, cleared out of the plate so the tenon has room
@@ -688,16 +653,6 @@ export function computeFlangeBoundary2D(
   let helpers: HelperDrawing[] = [];
   const edgeMarks: FlangeEdgeMark[] = [];
 
-  // Shapes fused into `main`, kept in separate buckets so the final assembly below can fuse them
-  // in a fixed order - fusing in a different order sometimes trips up opencascade's boolean ops,
-  // so this order must stay intact even though nothing about the resulting shape logically
-  // depends on it.
-  const connectionEdges: Drawing[] = [];
-  const edgeSides: Drawing[] = [];
-  const roundingShapes: Drawing[] = [];
-  const connectionSectorShapes: Drawing[] = [];
-  const rectEdgeShapes: Drawing[] = [];
-
   const negativeShapes: Drawing[] = [];
   const addNegative = (drawing: Drawing) => {
     negativeShapes.push(drawing);
@@ -716,8 +671,6 @@ export function computeFlangeBoundary2D(
       addNegative(holeB);
     }
 
-    const { start, end, nextLocalStart } = computeWedgeBoundary(edge, next, params);
-
     const wedgeCornerMillingCuts = computeWedgeCornerMillingCuts(edge, next, params);
     if (wedgeCornerMillingCuts) {
       const { millingCutA, millingCutB } = wedgeCornerMillingCuts;
@@ -726,42 +679,6 @@ export function computeFlangeBoundary2D(
       helpers.push({ drawing: millingCutB, color: "red", name: `milling cut ${edge.edgeId}` });
       addNegative(millingCutB);
     }
-
-    if (edge.hasFaceToNextEdge) {
-      const connectionEdge = computeConnectionEdgeShape(start, end, edge, params);
-      helpers.push({
-        drawing: connectionEdge,
-        color: "purple",
-        name: `connection edge ${edge.edgeId} to ${next.edgeId}, angle ${edge.angleToNextEdgeDeg}`,
-      });
-      connectionEdges.push(connectionEdge);
-    } else {
-      const { sideOne, sideTwo } = computeEdgeSides(start, nextLocalStart, edge, params);
-      helpers.push({ drawing: sideOne, color: "green", name: `side one ${edge.edgeId}` });
-      edgeSides.push(sideOne);
-      helpers.push({ drawing: sideTwo, color: "green", name: `side two ${edge.edgeId}` });
-      edgeSides.push(sideTwo);
-
-      if (edge.angleToNextEdgeDeg < 180) {
-        const rounding = computeWedgeRoundingShape(edge, next, params);
-        if (rounding) {
-          helpers.push({ drawing: rounding, color: "blue", name: `rounding ${edge.edgeId}-${next.edgeId}` });
-          roundingShapes.push(rounding);
-        }
-      } else if (edge.angleToNextEdgeDeg > 180) {
-        const connectionSector = computeConnectionSectorShape(edge, next, params);
-        helpers.push({
-          drawing: connectionSector,
-          color: "purple",
-          name: `connection sector ${edge.edgeId} to ${next.edgeId}`,
-        });
-        connectionSectorShapes.push(connectionSector);
-      }
-    }
-
-    const rectPatch = computeRectPatch(edge, params);
-    helpers.push({ drawing: rectPatch, color: "orange", name: `rect edge ${edge.edgeId}` });
-    rectEdgeShapes.push(rectPatch);
 
     const rectCut = computeRectCut(edge, params);
     helpers.push({ drawing: rectCut, color: "cyan", name: `rect cut ${edge.edgeId}` });
@@ -791,16 +708,9 @@ export function computeFlangeBoundary2D(
   // Drawn last so it stays on top of everything else instead of getting z-fought away.
   helpers.push({ drawing: drawCircle(5), color: "#f5e050", name: `vertex ${vertex.vertexId}` });
 
-  // Fused in this fixed order - see the comment on the buckets above.
-  let main: Drawing | null = null;
-  rectEdgeShapes.forEach((drawing) => (main = addToMain(main, drawing)));
-  connectionEdges.forEach((drawing) => (main = addToMain(main, drawing)));
-  edgeSides.forEach((drawing) => (main = addToMain(main, drawing)));
-  roundingShapes.forEach((drawing) => (main = addToMain(main, drawing)));
-  connectionSectorShapes.forEach((drawing) => (main = addToMain(main, drawing)));
-
+  // The plate is drawn in one go from its outline, then everything negative is cut out of it.
+  let main = drawPolygon(computeFlangeOutline(vertex.edges, params));
   negativeShapes.forEach((s) => {
-    if (!main) return;
     main = main.cut(s);
   });
 
