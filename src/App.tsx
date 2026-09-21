@@ -52,6 +52,12 @@ import { DEFAULT_FLANGE_SHAPE_PARAMS, type FlangeShapeParams } from './lib/flang
 import { runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
+import {
+  clampPartTransparency,
+  DEFAULT_PART_TRANSPARENCY,
+  type PartTransparency,
+  type PreviewPartKind,
+} from './lib/previewParts'
 
 export type ViewMode = 'new' | 'edit' | 'preview'
 export type EditOrPreviewMode = 'edit' | 'preview'
@@ -320,6 +326,11 @@ function App() {
     () => bracePlateParamsDiffer(sceneData, bracePlateDraft),
     [sceneData, bracePlateDraft],
   )
+  // View-only, so it lives outside the dome's saved state and the Apply flow: changing it just
+  // re-draws the already-built preview.
+  const [partTransparency, setPartTransparency] = useState<PartTransparency>(DEFAULT_PART_TRANSPARENCY)
+  const handlePartTransparencyChange = (kind: PreviewPartKind, percent: number) =>
+    setPartTransparency((prev) => ({ ...prev, [kind]: clampPartTransparency(percent) }))
   const handleBracePlateParamChange = (key: keyof BracePlateParams, value: number) =>
     setBracePlateDraft((prev) => ({ ...prev, [key]: sanitizeBraceParam(key, value) }))
   const handleApplyPreview = () => {
@@ -1019,6 +1030,8 @@ function App() {
         bracePlateDraft={bracePlateDraft}
         onBracePlateParamChange={handleBracePlateParamChange}
         onApplyPreview={handleApplyPreview}
+        partTransparency={partTransparency}
+        onPartTransparencyChange={handlePartTransparencyChange}
         canUndo={sceneHistory.canUndo}
         canRedo={sceneHistory.canRedo}
         onDeleteSelected={handleDeleteSelected}
@@ -1055,6 +1068,7 @@ function App() {
         overshoot={appliedPreviewParams.overshoot}
         minSide={appliedPreviewParams.minSide}
         flangeMillingDiameter={appliedPreviewParams.flangeMillingDiameter}
+        partTransparency={partTransparency}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}

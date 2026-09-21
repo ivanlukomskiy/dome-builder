@@ -136,7 +136,9 @@ export function braceRectInArcBand(
 // ends (along x) and `offsetTransverse` in from its long sides (along y), plus one midway between
 // the two corner holes at each end - so those two lie on the line through the center along the
 // axis. The corner holes are also punched through the strut itself; the middle ones only go in the
-// plate.
+// plate. `middle` is [far, near]: the far one is at +x, the end furthest from the strut end
+// (x points away from it), and sits `farCenterOffset` in from the plate's end instead of
+// `offsetLongitudinal`.
 export interface BracePlateHoles {
   corner: Pt[];
   middle: Pt[];
@@ -147,6 +149,7 @@ export function bracePlateHoleCenters(
   halfAcross: number,
   offsetLongitudinal: number,
   offsetTransverse: number,
+  farCenterOffset: number = offsetLongitudinal,
 ): BracePlateHoles {
   const x = halfAlong - offsetLongitudinal;
   const y = halfAcross - offsetTransverse;
@@ -158,7 +161,7 @@ export function bracePlateHoleCenters(
       [x, -y],
     ],
     middle: [
-      [x, 0],
+      [halfAlong - farCenterOffset, 0],
       [-x, 0],
     ],
   };

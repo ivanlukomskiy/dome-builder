@@ -7,6 +7,12 @@ import type { SceneData } from '../lib/polyhedra'
 import { computeBraceEndpoints } from '../lib/braces'
 import { buildBraceSolids, type BracePoints } from '../lib/braceSolid'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
+import {
+  partOpacity,
+  PREVIEW_PART_KINDS,
+  type PartTransparency,
+  type PreviewPartKind,
+} from '../lib/previewParts'
 import { createPreviewProfileRecorder, isPreviewProfilingEnabled } from '../lib/previewProfile'
 import type { FlangeShapeParams } from '../lib/flangeGeometry'
 import {
@@ -147,6 +153,8 @@ interface DomeMeshProps {
   overshoot: number
   minSide: number
   flangeMillingDiameter: number
+  // View-only: how see-through each kind of part is drawn in Preview (percent, see previewParts.ts).
+  partTransparency: PartTransparency
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -184,6 +192,7 @@ export function DomeMesh({
   overshoot,
   minSide,
   flangeMillingDiameter,
+  partTransparency,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -237,7 +246,11 @@ export function DomeMesh({
   // before handing it off. Running each build in a fresh worker (and terminating it once done)
   // also reclaims that worker's whole opencascade heap on its own, rather than relying on every
   // intermediate shape being individually .delete()'d.
-  const [previewGeometry, setPreviewGeometry] = useState<THREE.BufferGeometry | null>(null)
+  // One merged geometry per kind of part, so each can be given its own transparency without
+  // rebuilding anything.
+  const [previewGeometries, setPreviewGeometries] = useState<
+    Partial<Record<PreviewPartKind, THREE.BufferGeometry>>
+  >({})
   const workersRef = useRef<Set<Worker>>(new Set())
   const nextRequestIdRef = useRef(0)
 
@@ -500,7 +513,7 @@ export function DomeMesh({
                   built.mesh,
                   flangeFrame(vertex, startAngleDeg - built.startAngleDeg, sign * flangeSpan),
                 )
-                allPieces.push({ ...placed, color: [color.r, color.g, color.b] })
+                allPieces.push({ ...placed, color: [color.r, color.g, color.b], part: 'flanges' })
               }
             }
           }
@@ -508,19 +521,25 @@ export function DomeMesh({
 
         for (const { braceId, mesh } of timedMain('buildBraceSolids', () => buildBraceSolids(allBracePoints))) {
           try {
-            allPieces.push({ ...mesh, color: BRACE_BODY_COLOR })
+            allPieces.push({ ...mesh, color: BRACE_BODY_COLOR, part: 'braces' })
           } catch (err) {
             console.error(`Failed to build brace ${braceId}`, err)
           }
         }
         const merged = timedMain('buildColoredGeometry + mergeGeometries', () => {
-          const geometries = allPieces.map(buildColoredGeometry)
-          const result = geometries.length > 0 ? mergeGeometries(geometries, false) : null
-          geometries.forEach((g) => g.dispose())
+          const result: Partial<Record<PreviewPartKind, THREE.BufferGeometry>> = {}
+          for (const { kind } of PREVIEW_PART_KINDS) {
+            const geometries = allPieces.filter((p) => p.part === kind).map(buildColoredGeometry)
+            if (geometries.length > 0) {
+              const mergedPart = mergeGeometries(geometries, false)
+              if (mergedPart) result[kind] = mergedPart
+            }
+            geometries.forEach((g) => g.dispose())
+          }
           return result
         })
-        setPreviewGeometry((prev) => {
-          prev?.dispose()
+        setPreviewGeometries((prev) => {
+          Object.values(prev).forEach((g) => g.dispose())
           return merged
         })
         profiler?.finish({
@@ -635,11 +654,25 @@ export function DomeMesh({
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
       )}
-      {mode === 'preview' && previewGeometry && (
-        <mesh geometry={previewGeometry}>
-          <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.5} />
-        </mesh>
-      )}
+      {mode === 'preview' &&
+        PREVIEW_PART_KINDS.map(({ kind }) => {
+          const geometry = previewGeometries[kind]
+          if (!geometry) return null
+          const opacity = partOpacity(partTransparency[kind])
+          const seeThrough = opacity < 1
+          return (
+            <mesh key={kind} geometry={geometry} renderOrder={seeThrough ? 1 : 0}>
+              <meshStandardMaterial
+                vertexColors
+                side={THREE.DoubleSide}
+                roughness={0.5}
+                transparent={seeThrough}
+                opacity={opacity}
+                depthWrite={!seeThrough}
+              />
+            </mesh>
+          )
+        })}
       {editingVertices &&
         Array.from(data.vertices.keys()).map((idx) => {
           const v = resolvePosition(idx)

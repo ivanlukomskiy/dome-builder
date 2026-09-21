@@ -121,6 +121,16 @@ describe("bracePlateHoleCenters", () => {
       [-18, 0],
     ]);
   });
+
+  it("puts the far center hole (+x) at its own offset, leaving the near one alone", () => {
+    const holes = bracePlateHoleCenters(25, 40, 7, 9, 12);
+    expect(holes.middle).toEqual([
+      [13, 0],
+      [-18, 0],
+    ]);
+    // corners are unaffected
+    expect(holes.corner[0]).toEqual([18, 31]);
+  });
 });
 
 describe("placeInPlateFrame", () => {

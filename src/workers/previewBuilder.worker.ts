@@ -6,6 +6,7 @@ import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
 import type { BracePoints } from '../lib/braceSolid'
+import type { PreviewPartKind } from '../lib/previewParts'
 import type { Drawing } from 'replicad'
 import { createWorkerProfiler, type WorkerProfile } from '../lib/previewProfile'
 import { installReplicadProfiler, snapshotReplicadStats } from '../lib/replicadProfiler'
@@ -68,6 +69,8 @@ export interface PreviewPiece {
   normals: Float32Array
   indices: Uint32Array
   color: [number, number, number]
+  // Which kind of part this is - each kind is drawn as its own mesh (see previewParts.ts).
+  part: PreviewPartKind
 }
 
 export type PreviewBuildPhase = 'struts' | 'flanges'
@@ -156,7 +159,7 @@ async function buildPreview(
         )
         strutSolidMs += lastMs()
         if (strut) {
-          pieces.push({ positions: strut.positions, normals: strut.normals, indices: strut.indices, color: job.color })
+          pieces.push({ positions: strut.positions, normals: strut.normals, indices: strut.indices, color: job.color, part: 'struts' })
         }
       } catch (err) {
         console.error(`Failed to build strut solid for edge ${job.index}`, err)
@@ -189,7 +192,7 @@ async function buildPreview(
         )
         strutSolidMs += lastMs()
         if (mesh) {
-          pieces.push({ positions: mesh.positions, normals: mesh.normals, indices: mesh.indices, color: BRACE_PLATE_COLOR })
+          pieces.push({ positions: mesh.positions, normals: mesh.normals, indices: mesh.indices, color: BRACE_PLATE_COLOR, part: 'bracePlates' })
         }
       } catch (err) {
         console.error(`Failed to build brace plate ${brace.braceId} for edge ${job.index}`, err)

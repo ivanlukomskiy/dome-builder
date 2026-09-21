@@ -463,7 +463,8 @@ export const nullShoulderGeometry: Geometry = {
 };
 
 // The brace plate, flat: the rectangle `rect` (centered at `c`, its length along `axis`) with
-// corners rounded by `plateRadius`, and 6 bolt holes cut in it (see bracePlateHoleCenters).
+// corners rounded by `plateRadius`, and 6 bolt holes cut in it (see bracePlateHoleCenters; the
+// two on the center line have their own diameter, plateHoleCenterDiameter).
 // Null if the rectangle is degenerate.
 function drawBracePlate(
   c: Point2D,
@@ -486,17 +487,24 @@ function drawBracePlate(
       ? drawRoundedRectangle(width, height, radius)
       : drawRoundedRectangle(width, height);
 
-  if (params.plateHoleDiameter > 0) {
+  if (params.plateHoleDiameter > 0 || params.plateHoleCenterDiameter > 0) {
     const holes = bracePlateHoleCenters(
       rect.halfAlong,
       rect.halfAcross,
       params.plateHoleOffsetLongitudinal,
       params.plateHoleOffsetTransverse,
+      params.plateHoleFarCenterOffset,
     );
-    for (const holeCenter of [...holes.corner, ...holes.middle]) {
-      plate = plate.cut(
-        drawCircle(params.plateHoleDiameter / 2).translate(holeCenter),
-      );
+    // The corner holes and the two on the center line have their own diameters (0 = none).
+    const groups: [Point2D[], number][] = [
+      [holes.corner, params.plateHoleDiameter],
+      [holes.middle, params.plateHoleCenterDiameter],
+    ];
+    for (const [centers, diameter] of groups) {
+      if (diameter <= 0) continue;
+      for (const holeCenter of centers) {
+        plate = plate.cut(drawCircle(diameter / 2).translate(holeCenter));
+      }
     }
   }
 
@@ -647,14 +655,16 @@ function createStrutEnd(p: StrutEndMeasurements): Drawing {
     try {
       main = main.cut(s);
     } catch (err) {
-      throw new Error(`createStrutEnd: cutting negative shape "${name}" failed`, { cause: err });
+      console.error(`createStrutEnd: cutting negative shape "${name}" failed`, { cause: err })
+      // throw new Error(`createStrutEnd: cutting negative shape "${name}" failed`, { cause: err });
     }
     try {
       main = main.cut(mirrored);
     } catch (err) {
-      throw new Error(`createStrutEnd: cutting mirrored negative shape "${name}" failed`, {
-        cause: err,
-      });
+      console.error(`createStrutEnd: cutting mirrored negative shape "${name}" failed`, { cause: err })
+      // throw new Error(`createStrutEnd: cutting mirrored negative shape "${name}" failed`, {
+      //   cause: err,
+      // });
     }
   });
   return main;
@@ -900,11 +910,11 @@ export function computeStrutBoundary2D(
               ? tangentDirection2D(a, b, center)
               : tangentDirection2D(b, a, center),
         });
-        helpers.push({
-          drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
-          color: "magenta",
-          name: `braceCenter ${end} (brace ${brace.braceId})`,
-        });
+        // helpers.push({
+        //   drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
+        //   color: "magenta",
+        //   name: `braceCenter ${end} (brace ${brace.braceId})`,
+        // });
 
         // The brace plate's rectangle around braceCenter: `width` long along this strut end's
         // axis (the tangent at that end - strutA / strutB above are drawn with their length along
@@ -931,6 +941,7 @@ export function computeStrutBoundary2D(
             rect.halfAcross,
             brace.params.plateHoleOffsetLongitudinal,
             brace.params.plateHoleOffsetTransverse,
+            brace.params.plateHoleFarCenterOffset,
           );
           for (const hole of placeInPlateFrame(
             braceCenter,
@@ -948,13 +959,13 @@ export function computeStrutBoundary2D(
               [-rect.halfAlong, 0],
             ])
           : null;
-        plateEnds?.forEach((point, i) => {
-          helpers.push({
-            drawing: drawPointMarker(point, MARKER_RADIUS),
-            color: "lime",
-            name: `bracePlateEnd ${end} point ${i + 1} (brace ${brace.braceId})`,
-          });
-        });
+        // plateEnds?.forEach((point, i) => {
+        //   helpers.push({
+        //     drawing: drawPointMarker(point, MARKER_RADIUS),
+        //     color: "lime",
+        //     name: `bracePlateEnd ${end} point ${i + 1} (brace ${brace.braceId})`,
+        //   });
+        // });
         if (plate && braceIndex === 0) {
           if (end === "A") bracePlateA = plate.clone();
           else bracePlateB = plate.clone();

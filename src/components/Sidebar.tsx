@@ -2,6 +2,14 @@ import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import { LANGUAGES, useI18n } from '../lib/i18n'
+import {
+  MAX_PART_TRANSPARENCY,
+  MIN_PART_TRANSPARENCY,
+  PART_TRANSPARENCY_STEP,
+  PREVIEW_PART_KINDS,
+  type PartTransparency,
+  type PreviewPartKind,
+} from '../lib/previewParts'
 import type { StepExportProgress } from '../lib/stepExportRunner'
 import type { DxfExportProgress } from '../lib/dxfExportRunner'
 import {
@@ -141,6 +149,9 @@ interface SidebarProps {
   onBracePlateParamChange: (key: keyof BracePlateParams, value: number) => void
   previewParamsDirty: boolean
   onApplyPreview: () => void
+  // View-only transparency (percent) of each kind of part in Preview.
+  partTransparency: PartTransparency
+  onPartTransparencyChange: (kind: PreviewPartKind, percent: number) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -354,6 +365,8 @@ export function Sidebar({
   onBracePlateParamChange,
   previewParamsDirty,
   onApplyPreview,
+  partTransparency,
+  onPartTransparencyChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -459,6 +472,28 @@ export function Sidebar({
             </div>
           </section>
         </>
+      )}
+
+      {mode === 'preview' && (
+        <section className="control-group">
+          <h2>{t('Part transparency')}</h2>
+          {PREVIEW_PART_KINDS.map(({ kind, label }) => (
+            <div className="transform-field part-transparency" key={kind}>
+              <label>{t(label)}</label>
+              <div className="layer-slider-row">
+                <input
+                  type="range"
+                  min={MIN_PART_TRANSPARENCY}
+                  max={MAX_PART_TRANSPARENCY}
+                  step={PART_TRANSPARENCY_STEP}
+                  value={partTransparency[kind]}
+                  onChange={(e) => onPartTransparencyChange(kind, Number(e.target.value))}
+                />
+                <span className="layer-count">{partTransparency[kind]}%</span>
+              </div>
+            </div>
+          ))}
+        </section>
       )}
 
       <section className="control-group">

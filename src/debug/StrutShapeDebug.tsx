@@ -249,6 +249,7 @@ export function StrutShapeDebug() {
           }
         }
 
+        console.log('md', call.millingDiameter, imported)
         const result = computeStrutBoundary(
           new THREE.Vector3(...call.a),
           new THREE.Vector3(...call.b),

@@ -15,8 +15,14 @@ export interface BraceParams {
   maxPlateWidth: number
   plateRadius: number
   plateHoleDiameter: number
+  // Diameter, mm, of the two holes on the line through the plate's center along the strut (the
+  // "center" holes); the 4 corner holes use plateHoleDiameter.
+  plateHoleCenterDiameter: number
   plateHoleOffsetLongitudinal: number
   plateHoleOffsetTransverse: number
+  // How far in from the plate's end, mm, the one center hole furthest from the strut end (the
+  // vertex side) sits. The other center hole uses plateHoleOffsetLongitudinal.
+  plateHoleFarCenterOffset: number
   // How thick the plate is, mm - extruded out from the strut's side face.
   plateThickness: number
   // How thick the brace itself is, mm - the bar running between the two struts' plates, extruded
@@ -34,8 +40,10 @@ export const DEFAULT_BRACE_PARAMS: BraceParams = {
   maxPlateWidth: 50,
   plateRadius: 5,
   plateHoleDiameter: 5,
+  plateHoleCenterDiameter: 6,
   plateHoleOffsetLongitudinal: 7,
   plateHoleOffsetTransverse: 7,
+  plateHoleFarCenterOffset: 7,
   plateThickness: 5,
   thickness: 10,
 }
@@ -52,8 +60,10 @@ export const BRACE_PARAM_FIELDS: { key: keyof BraceParams; label: string; step: 
   { key: 'maxPlateWidth', label: 'Max plate width (mm)', step: 5 },
   { key: 'plateRadius', label: 'Plate radius (mm)', step: 1 },
   { key: 'plateHoleDiameter', label: 'Plate hole diameter (mm)', step: 1 },
+  { key: 'plateHoleCenterDiameter', label: 'Plate hole center diameter (mm)', step: 1 },
   { key: 'plateHoleOffsetLongitudinal', label: 'Plate hole offset, longitudinal (mm)', step: 1 },
   { key: 'plateHoleOffsetTransverse', label: 'Plate hole offset, transverse (mm)', step: 1 },
+  { key: 'plateHoleFarCenterOffset', label: 'Far center hole offset (mm)', step: 1 },
   { key: 'plateThickness', label: 'Plate thickness (mm)', step: 1 },
   { key: 'thickness', label: 'Brace thickness (mm)', step: 1 },
 ]
