@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { Face, SceneData } from './polyhedra'
 import { buildVertexAdjacency, computeVertexHubMetrics, computeVertexTangentPlane } from './polyhedra'
 import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometry'
-import type { FlangeShapeParams } from './flangeGeometry'
+import type { FlangeShapeParams, FootParams } from './flangeGeometry'
 
 type Vec3Tuple = [number, number, number]
 
@@ -50,6 +50,9 @@ export interface VertexEdgesInfo {
   // This vertex's own overrides of the flange parameters, if it has any - laid over the global ones
   // when its flange is built (see resolveFlangeParams). Undefined otherwise.
   flangeOverrides?: Partial<FlangeShapeParams>
+  // The global foot parameters, if this vertex is marked as a foot (see FlangeVertexInput.foot).
+  // Undefined otherwise.
+  foot?: FootParams
   // Sorted in angular order around the tangent plane (matching angleToNextEdgeDeg's meaning).
   edges: EdgeInfo[]
 }
@@ -69,6 +72,9 @@ export interface ComputeEdgesInfoParams {
   vertexCornerLength: ReadonlyMap<number, number>
   // Per-vertex flange parameter overrides, keyed by vertex id.
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
+  // Ids of the vertices marked as feet, and the (global) dimensions they're built with.
+  footVertices: ReadonlySet<number>
+  footParams: FootParams
   halfWidth: number
   offsetModifier: number
   endGrooveLengthPercent: number
@@ -152,6 +158,8 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
     cornerLength: globalCornerLength,
     vertexCornerLength,
     vertexFlangeParams,
+    footVertices,
+    footParams,
     halfWidth,
     offsetModifier,
     endGrooveLengthPercent,
@@ -229,6 +237,7 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
       position: toTuple(vertexPos),
       cornerLengthOverride,
       flangeOverrides: vertexFlangeParams.get(vertexId),
+      foot: footVertices.has(vertexId) ? footParams : undefined,
       tangentPlane: {
         origin: toTuple(vertexPos),
         normal: toTuple(normal),

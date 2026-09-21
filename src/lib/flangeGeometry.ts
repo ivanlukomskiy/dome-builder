@@ -44,6 +44,9 @@ export interface FlangeVertexInput {
   vertexId: number;
   // In ascending `projectedAngleDeg` order, same as get_edges_info reports them.
   edges: FlangeEdgeInput[];
+  // Set (to the global foot parameters) when this vertex is marked as a "foot" - undefined for an
+  // ordinary hub vertex.
+  foot?: FootParams;
 }
 
 export interface FlangeShapeParams {
@@ -103,6 +106,35 @@ export function resolveFlangeParams(
   overrides: Partial<FlangeShapeParams> | undefined,
 ): FlangeShapeParams {
   return overrides ? { ...base, ...overrides } : base;
+}
+
+// The dimensions of a "foot" - what a vertex marked as one gets built with. One shared set for the
+// whole dome (unlike FlangeShapeParams there's no per-vertex override yet); each vertex is only
+// flagged as a foot or not.
+export interface FootParams {
+  // How far (mm) the foot reaches.
+  length: number;
+  // How thick (mm) the foot is.
+  thickness: number;
+  // Length (mm) of the groove cut into the foot.
+  grooveLength: number;
+}
+
+export const DEFAULT_FOOT_PARAMS: FootParams = {
+  length: 50,
+  thickness: 10,
+  grooveLength: 20,
+};
+
+// The foot parameters, with the labels the Sidebar shows for them.
+export const FOOT_PARAM_FIELDS: { key: keyof FootParams; label: string }[] = [
+  { key: "length", label: "Foot length (mm)" },
+  { key: "thickness", label: "Foot thickness (mm)" },
+  { key: "grooveLength", label: "Foot groove length (mm)" },
+];
+
+export function footParamsEqual(a: FootParams, b: FootParams): boolean {
+  return a.length === b.length && a.thickness === b.thickness && a.grooveLength === b.grooveLength;
 }
 
 // The middle of one strut's rectangular tenon hole in the flange plate: which strut (edge), where,
@@ -657,6 +689,15 @@ export function computeFlangeBoundary2D(
   };
 
   if (vertex.edges.length === 0) return { main: null, edgeMarks: [], helpers };
+
+  // Foot geometry isn't built yet - for now the params just get logged, to show they arrive here.
+  if (vertex.foot) {
+    console.log(`[flange] vertex ${vertex.vertexId} is a foot`, {
+      length: vertex.foot.length,
+      thickness: vertex.foot.thickness,
+      grooveLength: vertex.foot.grooveLength,
+    });
+  }
 
   vertex.edges.forEach((edge, i) => {
     const next = vertex.edges[(i + 1) % vertex.edges.length];

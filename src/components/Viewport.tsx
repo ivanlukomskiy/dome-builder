@@ -6,7 +6,7 @@ import type { EditTarget, ViewMode } from '../App'
 import type { HubEdgeMetric, SceneData } from '../lib/polyhedra'
 import { buildVertexAdjacency, computeModelStats, computeVertexHubMetrics } from '../lib/polyhedra'
 import { buildFaceNeighborPairs, directedEdgeKey } from '../lib/edgesInfo'
-import type { FlangeShapeParams } from '../lib/flangeGeometry'
+import type { FlangeShapeParams, FootParams } from '../lib/flangeGeometry'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
 import type { PartTransparency } from '../lib/previewParts'
 import { Hud, type HudHubEdgeMetric } from './Hud'
@@ -22,6 +22,8 @@ interface ViewportProps {
   edgeThickness: ReadonlyMap<number, number>
   vertexCornerLength: ReadonlyMap<number, number>
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
+  footVertices: ReadonlySet<number>
+  footParams: FootParams
   selectedFaceIndices: ReadonlySet<number>
   selectedBraceIndices: ReadonlySet<number>
   extrudeDistance: number
@@ -60,6 +62,8 @@ export function Viewport({
   edgeThickness,
   vertexCornerLength,
   vertexFlangeParams,
+  footVertices,
+  footParams,
   selectedFaceIndices,
   selectedBraceIndices,
   extrudeDistance,
@@ -190,6 +194,8 @@ export function Viewport({
           edgeThickness={edgeThickness}
           vertexCornerLength={vertexCornerLength}
           vertexFlangeParams={vertexFlangeParams}
+          footVertices={footVertices}
+          footParams={footParams}
           selectedFaceIndices={selectedFaceIndices}
           selectedBraceIndices={selectedBraceIndices}
           extrudeDistance={extrudeDistance}

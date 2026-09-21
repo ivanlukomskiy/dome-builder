@@ -81,7 +81,7 @@ export function computeFlangeSignature(vertex: VertexEdgesInfo, context: string)
   }
 
   return {
-    key: `${context}#${n}#${vertex.flangeOverrides ? JSON.stringify(vertex.flangeOverrides) : ''}#${best}`,
+    key: `${context}#${n}#${vertex.flangeOverrides ? JSON.stringify(vertex.flangeOverrides) : ''}#${vertex.foot ? JSON.stringify(vertex.foot) : ''}#${best}`,
     startAngleDeg: n > 0 ? edges[bestStart].projectedAngleDeg : 0,
   }
 }

@@ -218,7 +218,7 @@ async function buildPreview(
     const { vertex } = job
     const boundary = timed('flangeBoundary2D', () =>
       computeFlangeBoundary2D(
-        { vertexId: vertex.vertexId, edges: vertex.edges },
+        { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
         resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
       ),
     )

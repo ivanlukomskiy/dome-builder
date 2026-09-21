@@ -14,7 +14,7 @@ import {
   type PreviewPartKind,
 } from '../lib/previewParts'
 import { createPreviewProfileRecorder, isPreviewProfilingEnabled } from '../lib/previewProfile'
-import type { FlangeShapeParams } from '../lib/flangeGeometry'
+import type { FlangeShapeParams, FootParams } from '../lib/flangeGeometry'
 import {
   flangeFrame,
   flangeMeshCache,
@@ -66,6 +66,8 @@ const FLANGE_COLOR = new THREE.Color('#b0b4bc')
 // Marks a vertex (Edit) and its flanges (Preview) that have any override of their own (corner
 // length or flange parameters).
 const CORNER_OVERRIDE_COLOR = new THREE.Color('#22d3ee')
+// Edit-mode marker color of a vertex marked as a foot.
+const FOOT_VERTEX_COLOR = '#c084fc'
 const BRACE_COLOR = '#e05ad0'
 
 // The heatmap color for a given thickness override (or the default tone if there isn't one) -
@@ -134,6 +136,8 @@ interface DomeMeshProps {
   edgeThickness: ReadonlyMap<number, number>
   vertexCornerLength: ReadonlyMap<number, number>
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
+  footVertices: ReadonlySet<number>
+  footParams: FootParams
   selectedFaceIndices: ReadonlySet<number>
   selectedBraceIndices: ReadonlySet<number>
   extrudeDistance: number
@@ -173,6 +177,8 @@ export function DomeMesh({
   edgeThickness,
   vertexCornerLength,
   vertexFlangeParams,
+  footVertices,
+  footParams,
   selectedFaceIndices,
   selectedBraceIndices,
   extrudeDistance,
@@ -286,6 +292,8 @@ export function DomeMesh({
         cornerLength,
         vertexCornerLength,
         vertexFlangeParams,
+        footVertices,
+        footParams,
         offsetModifier,
         endGrooveLengthPercent,
         midGrooveLengthPercent,
@@ -573,6 +581,8 @@ export function DomeMesh({
     cornerLength,
     vertexCornerLength,
     vertexFlangeParams,
+    footVertices,
+    footParams,
     offsetModifier,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
@@ -695,9 +705,11 @@ export function DomeMesh({
                 color={
                   isSelected
                     ? '#f5a623'
-                    : vertexCornerLength.has(idx) || vertexFlangeParams.has(idx)
-                      ? `#${CORNER_OVERRIDE_COLOR.getHexString()}`
-                      : '#4fd97e'
+                    : footVertices.has(idx)
+                      ? FOOT_VERTEX_COLOR
+                      : vertexCornerLength.has(idx) || vertexFlangeParams.has(idx)
+                        ? `#${CORNER_OVERRIDE_COLOR.getHexString()}`
+                        : '#4fd97e'
                 }
               />
             </mesh>

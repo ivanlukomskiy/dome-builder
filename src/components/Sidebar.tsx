@@ -19,7 +19,7 @@ import {
   type BraceParams,
   type BracePlateParams,
 } from '../lib/braces'
-import { FLANGE_PARAM_FIELDS, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { FLANGE_PARAM_FIELDS, FOOT_PARAM_FIELDS, type FlangeShapeParams, type FootParams } from '../lib/flangeGeometry'
 import type {
   AxisType,
   PolyhedronData,
@@ -99,6 +99,12 @@ interface SidebarProps {
   onVertexFlangeParamChange: (key: keyof FlangeShapeParams, value: number) => void
   onResetVertexFlangeParam: (key: keyof FlangeShapeParams) => void
   onResetVertexFlangeParams: () => void
+  // Vertices marked as feet; the toggle marks/unmarks every selected vertex.
+  footVertices: ReadonlySet<number>
+  onFootVertexToggle: (isFoot: boolean) => void
+  // The dimensions shared by every foot.
+  footParams: FootParams
+  onFootParamChange: (key: keyof FootParams, value: number) => void
   canCreateFace: boolean
   onCreateFace: () => void
   canAddBrace: boolean
@@ -317,6 +323,10 @@ export function Sidebar({
   onVertexFlangeParamChange,
   onResetVertexFlangeParam,
   onResetVertexFlangeParams,
+  footVertices,
+  onFootVertexToggle,
+  footParams,
+  onFootParamChange,
   canCreateFace,
   onCreateFace,
   canAddBrace,
@@ -403,6 +413,10 @@ export function Sidebar({
   const hasVertexCornerLengthOverrides = Array.from(selectedVertexIndices).some((idx) =>
     vertexCornerLength.has(idx),
   )
+
+  const selectedFootCount = Array.from(selectedVertexIndices).filter((idx) => footVertices.has(idx)).length
+  const allSelectedAreFeet = selectedVertexIndices.size > 0 && selectedFootCount === selectedVertexIndices.size
+  const someSelectedAreFeet = selectedFootCount > 0 && !allSelectedAreFeet
 
   const importInputRef = useRef<HTMLInputElement>(null)
 
@@ -757,6 +771,29 @@ export function Sidebar({
 
       {(mode === 'preview' || mode === 'edit') && (
         <section className="control-group">
+          <h2>{t('Foot')}</h2>
+          {FOOT_PARAM_FIELDS.map(({ key, label }) => (
+            <div className="transform-field" key={key}>
+              <label>{t(label)}</label>
+              <NumberField
+                value={footParams[key]}
+                step={1}
+                min={0}
+                clamp={(n) => Math.max(n, 0)}
+                onCommit={(v) => onFootParamChange(key, v)}
+              />
+            </div>
+          ))}
+          <p className="hint">
+            {t(
+              'The same for every vertex marked as a foot (Edit → Vertices → Foot Geometry), applied to the preview with Apply.',
+            )}
+          </p>
+        </section>
+      )}
+
+      {(mode === 'preview' || mode === 'edit') && (
+        <section className="control-group">
           <h2>{t('Braces')}</h2>
           {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
             <div className="transform-field" key={key}>
@@ -1078,6 +1115,28 @@ export function Sidebar({
               {t('Reset Corner Length')}
             </button>
           </div>
+        </section>
+      )}
+
+      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+        <section className="control-group">
+          <h2>{t('Foot Geometry')}</h2>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={allSelectedAreFeet}
+              ref={(el) => {
+                if (el) el.indeterminate = someSelectedAreFeet
+              }}
+              onChange={(e) => onFootVertexToggle(e.target.checked)}
+            />
+            {t('Foot geometry')}
+          </label>
+          <p className="hint">
+            {t(
+              'Marks the selected vertices as feet: their flange is built with the dimensions from the Foot section. Foot vertices are shown in purple.',
+            )}
+          </p>
         </section>
       )}
 

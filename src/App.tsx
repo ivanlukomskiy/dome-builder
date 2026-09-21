@@ -48,7 +48,13 @@ import {
 } from './lib/config'
 import { downloadBlob, downloadJson } from './lib/download'
 import { computeEdgesInfo } from './lib/edgesInfo'
-import { DEFAULT_FLANGE_SHAPE_PARAMS, type FlangeShapeParams } from './lib/flangeGeometry'
+import {
+  DEFAULT_FLANGE_SHAPE_PARAMS,
+  DEFAULT_FOOT_PARAMS,
+  footParamsEqual,
+  type FlangeShapeParams,
+  type FootParams,
+} from './lib/flangeGeometry'
 import { runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
@@ -85,6 +91,7 @@ export interface PreviewShapeParams {
   overshoot: number
   minSide: number
   flangeMillingDiameter: number
+  footParams: FootParams
 }
 
 // Shared by both vertex and edge selection: toggles a whole group (an individual pick, a
@@ -229,6 +236,8 @@ function App() {
   const [vertexFlangeParams, setVertexFlangeParams] = useState<
     Map<number, Partial<FlangeShapeParams>>
   >(new Map(initial?.vertexFlangeParams ?? []))
+  // Vertices marked as "feet" (see flangeGeometry.ts's FootParams). Applies live, like the above.
+  const [footVertices, setFootVertices] = useState<Set<number>>(new Set(initial?.footVertices ?? []))
   const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
     new Map(initial?.vertexTransforms ?? []),
   )
@@ -277,6 +286,8 @@ function App() {
   const [flangeMillingDiameter, setFlangeMillingDiameter] = useState(
     initial?.flangeMillingDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
   )
+  // The dimensions shared by every foot vertex - see the "Foot" Sidebar section.
+  const [footParams, setFootParams] = useState<FootParams>(initial?.footParams ?? DEFAULT_FOOT_PARAMS)
 
   // The draft values above update live as the Sidebar's Preview fields are edited; the Viewport
   // instead renders this applied snapshot, only updated by handleApplyPreview - see
@@ -299,6 +310,7 @@ function App() {
     overshoot,
     minSide,
     flangeMillingDiameter,
+    footParams,
   }))
   const draftPreviewParams: PreviewShapeParams = {
     extrudeDistance,
@@ -318,9 +330,13 @@ function App() {
     overshoot,
     minSide,
     flangeMillingDiameter,
+    footParams,
   }
   const previewParamsDirty = (Object.keys(draftPreviewParams) as (keyof PreviewShapeParams)[]).some(
-    (key) => draftPreviewParams[key] !== appliedPreviewParams[key],
+    (key) =>
+      key === 'footParams'
+        ? !footParamsEqual(draftPreviewParams.footParams, appliedPreviewParams.footParams)
+        : draftPreviewParams[key] !== appliedPreviewParams[key],
   )
   const bracePlateDirty = useMemo(
     () => bracePlateParamsDiffer(sceneData, bracePlateDraft),
@@ -591,6 +607,22 @@ function App() {
     })
   }
 
+  // Marks (or unmarks) every selected vertex as a foot.
+  const handleFootVertexToggle = (isFoot: boolean) => {
+    if (selectedVertexIndices.size === 0) return
+    setFootVertices((prev) => {
+      const next = new Set(prev)
+      for (const idx of selectedVertexIndices) {
+        if (isFoot) next.add(idx)
+        else next.delete(idx)
+      }
+      return next
+    })
+  }
+
+  const handleFootParamChange = (key: keyof FootParams, value: number) =>
+    setFootParams((prev) => ({ ...prev, [key]: value }))
+
   const handleDeleteSelected = () => {
     if (selectedVertexIndices.size === 0) return
     sceneHistory.commit(deleteVertices(sceneData, selectedVertexIndices))
@@ -669,6 +701,7 @@ function App() {
     setEdgeThickness(new Map())
     setVertexCornerLength(new Map())
     setVertexFlangeParams(new Map())
+    setFootVertices(new Set())
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
@@ -692,6 +725,7 @@ function App() {
     setOvershoot(DEFAULT_FLANGE_SHAPE_PARAMS.overshoot)
     setMinSide(DEFAULT_FLANGE_SHAPE_PARAMS.minSide)
     setFlangeMillingDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter)
+    setFootParams(DEFAULT_FOOT_PARAMS)
     setAppliedPreviewParams({
       extrudeDistance: DEFAULT_EXTRUDE_DISTANCE,
       thickness: DEFAULT_THICKNESS,
@@ -710,6 +744,7 @@ function App() {
       overshoot: DEFAULT_FLANGE_SHAPE_PARAMS.overshoot,
       minSide: DEFAULT_FLANGE_SHAPE_PARAMS.minSide,
       flangeMillingDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
+      footParams: DEFAULT_FOOT_PARAMS,
     })
     setMode(preNewMode)
   }
@@ -739,6 +774,7 @@ function App() {
     setOvershoot(state.overshoot)
     setMinSide(state.minSide)
     setFlangeMillingDiameter(state.flangeMillingDiameter)
+    setFootParams(state.footParams)
     setAppliedPreviewParams({
       extrudeDistance: state.extrudeDistance,
       thickness: state.thickness,
@@ -757,11 +793,13 @@ function App() {
       overshoot: state.overshoot,
       minSide: state.minSide,
       flangeMillingDiameter: state.flangeMillingDiameter,
+      footParams: state.footParams,
     })
     setVertexTransforms(new Map(state.vertexTransforms))
     setEdgeThickness(new Map(state.edgeThickness))
     setVertexCornerLength(new Map(state.vertexCornerLength))
     setVertexFlangeParams(new Map(state.vertexFlangeParams))
+    setFootVertices(new Set(state.footVertices))
     setSelectedVertexIndices(new Set())
     setSelectedEdgeIndices(new Set())
     setSelectedFaceIndices(new Set())
@@ -796,6 +834,8 @@ function App() {
       edgeThickness,
       vertexCornerLength,
       vertexFlangeParams,
+      footParams,
+      footVertices,
     })
 
   // Auto-save on every change to any config field, so the next page load can restore it.
@@ -825,6 +865,8 @@ function App() {
     edgeThickness,
     vertexCornerLength,
     vertexFlangeParams,
+    footParams,
+    footVertices,
   ])
 
   const handleExportConfig = () => {
@@ -853,6 +895,8 @@ function App() {
       cornerLength: appliedPreviewParams.cornerLength,
       vertexCornerLength,
       vertexFlangeParams,
+      footVertices,
+      footParams: appliedPreviewParams.footParams,
       halfWidth: appliedPreviewParams.extrudeDistance / 2,
       offsetModifier: appliedPreviewParams.offsetModifier,
       endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
@@ -875,6 +919,8 @@ function App() {
       cornerLength: appliedPreviewParams.cornerLength,
       vertexCornerLength,
       vertexFlangeParams,
+      footVertices,
+      footParams: appliedPreviewParams.footParams,
       offsetModifier: appliedPreviewParams.offsetModifier,
       endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
       midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
@@ -982,6 +1028,10 @@ function App() {
         onVertexFlangeParamChange={handleVertexFlangeParamChange}
         onResetVertexFlangeParam={handleResetVertexFlangeParam}
         onResetVertexFlangeParams={handleResetVertexFlangeParams}
+        footVertices={footVertices}
+        onFootVertexToggle={handleFootVertexToggle}
+        footParams={footParams}
+        onFootParamChange={handleFootParamChange}
         canCreateFace={creatableFaces.length > 0}
         onCreateFace={handleCreateFacesFromEdges}
         canAddBrace={canAddBrace}
@@ -1049,6 +1099,8 @@ function App() {
         edgeThickness={isNew ? EMPTY_EDGE_THICKNESS : edgeThickness}
         vertexCornerLength={isNew ? EMPTY_VERTEX_CORNER_LENGTH : vertexCornerLength}
         vertexFlangeParams={isNew ? EMPTY_VERTEX_FLANGE_PARAMS : vertexFlangeParams}
+        footVertices={isNew ? EMPTY_INDEX_SET : footVertices}
+        footParams={appliedPreviewParams.footParams}
         selectedFaceIndices={isNew ? EMPTY_INDEX_SET : selectedFaceIndices}
         selectedBraceIndices={isNew ? EMPTY_INDEX_SET : liveSelectedBraceIndices}
         extrudeDistance={appliedPreviewParams.extrudeDistance}

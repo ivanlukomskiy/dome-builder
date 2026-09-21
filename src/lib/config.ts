@@ -1,6 +1,6 @@
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
-import type { FlangeShapeParams } from './flangeGeometry'
+import { DEFAULT_FOOT_PARAMS, type FlangeShapeParams, type FootParams } from './flangeGeometry'
 import { downloadJson } from './download'
 
 // A saved config captures the *result* of picking a shape in the "New" tab - the concrete,
@@ -59,6 +59,10 @@ export interface DomeConfig {
   // Per-vertex overrides of any flange parameter, keyed by vertex id (only the overridden ones are
   // present). Missing in configs saved before this existed.
   vertexFlangeParams?: [number, Partial<FlangeShapeParams>][]
+  // The global foot dimensions, and the ids of the vertices marked as feet (see flangeGeometry.ts's
+  // FootParams). Missing in configs saved before this existed.
+  footParams?: FootParams
+  footVertices?: number[]
 }
 
 // The subset of App's state a config captures - plain data in, plain data out, so App can
@@ -87,6 +91,8 @@ export interface DomeState {
   edgeThickness: ReadonlyMap<number, number>
   vertexCornerLength: ReadonlyMap<number, number>
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
+  footParams: FootParams
+  footVertices: ReadonlySet<number>
 }
 
 export function serializeConfig(state: DomeState): DomeConfig {
@@ -126,6 +132,8 @@ export function serializeConfig(state: DomeState): DomeConfig {
     edgeThickness: Array.from(state.edgeThickness.entries()),
     vertexCornerLength: Array.from(state.vertexCornerLength.entries()),
     vertexFlangeParams: Array.from(state.vertexFlangeParams.entries()),
+    footParams: state.footParams,
+    footVertices: Array.from(state.footVertices),
   }
 }
 
@@ -170,6 +178,8 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     edgeThickness: new Map(config.edgeThickness),
     vertexCornerLength: new Map(config.vertexCornerLength ?? []),
     vertexFlangeParams: new Map(config.vertexFlangeParams ?? []),
+    footParams: { ...DEFAULT_FOOT_PARAMS, ...config.footParams },
+    footVertices: new Set(config.footVertices ?? []),
   }
 }
 

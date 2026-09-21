@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { SceneData } from './polyhedra'
 import { computeEdgeEndOffsets } from './strutGeometry'
 import { computeEdgesInfo, type VertexEdgesInfo } from './edgesInfo'
-import type { FlangeShapeParams } from './flangeGeometry'
+import type { FlangeShapeParams, FootParams } from './flangeGeometry'
 import { computeStrutBraces, indexBracesByEdge, type StrutBraces } from './braces'
 
 // Everything DomeMesh.tsx's live Preview build and the "Download STEP Archive" export both need
@@ -50,6 +50,9 @@ export interface PreviewBuildInputParams {
   vertexCornerLength: ReadonlyMap<number, number>
   // Per-vertex flange parameter overrides, keyed by vertex id.
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
+  // Ids of the vertices marked as feet, and the (global) dimensions they're built with.
+  footVertices: ReadonlySet<number>
+  footParams: FootParams
   offsetModifier: number
   endGrooveLengthPercent: number
   midGrooveLengthPercent: number
@@ -68,6 +71,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     cornerLength,
     vertexCornerLength,
     vertexFlangeParams,
+    footVertices,
+    footParams,
     offsetModifier,
     endGrooveLengthPercent,
     midGrooveLengthPercent,
@@ -120,6 +125,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     cornerLength,
     vertexCornerLength,
     vertexFlangeParams,
+    footVertices,
+    footParams,
     halfWidth,
     offsetModifier,
     endGrooveLengthPercent,

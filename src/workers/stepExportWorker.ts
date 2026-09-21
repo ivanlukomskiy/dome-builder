@@ -153,7 +153,7 @@ async function buildStepExports(
 
   req.vertices.forEach((vertex, i) => {
     const boundary = computeFlangeBoundary2D(
-      { vertexId: vertex.vertexId, edges: vertex.edges },
+      { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
       resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
     )
     self.postMessage({
