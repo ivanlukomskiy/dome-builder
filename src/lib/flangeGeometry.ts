@@ -398,24 +398,26 @@ function computeConnectionCurvePoints(
 
 // The plate's boundary across an acute (< 180 deg) open wedge between `edge` and `next`: a
 // quadratic bezier that starts on `edge`'s outer side line, ends on `next`'s, and is pulled towards
-// the point where those two side lines would cross - which rounds that corner off. Returns null if
-// the two side lines turn out to be parallel (no crossing) - shouldn't happen for real dome
-// geometry.
+// a control point on the wedge's bisector, which rounds the corner between the two sides off.
+//
+// The control point sits where the two side lines meet on the bisector when both struts are equally
+// thick: as far from the vertex as the sides are (on average), divided by the sine of half the
+// wedge angle. Placing it on the bisector rather than intersecting the two side lines keeps it
+// well behaved (no parallel lines, no runaway crossing) when the two struts differ in thickness.
 function computeWedgeRoundingPoints(
   edge: FlangeEdgeInput,
   next: FlangeEdgeInput,
   params: FlangeShapeParams,
-): Point2D[] | null {
+): Point2D[] {
   const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
   const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
   const nextAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg;
 
-  const edge1p1 = rotate2D([100, h1], edge.projectedAngleDeg);
-  const edge1p2 = rotate2D([0, h1], edge.projectedAngleDeg);
-  const edge2p1 = rotate2D([100, -h2], nextAngle);
-  const edge2p2 = rotate2D([0, -h2], nextAngle);
-  const intersection = lineIntersection(edge1p1, edge1p2, edge2p1, edge2p2);
-  if (intersection == null) return null;
+  const bisectorAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg / 2;
+  const control = polar(
+    bisectorAngle,
+    (h1 + h2) / 2 / Math.sin((edge.angleToNextEdgeDeg / 2) * DEG2RAD),
+  );
 
   const start = rotate2D(
     [edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1],
@@ -432,8 +434,8 @@ function computeWedgeRoundingPoints(
     const w1 = 2 * (1 - t) * t;
     const w2 = t * t;
     return [
-      w0 * start[0] + w1 * intersection[0] + w2 * end[0],
-      w0 * start[1] + w1 * intersection[1] + w2 * end[1],
+      w0 * start[0] + w1 * control[0] + w2 * end[0],
+      w0 * start[1] + w1 * control[1] + w2 * end[1],
     ] as Point2D;
   });
 }
@@ -513,12 +515,12 @@ function computeWedgePoints(
       polar(nextAngle, 1),
     );
     bridge = sideOneHit && sideTwoHit ? [sideOneHit, sideTwoHit] : [sideOneInner, sideTwoInner];
+  } else if (edge.angleToNextEdgeDeg < 180) {
+    bridge = computeWedgeRoundingPoints(edge, next, params);
   } else {
-    bridge =
-      (edge.angleToNextEdgeDeg < 180 && computeWedgeRoundingPoints(edge, next, params)) || [
-        sideOneInner,
-        sideTwoInner,
-      ];
+    bridge = computeWedgeRoundingPoints(edge, next, params);
+
+    // bridge = [sideOneInner, sideTwoInner];
   }
 
   return [...earOne, ...bridge, ...earTwo];
