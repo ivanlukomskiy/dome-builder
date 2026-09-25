@@ -121,6 +121,8 @@ export const ru: Dictionary = {
   "Foot length (mm)": "Длина опоры (мм)",
   "Foot thickness (mm)": "Толщина опоры (мм)",
   "Foot groove length (mm)": "Длина паза опоры (мм)",
+  "Foot hole offset (mm)": "Смещение отверстия опоры (мм)",
+  "Foot tip offset (mm)": "Смещение кончика опоры (мм)",
   "Marks the selected vertices as feet: their flange is built with the dimensions from the Foot section. Foot vertices are shown in purple.": "Помечает выбранные вершины как опоры: их фланец строится с размерами из раздела «Опора». Вершины-опоры показаны фиолетовым.",
   "The same for every vertex marked as a foot (Edit → Vertices → Foot Geometry), applied to the preview with Apply.": "Общие для всех вершин, помеченных как опоры (Правка → Вершины → Геометрия опоры); применяются к предпросмотру кнопкой «Применить».",
   "Transform": "Преобразование",

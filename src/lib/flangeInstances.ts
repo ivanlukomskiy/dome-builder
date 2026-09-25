@@ -1,4 +1,5 @@
 import type { VertexEdgesInfo } from './edgesInfo'
+import type { FlangeFoot } from './flangeGeometry'
 
 // Flange plates are expensive to build (a 2D outline of ~60 boolean cuts, then extrude + mesh) but
 // most of them are copies of each other: in a symmetric dome many hubs have exactly the same
@@ -30,6 +31,11 @@ function num(n: number): string {
 
 function mod360(deg: number): number {
   return ((deg % 360) + 360) % 360
+}
+
+// The foot's own dimensions (not its direction, which is folded in relative to the edges instead).
+function footShapeKey(foot: FlangeFoot): string {
+  return [foot.length, foot.thickness, foot.grooveLength, foot.holeOffset, foot.tipOffset].map(num).join(',')
 }
 
 export interface FlangeSignature {
@@ -73,7 +79,9 @@ export function computeFlangeSignature(vertex: VertexEdgesInfo, context: string)
         ].join('|'),
       )
     }
-    const candidate = parts.join(';')
+    // The foot's direction, relative to the first edge, is part of what makes two hubs identical.
+    const footDirection = vertex.foot ? `;foot@${num(mod360(vertex.foot.projectedAngleDeg - startAngle))}` : ''
+    const candidate = parts.join(';') + footDirection
     if (start === 0 || candidate < best) {
       best = candidate
       bestStart = start
@@ -81,7 +89,7 @@ export function computeFlangeSignature(vertex: VertexEdgesInfo, context: string)
   }
 
   return {
-    key: `${context}#${n}#${vertex.flangeOverrides ? JSON.stringify(vertex.flangeOverrides) : ''}#${vertex.foot ? JSON.stringify(vertex.foot) : ''}#${best}`,
+    key: `${context}#${n}#${vertex.flangeOverrides ? JSON.stringify(vertex.flangeOverrides) : ''}#${vertex.foot ? footShapeKey(vertex.foot) : ''}#${best}`,
     startAngleDeg: n > 0 ? edges[bestStart].projectedAngleDeg : 0,
   }
 }

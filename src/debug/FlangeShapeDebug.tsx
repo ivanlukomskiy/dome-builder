@@ -42,11 +42,26 @@ interface FlangeParams {
   millingDiameter: number
 }
 
+// Matches FootParams in flangeGeometry.ts (duplicated for the same reason as FlangeParams), plus
+// whether this vertex is a foot at all, and the direction it points in - in the real app that
+// comes from projecting the world's "down" onto the vertex's tangent plane (see edgesInfo.ts), here
+// it's just typed in.
+interface FootDebugParams {
+  enabled: boolean
+  projectedAngleDeg: number
+  length: number
+  thickness: number
+  grooveLength: number
+  holeOffset: number
+  tipOffset: number
+}
+
 interface Params {
   vertexId: number
   edges: EdgeParams[]
   shared: SharedParams
   flange: FlangeParams
+  foot: FootDebugParams
 }
 
 // Vertex 6 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - only two struts
@@ -83,6 +98,16 @@ const DEFAULT_PARAMS: Params = {
     minSide: 6,
     millingDiameter: 8,
   },
+  // Pointing into the middle of the open wedge between the two struts.
+  foot: {
+    enabled: false,
+    projectedAngleDeg: 114.6,
+    length: 50,
+    thickness: 10,
+    grooveLength: 20,
+    holeOffset: 20,
+    tipOffset: 20,
+  },
 }
 
 const NEW_EDGE: EdgeParams = {
@@ -117,6 +142,7 @@ function loadParams(): Params {
       ...p,
       shared: { ...DEFAULT_PARAMS.shared, ...p.shared },
       flange: { ...DEFAULT_PARAMS.flange, ...p.flange },
+      foot: { ...DEFAULT_PARAMS.foot, ...p.foot },
     }
   } catch {
     return DEFAULT_PARAMS
@@ -160,6 +186,8 @@ export function FlangeShapeDebug() {
     setParams((prev) => ({ ...prev, shared: { ...prev.shared, [field]: value } }))
   const setFlange = (field: keyof FlangeParams) => (value: number) =>
     setParams((prev) => ({ ...prev, flange: { ...prev.flange, [field]: value } }))
+  const setFoot = <K extends keyof FootDebugParams>(field: K) => (value: FootDebugParams[K]) =>
+    setParams((prev) => ({ ...prev, foot: { ...prev.foot, [field]: value } }))
   const setEdgeField = <K extends keyof EdgeParams>(index: number, field: K) => (value: EdgeParams[K]) =>
     setParams((prev) => ({
       ...prev,
@@ -207,7 +235,7 @@ export function FlangeShapeDebug() {
         await ensureReplicadReady()
         if (cancelled) return
 
-        const { shared, edges, vertexId } = params
+        const { shared, edges, vertexId, foot } = params
         const n = edges.length
         const sorted = [...edges].sort((a, b) => a.projectedAngleDeg - b.projectedAngleDeg)
         const vertexInput = {
@@ -237,6 +265,16 @@ export function FlangeShapeDebug() {
               faceIdToNextEdge: edge.faceIdToNextEdge,
             }
           }),
+          foot: foot.enabled
+            ? {
+                projectedAngleDeg: foot.projectedAngleDeg,
+                length: foot.length,
+                thickness: foot.thickness,
+                grooveLength: foot.grooveLength,
+                holeOffset: foot.holeOffset,
+                tipOffset: foot.tipOffset,
+              }
+            : undefined,
         }
 
         const result = computeFlangeBoundary2D(vertexInput, params.flange)
@@ -411,6 +449,47 @@ export function FlangeShapeDebug() {
               onCommit={setFlange('millingDiameter')}
             />
           </div>
+        </section>
+
+        <section className="control-group">
+          <h2>Foot</h2>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={params.foot.enabled}
+              onChange={(e) => setFoot('enabled')(e.target.checked)}
+            />
+            Foot geometry
+          </label>
+          <div className="transform-field">
+            <label>Projected angle (deg)</label>
+            <NumberField value={params.foot.projectedAngleDeg} step={5} onCommit={setFoot('projectedAngleDeg')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot length (mm)</label>
+            <NumberField value={params.foot.length} step={1} min={0} onCommit={setFoot('length')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot thickness (mm)</label>
+            <NumberField value={params.foot.thickness} step={1} min={0} onCommit={setFoot('thickness')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot groove length (mm)</label>
+            <NumberField value={params.foot.grooveLength} step={1} min={0} onCommit={setFoot('grooveLength')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot hole offset (mm)</label>
+            <NumberField value={params.foot.holeOffset} step={1} min={0} onCommit={setFoot('holeOffset')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot tip offset (mm)</label>
+            <NumberField value={params.foot.tipOffset} step={1} min={0} onCommit={setFoot('tipOffset')} />
+          </div>
+          <p className="hint">
+            The foot is one more plate arm, pointing along the projected angle (in the app: the
+            world's "down" projected onto the vertex's tangent plane). It lands in whichever wedge
+            that angle falls in.
+          </p>
         </section>
 
         <section className="control-group">

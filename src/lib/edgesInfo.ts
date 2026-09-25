@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { Face, SceneData } from './polyhedra'
 import { buildVertexAdjacency, computeVertexHubMetrics, computeVertexTangentPlane } from './polyhedra'
 import { precalculateStrutEnd, type StrutEndMeasurements } from './strutGeometry'
-import type { FlangeShapeParams, FootParams } from './flangeGeometry'
+import type { FlangeFoot, FlangeShapeParams, FootParams } from './flangeGeometry'
 
 type Vec3Tuple = [number, number, number]
 
@@ -50,9 +50,9 @@ export interface VertexEdgesInfo {
   // This vertex's own overrides of the flange parameters, if it has any - laid over the global ones
   // when its flange is built (see resolveFlangeParams). Undefined otherwise.
   flangeOverrides?: Partial<FlangeShapeParams>
-  // The global foot parameters, if this vertex is marked as a foot (see FlangeVertexInput.foot).
-  // Undefined otherwise.
-  foot?: FootParams
+  // The foot at this vertex - the global foot parameters plus the direction it points in - if the
+  // vertex is marked as one (see FlangeVertexInput.foot). Undefined otherwise.
+  foot?: FlangeFoot
   // Sorted in angular order around the tangent plane (matching angleToNextEdgeDeg's meaning).
   edges: EdgeInfo[]
 }
@@ -82,6 +82,23 @@ export interface ComputeEdgesInfoParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+}
+
+const WORLD_DOWN = new THREE.Vector3(0, -1, 0)
+
+// The direction a foot at this vertex points in: the world's "down" (Y is up) projected onto the
+// vertex's tangent plane, as an angle (degrees, 0-360) from e1 toward e2 - the same convention as
+// each edge's projectedAngleDeg. Straight above/below the center (the apex or the bottom pole) down
+// is perpendicular to the plane and has no projection; best effort there is e1's direction, with an error.
+function projectedDownAngleDeg(vertexId: number, normal: THREE.Vector3, e1: THREE.Vector3, e2: THREE.Vector3): number {
+  const projected = WORLD_DOWN.clone().addScaledVector(normal, -WORLD_DOWN.dot(normal))
+  if (projected.lengthSq() < 1e-12) {
+    console.error(`[flange] vertex ${vertexId} is a foot but "down" has no direction in its tangent plane - pointing it along e1`)
+    return 0
+  }
+  let angle = Math.atan2(projected.dot(e2), projected.dot(e1))
+  if (angle < 0) angle += 2 * Math.PI
+  return (angle * 180) / Math.PI
 }
 
 // Whether a face ring winds counter-clockwise when seen from outside: its Newell normal (robust
@@ -237,7 +254,9 @@ export function computeEdgesInfo(params: ComputeEdgesInfoParams): EdgesInfoResul
       position: toTuple(vertexPos),
       cornerLengthOverride,
       flangeOverrides: vertexFlangeParams.get(vertexId),
-      foot: footVertices.has(vertexId) ? footParams : undefined,
+      foot: footVertices.has(vertexId)
+        ? { ...footParams, projectedAngleDeg: projectedDownAngleDeg(vertexId, normal, e1, e2) }
+        : undefined,
       tangentPlane: {
         origin: toTuple(vertexPos),
         normal: toTuple(normal),

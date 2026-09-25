@@ -71,6 +71,24 @@ describe('computeFlangeSignature', () => {
     expect(computeFlangeSignature(base, 'other').key).not.toBe(computeFlangeSignature(base, 'ctx').key)
   })
 
+  it('includes the foot: same when turned with the hub, different when it points elsewhere or is shaped differently', () => {
+    const foot = { length: 50, thickness: 10, grooveLength: 20, holeOffset: 20, tipOffset: 20 }
+    const withFoot = (v: VertexEdgesInfo, projectedAngleDeg: number, shape = foot): VertexEdgesInfo => ({
+      ...v,
+      foot: { ...shape, projectedAngleDeg },
+    })
+    const turned = vertex(9, [edge(12, 6, 170, 120), edge(13, 7, 290, 120), edge(11, 5, 50, 120)])
+
+    const a = computeFlangeSignature(withFoot(base, 70), 'ctx')
+    const b = computeFlangeSignature(withFoot(turned, 110), 'ctx')
+    expect(b.key).toBe(a.key)
+    expect(b.startAngleDeg - a.startAngleDeg).toBeCloseTo(40, 9)
+
+    expect(computeFlangeSignature(withFoot(base, 71), 'ctx').key).not.toBe(a.key)
+    expect(computeFlangeSignature(withFoot(base, 70, { ...foot, tipOffset: 21 }), 'ctx').key).not.toBe(a.key)
+    expect(computeFlangeSignature(base, 'ctx').key).not.toBe(a.key)
+  })
+
   it('differs for a mirrored hub', () => {
     // Same thicknesses in the opposite winding order.
     const mirrored = vertex(4, [edge(1, 7, 10, 120), edge(2, 6, 130, 120), edge(3, 5, 250, 120)])

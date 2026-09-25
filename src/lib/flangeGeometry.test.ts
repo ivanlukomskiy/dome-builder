@@ -1,13 +1,15 @@
 /// <reference types="node" />
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { measureArea, setOC, type Drawing, type Face } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import {
   computeFlangeBoundary2D,
   computeFlangeOutline,
   DEFAULT_FLANGE_SHAPE_PARAMS,
+  DEFAULT_FOOT_PARAMS,
+  type FlangeFoot,
   type FlangeShapeParams,
   type FlangeVertexInput,
 } from "./flangeGeometry";
@@ -451,5 +453,121 @@ describe("computeFlangeBoundary2D plate shape", () => {
     const { main } = computeFlangeBoundary2D(vertex, DEFAULT_FLANGE_SHAPE_PARAMS);
     expect(main).not.toBeNull();
     expect(areaOf(main!)).toBeGreaterThan(0);
+  });
+});
+
+// --- The foot ---------------------------------------------------------------------------------
+
+// A foot is one more plate arm, in the wedge its direction falls in: a flat tip `length` wide at
+// holeOffset + thickness + tipOffset, straight sides, and a rectangular hole across its axis.
+describe("foot", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const params = DEFAULT_FLANGE_SHAPE_PARAMS;
+  const footAt = (projectedAngleDeg: number): FlangeFoot => ({
+    ...DEFAULT_FOOT_PARAMS,
+    projectedAngleDeg,
+  });
+  const tipX = DEFAULT_FOOT_PARAMS.holeOffset + DEFAULT_FOOT_PARAMS.thickness + DEFAULT_FOOT_PARAMS.tipOffset;
+  const rotate = (p: Pt, deg: number): Pt => {
+    const a = (deg * Math.PI) / 180;
+    return [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin(a) + p[1] * Math.cos(a)];
+  };
+  const hasPoint = (outline: Pt[], p: Pt) => outline.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-6);
+
+  // The reflex open wedge of ACUTE_OPEN_WEDGE (its struts sit at 224.5 and 276.4 degrees) is
+  // centered on 70.5 degrees; its acute open wedge on 250.5.
+  const CASES: [string, FlangeVertexInput, number][] = [
+    ["the open reflex wedge", ACUTE_OPEN_WEDGE, 70.49],
+    ["the open acute wedge", ACUTE_OPEN_WEDGE, 250.49],
+    ["a lone strut's wedge", SINGLE_STRUT, VERTEX_21.edges[0].projectedAngleDeg + 180],
+  ];
+
+  describe.each(CASES)("in %s", (_name, vertex, angle) => {
+    const foot = footAt(angle);
+    const outline = computeFlangeOutline(vertex.edges, params, foot);
+
+    it("is still a simple counter-clockwise polygon", () => {
+      expect(signedArea(outline)).toBeGreaterThan(0);
+      expect(crossesItself(outline)).toBe(false);
+    });
+
+    it("ends in a flat tip, foot.length wide, tipX from the vertex", () => {
+      expect(hasPoint(outline, rotate([tipX, -foot.length / 2], angle))).toBe(true);
+      expect(hasPoint(outline, rotate([tipX, foot.length / 2], angle))).toBe(true);
+    });
+
+    it("has flat sides parallel to the axis, ending on the line of the hole's near side", () => {
+      const holeX0 = foot.holeOffset - params.toleranceTransverse;
+      for (const sign of [-1, 1]) {
+        // The side runs from the tip corner to where it meets the hole's near-side line...
+        expect(hasPoint(outline, rotate([tipX, sign * foot.length / 2], angle))).toBe(true);
+        expect(hasPoint(outline, rotate([holeX0, sign * foot.length / 2], angle))).toBe(true);
+      }
+      // ...and nothing of the outline strays into the band the two sides enclose, past that line
+      // (in the foot's own frame).
+      const strays = outline
+        .map((p) => rotate(p, -angle))
+        .filter((p) => p[0] > holeX0 + 1e-6 && p[0] < tipX - 1e-6 && Math.abs(p[1]) < foot.length / 2 - 1e-6);
+      expect(strays).toHaveLength(0);
+    });
+
+    it("builds a plate with a rectangular hole of the right size", () => {
+      const result = computeFlangeBoundary2D({ vertexId: 2001, edges: vertex.edges, foot }, params);
+      expect(result.main).not.toBeNull();
+      const rect = result.helpers.find((h) => h.name === "foot rect cut")!;
+      // thickness (+ transverse tolerance both sides) along the axis, groove length (+ longitudinal
+      // tolerance both sides) across it.
+      const expected =
+        (foot.thickness + 2 * params.toleranceTransverse) * (foot.grooveLength + 2 * params.toleranceLongitudinal);
+      expect(areaOf(rect.drawing)).toBeCloseTo(expected, 3);
+      expect(result.helpers.filter((h) => h.name.startsWith("foot side hole"))).toHaveLength(2);
+    });
+  });
+
+  it("leaves a vertex without a foot exactly as it was", () => {
+    const edges = ACUTE_OPEN_WEDGE.edges;
+    expect(computeFlangeOutline(edges, params, undefined)).toEqual(computeFlangeOutline(edges, params));
+  });
+
+  it("puts the side bolt holes on the foot's axis, either side of the rectangular hole", () => {
+    const angle = 70.49;
+    const { helpers } = computeFlangeBoundary2D(
+      { vertexId: 2003, edges: ACUTE_OPEN_WEDGE.edges, foot: footAt(angle) },
+      params,
+    );
+    expect(helpers.some((h) => h.name === "foot side hole (+)")).toBe(true);
+    expect(helpers.some((h) => h.name === "foot side hole (-)")).toBe(true);
+  });
+
+  describe("best effort", () => {
+    it("reports a foot in a wedge that already has a face, and still builds it", () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      // VERTEX_0's four wedges all have a face.
+      const { main } = computeFlangeBoundary2D(
+        { vertexId: VERTEX_0.vertexId, edges: VERTEX_0.edges, foot: footAt(VERTEX_0.edges[0].projectedAngleDeg + 30) },
+        params,
+      );
+      expect(error).toHaveBeenCalled();
+      expect(main).not.toBeNull();
+    });
+
+    it("reports a foot pointing along a strut, and still shows it", () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const strutAngle = ACUTE_OPEN_WEDGE.edges[0].projectedAngleDeg;
+      const plain = computeFlangeBoundary2D({ vertexId: 2004, edges: ACUTE_OPEN_WEDGE.edges }, params);
+      const { main, helpers } = computeFlangeBoundary2D(
+        { vertexId: 2004, edges: ACUTE_OPEN_WEDGE.edges, foot: footAt(strutAngle + 0.1) },
+        params,
+      );
+      expect(error).toHaveBeenCalled();
+      expect(main).not.toBeNull();
+      expect(helpers.some((h) => h.name === "foot rect cut")).toBe(true);
+      // The strut is 375 mm long and the foot ends far inside it, so the plate is (nearly) unchanged
+      // - it must simply not blow up.
+      expect(areaOf(main!)).toBeGreaterThan(areaOf(plain.main!) * 0.99);
+    });
   });
 });

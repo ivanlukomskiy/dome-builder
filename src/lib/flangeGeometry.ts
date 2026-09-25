@@ -44,9 +44,8 @@ export interface FlangeVertexInput {
   vertexId: number;
   // In ascending `projectedAngleDeg` order, same as get_edges_info reports them.
   edges: FlangeEdgeInput[];
-  // Set (to the global foot parameters) when this vertex is marked as a "foot" - undefined for an
-  // ordinary hub vertex.
-  foot?: FootParams;
+  // Set when this vertex is marked as a "foot" - undefined for an ordinary hub vertex.
+  foot?: FlangeFoot;
 }
 
 export interface FlangeShapeParams {
@@ -108,22 +107,44 @@ export function resolveFlangeParams(
   return overrides ? { ...base, ...overrides } : base;
 }
 
-// The dimensions of a "foot" - what a vertex marked as one gets built with. One shared set for the
-// whole dome (unlike FlangeShapeParams there's no per-vertex override yet); each vertex is only
-// flagged as a foot or not.
+// The dimensions of a "foot" - an extra plate arm that points along the vertex's projected "down"
+// direction (see FlangeFoot), beside the struts' own arms. One shared set for the whole dome
+// (unlike FlangeShapeParams there's no per-vertex override yet); each vertex is only flagged as a
+// foot or not.
+//
+// In the foot's own frame (x along its axis, pointing away from the vertex; y across it) the arm is
+// a plain rectangle - flat tip, flat sides - with a rectangular hole through it that runs ACROSS
+// the axis. So it is laid out like a strut arm turned 90 degrees: `grooveLength` plays the part of
+// a strut's tenon length (and gets the longitudinal tolerance), `thickness` the part of a strut's
+// thickness (and gets the transverse one).
 export interface FootParams {
-  // How far (mm) the foot reaches.
+  // Distance (mm) between the arm's two flat sides - its width across its axis.
   length: number;
-  // How thick (mm) the foot is.
+  // Size (mm) of the rectangular hole along the foot's axis, before tolerance.
   thickness: number;
-  // Length (mm) of the groove cut into the foot.
+  // Size (mm) of the rectangular hole across the foot's axis (centered on it), before tolerance.
   grooveLength: number;
+  // Distance (mm) along the axis from the vertex to where the rectangular hole starts (before
+  // tolerance).
+  holeOffset: number;
+  // Distance (mm) along the axis from where the rectangular hole ends (before tolerance) to the
+  // arm's flat tip.
+  tipOffset: number;
+}
+
+// A foot as one vertex's flange sees it: the shared dimensions, plus the direction it points in.
+export interface FlangeFoot extends FootParams {
+  // The world's "down" direction projected onto this vertex's tangent plane, as an angle (degrees)
+  // from the plane's e1 axis toward e2 - same convention as FlangeEdgeInput.projectedAngleDeg.
+  projectedAngleDeg: number;
 }
 
 export const DEFAULT_FOOT_PARAMS: FootParams = {
   length: 50,
   thickness: 10,
   grooveLength: 20,
+  holeOffset: 20,
+  tipOffset: 20,
 };
 
 // The foot parameters, with the labels the Sidebar shows for them.
@@ -131,10 +152,12 @@ export const FOOT_PARAM_FIELDS: { key: keyof FootParams; label: string }[] = [
   { key: "length", label: "Foot length (mm)" },
   { key: "thickness", label: "Foot thickness (mm)" },
   { key: "grooveLength", label: "Foot groove length (mm)" },
+  { key: "holeOffset", label: "Foot hole offset (mm)" },
+  { key: "tipOffset", label: "Foot tip offset (mm)" },
 ];
 
 export function footParamsEqual(a: FootParams, b: FootParams): boolean {
-  return a.length === b.length && a.thickness === b.thickness && a.grooveLength === b.grooveLength;
+  return FOOT_PARAM_FIELDS.every(({ key }) => a[key] === b[key]);
 }
 
 // The middle of one strut's rectangular tenon hole in the flange plate: which strut (edge), where,
@@ -183,6 +206,10 @@ const DEG2RAD = Math.PI / 180;
 function polar(angleDeg: number, radius: number): Point2D {
   const rad = angleDeg * DEG2RAD;
   return [radius * Math.cos(rad), radius * Math.sin(rad)];
+}
+
+function mod360(deg: number): number {
+  return ((deg % 360) + 360) % 360;
 }
 
 function rotate2D(p: Point2D, degrees: number): Point2D {
@@ -262,22 +289,172 @@ function computeSideHoles(
   };
 }
 
+// Where the foot's parts sit in its own frame (x along its axis out from the vertex, y across it).
+function computeFootLayout(foot: FootParams, params: FlangeShapeParams) {
+  const holeEnd = foot.holeOffset + foot.thickness;
+  return {
+    // The tip is measured from the hole's real (tolerance-free) end.
+    tipX: holeEnd + foot.tipOffset,
+    // The rectangular hole: its thickness runs along the axis, its groove length across it.
+    holeX0: foot.holeOffset - params.toleranceTransverse,
+    holeX1: holeEnd + params.toleranceTransverse,
+    holeHalfY: foot.grooveLength / 2 + params.toleranceLongitudinal,
+    // Middle of the hole along the axis - the side bolt holes flank it there, on the axis.
+    holeCenterX: foot.holeOffset + foot.thickness / 2,
+  };
+}
+
+// Side bolt holes either side of the foot's rectangular hole. The hole runs across the axis, so
+// they sit on the axis itself, a foot-thickness/2 + sideHoleDiameterOffset away from the hole's middle.
+function computeFootSideHoles(
+  foot: FlangeFoot,
+  params: FlangeShapeParams,
+): { holeA: Drawing; holeB: Drawing } {
+  const { holeCenterX } = computeFootLayout(foot, params);
+  const holeShift = foot.thickness / 2 + params.sideHoleDiameterOffset;
+
+  const holeA = polar(foot.projectedAngleDeg, holeCenterX + holeShift);
+  const holeB = polar(foot.projectedAngleDeg, holeCenterX - holeShift);
+
+  return {
+    holeA: drawCircle(params.sideHoleDiameter / 2).translate(holeA),
+    holeB: drawCircle(params.sideHoleDiameter / 2).translate(holeB),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Plate arms
+//
+// The plate's outline is drawn arm by arm (see below): one arm per strut, plus the foot if the
+// vertex has one. Everything the tip/wedge code needs to know about an arm is gathered here, so it
+// doesn't care which of the two it is drawing. Lengths are in mm, in the arm's own frame (x out
+// along the arm from the vertex, y across it).
+// ---------------------------------------------------------------------------------------------
+interface PlateArm {
+  // For helper names.
+  label: string;
+  projectedAngleDeg: number;
+  // The wedge from this arm to the next one in the ring - see FlangeEdgeInput.
+  angleToNextEdgeDeg: number;
+  hasFaceToNextEdge: boolean;
+  // How far out the arm reaches, before overshoot.
+  cornerLength: number;
+  // How far the plate's corners reach past `cornerLength`.
+  overshoot: number;
+  // Half the arm's width at its tip.
+  halfWidth: number;
+  // Radius of the rounded "ear" a plate side flares out into beside the tip (0: the side is
+  // straight, no flare).
+  earRadius: number;
+  // Half-width of the plate's sides where the wedge's rounding curve meets them, and how far back
+  // from the tip that is.
+  roundedHalfWidth: number;
+  roundingInset: number;
+  // Half-width of the plate's sides at their inner end, next to the vertex.
+  sideHalfWidth: number;
+}
+
+function strutArm(edge: FlangeEdgeInput, params: FlangeShapeParams): PlateArm {
+  const halfWidth = edge.thicknessMm / 2 + params.toleranceTransverse;
+  return {
+    label: String(edge.edgeId),
+    projectedAngleDeg: edge.projectedAngleDeg,
+    angleToNextEdgeDeg: edge.angleToNextEdgeDeg,
+    hasFaceToNextEdge: edge.hasFaceToNextEdge,
+    cornerLength: edge.strutEnd.cornerLength,
+    overshoot: params.overshoot,
+    halfWidth,
+    earRadius: Math.max(params.minSide - params.toleranceTransverse, 0),
+    roundedHalfWidth: halfWidth + params.minSide,
+    roundingInset: params.minSide,
+    sideHalfWidth: params.minSide + edge.thicknessMm / 2,
+  };
+}
+
+// The foot as an arm: a flat tip `length` wide, with straight sides (no ears) parallel to its axis.
+// The sides run back from the tip only as far as the line through the near (vertex-side) edge of the
+// rectangular hole, perpendicular to the axis; there the wedge to the neighbouring arm takes over.
+function footArm(
+  foot: FlangeFoot,
+  params: FlangeShapeParams,
+  angleToNextEdgeDeg: number,
+  hasFaceToNextEdge: boolean,
+): PlateArm {
+  const { tipX, holeX0 } = computeFootLayout(foot, params);
+  const halfWidth = foot.length / 2;
+  return {
+    label: "foot",
+    projectedAngleDeg: foot.projectedAngleDeg,
+    angleToNextEdgeDeg,
+    hasFaceToNextEdge,
+    cornerLength: tipX,
+    overshoot: 0,
+    halfWidth,
+    earRadius: 0,
+    roundedHalfWidth: halfWidth,
+    roundingInset: tipX - Math.max(holeX0, 0),
+    sideHalfWidth: halfWidth,
+  };
+}
+
+// A foot closer than this (degrees) to a strut leaves a wedge too thin to draw.
+const MIN_FOOT_GAP_DEG = 1;
+
+// The plate's arms in counter-clockwise order: the struts, with the foot (if any) slotted in among
+// them at its angle, splitting the wedge it lands in in two. Best effort for a foot that doesn't fit
+// properly: it is reported with console.error, and either drawn anyway (in a wedge that has a
+// face - both halves count as faced) or, when it is (almost) on top of a strut, left out of the ring
+// (`footInRing` false) for the caller to add to the plate some other way.
+function buildPlateArms(
+  edges: FlangeEdgeInput[],
+  params: FlangeShapeParams,
+  foot: FlangeFoot | undefined,
+  where: string,
+): { arms: PlateArm[]; footInRing: boolean } {
+  const arms = edges.map((edge) => strutArm(edge, params));
+  if (!foot || arms.length === 0) return { arms, footInRing: false };
+
+  // The strut just behind the foot, going counter-clockwise: the foot lands in the wedge it starts.
+  let behind = 0;
+  let angleBehind = Infinity;
+  arms.forEach((arm, i) => {
+    const angle = mod360(foot.projectedAngleDeg - arm.projectedAngleDeg);
+    if (angle < angleBehind) {
+      angleBehind = angle;
+      behind = i;
+    }
+  });
+  const wedgeArm = arms[behind];
+  const angleAhead = wedgeArm.angleToNextEdgeDeg - angleBehind;
+
+  if (angleBehind < MIN_FOOT_GAP_DEG || angleAhead < MIN_FOOT_GAP_DEG) {
+    console.error(
+      `[flange] ${where}: the foot points (almost) along strut ${wedgeArm.label} or the next one - ` +
+        `too close to draw the wedge between them; adding it to the plate as a plain rectangle instead`,
+    );
+    return { arms, footInRing: false };
+  }
+  if (wedgeArm.hasFaceToNextEdge) {
+    console.error(
+      `[flange] ${where}: the foot points into a wedge that already has a face - drawing it anyway`,
+    );
+  }
+
+  const arm = footArm(foot, params, angleAhead, wedgeArm.hasFaceToNextEdge);
+  wedgeArm.angleToNextEdgeDeg = angleBehind;
+  arms.splice(behind + 1, 0, arm);
+  return { arms, footInRing: true };
+}
+
 // The two points (in `edge`'s own local frame) where the wedge between `edge` and `next` starts
 // and ends - `nextLocalStart` is `end` before it's rotated into `edge`'s frame, and is also the
 // anchor `next`'s own side-of-the-wedge shape is built from.
 function computeWedgeBoundary(
-  edge: FlangeEdgeInput,
-  next: FlangeEdgeInput,
-  params: FlangeShapeParams,
+  edge: PlateArm,
+  next: PlateArm,
 ): { start: Point2D; end: Point2D; nextLocalStart: Point2D } {
-  const start: Point2D = [
-    edge.strutEnd.cornerLength + params.overshoot,
-    edge.thicknessMm / 2 + params.toleranceTransverse,
-  ];
-  const nextLocalStart: Point2D = [
-    next.strutEnd.cornerLength + params.overshoot,
-    -next.thicknessMm / 2 - params.toleranceTransverse,
-  ];
+  const start: Point2D = [edge.cornerLength + edge.overshoot, edge.halfWidth];
+  const nextLocalStart: Point2D = [next.cornerLength + next.overshoot, -next.halfWidth];
   const end = rotate2D(nextLocalStart, edge.angleToNextEdgeDeg);
 
   return { start, end, nextLocalStart };
@@ -287,31 +464,33 @@ function computeWedgeBoundary(
 // only needed once tolerance/overshoot actually pushes the corner out into a shape a round mill
 // bit couldn't otherwise clear.
 function computeWedgeCornerMillingCuts(
-  edge: FlangeEdgeInput,
-  next: FlangeEdgeInput,
+  edge: PlateArm,
+  next: PlateArm,
   params: FlangeShapeParams,
-): { millingCutA: Drawing; millingCutB: Drawing } | null {
-  if (params.overshoot == 0) return null;
+): Drawing[] {
+  const cuts: Drawing[] = [];
 
-  const millingCutA = drawMillingCircle(
-    [
-      edge.strutEnd.cornerLength - params.toleranceLongitudinal,
-      edge.thicknessMm / 2 + params.toleranceTransverse,
-    ],
-    "bottom-right",
-    params.millingDiameter,
-  ).rotate(edge.projectedAngleDeg);
+  if (edge.overshoot !== 0) {
+    cuts.push(
+      drawMillingCircle(
+        [edge.cornerLength - params.toleranceLongitudinal, edge.halfWidth],
+        "bottom-right",
+        params.millingDiameter,
+      ).rotate(edge.projectedAngleDeg),
+    );
+  }
 
-  const millingCutB = drawMillingCircle(
-    [
-      next.strutEnd.cornerLength - params.toleranceLongitudinal,
-      -next.thicknessMm / 2 - params.toleranceTransverse,
-    ],
-    "top-right",
-    params.millingDiameter,
-  ).rotate(next.projectedAngleDeg);
+  if (next.overshoot !== 0) {
+    cuts.push(
+      drawMillingCircle(
+        [next.cornerLength - params.toleranceLongitudinal, -next.halfWidth],
+        "top-right",
+        params.millingDiameter,
+      ).rotate(next.projectedAngleDeg),
+    );
+  }
 
-  return { millingCutA, millingCutB };
+  return cuts;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -363,8 +542,7 @@ function circleArcPoints(
 function computeConnectionCurvePoints(
   start: Point2D,
   end: Point2D,
-  edge: FlangeEdgeInput,
-  params: FlangeShapeParams,
+  edge: PlateArm,
 ): Point2D[] {
   const rStart = length2(start);
   const rEnd = length2(end);
@@ -382,10 +560,7 @@ function computeConnectionCurvePoints(
 
   let midR = ((rStart + rEnd) / 2) * 0.75;
 
-  const minStraight = Math.atan2(
-    edge.thicknessMm / 2 + params.toleranceTransverse,
-    (rStart + rEnd) / 2,
-  );
+  const minStraight = Math.atan2(edge.halfWidth, (rStart + rEnd) / 2);
 
   const hit0Angle = Math.PI * 0.75;
   const a0 = 1 / (minStraight * 3 - hit0Angle);
@@ -436,13 +611,9 @@ function computeConnectionCurvePoints(
 // thick: as far from the vertex as the sides are (on average), divided by the sine of half the
 // wedge angle. Placing it on the bisector rather than intersecting the two side lines keeps it
 // well behaved (no parallel lines, no runaway crossing) when the two struts differ in thickness.
-function computeWedgeRoundingPoints(
-  edge: FlangeEdgeInput,
-  next: FlangeEdgeInput,
-  params: FlangeShapeParams,
-): Point2D[] {
-  const h1 = edge.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
-  const h2 = next.thicknessMm / 2 + params.toleranceTransverse + params.minSide;
+function computeWedgeRoundingPoints(edge: PlateArm, next: PlateArm): Point2D[] {
+  const h1 = edge.roundedHalfWidth;
+  const h2 = next.roundedHalfWidth;
   const nextAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg;
 
   const bisectorAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg / 2;
@@ -452,11 +623,11 @@ function computeWedgeRoundingPoints(
   );
 
   const start = rotate2D(
-    [edge.strutEnd.cornerLength + params.overshoot - params.minSide, h1],
+    [edge.cornerLength + edge.overshoot - edge.roundingInset, h1],
     edge.projectedAngleDeg,
   );
   const end = rotate2D(
-    [next.strutEnd.cornerLength + params.overshoot - params.minSide, -h2],
+    [next.cornerLength + next.overshoot - next.roundingInset, -h2],
     nextAngle,
   );
 
@@ -497,41 +668,44 @@ function beamHitPoint(
 //   - reflex wedge (> 180 deg): by a straight line across the back of the vertex, between the
 //     points where two beams cast from the vertex either side of the wedge's bisector hit the sides,
 //   - exactly straight (180 deg): by nothing - the two sides simply meet.
-function computeWedgePoints(
-  edge: FlangeEdgeInput,
-  next: FlangeEdgeInput,
-  params: FlangeShapeParams,
-): Point2D[] {
-  const { start, end, nextLocalStart } = computeWedgeBoundary(edge, next, params);
+function computeWedgePoints(edge: PlateArm, next: PlateArm): Point2D[] {
+  const { start, end, nextLocalStart } = computeWedgeBoundary(edge, next);
   const edgeAngle = edge.projectedAngleDeg;
   const nextAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg;
 
   if (edge.hasFaceToNextEdge) {
-    return computeConnectionCurvePoints(start, end, edge, params).map((p) =>
+    return computeConnectionCurvePoints(start, end, edge).map((p) =>
       rotate2D(p, edgeAngle),
     );
   }
 
-  // How far the plate sides reach past their arm's own (tolerance-widened) edge.
-  const rad = Math.max(params.minSide - params.toleranceTransverse, 0);
-
-  // Each ear is a quarter circle: `edge`'s runs from its tip corner `start` up to the top of its
-  // side, `next`'s from the top of its side down to its own tip corner.
-  const earOne = circleArcPoints([start[0] - rad, start[1]], rad, 0, 90, EAR_ARC_SEGMENTS).map(
-    (p) => rotate2D(p, edgeAngle),
-  );
-  const earTwo = circleArcPoints(
-    [nextLocalStart[0] - rad, nextLocalStart[1]],
-    rad,
-    -90,
-    0,
-    EAR_ARC_SEGMENTS,
+  // Each ear is a quarter circle (how far the plate side reaches past its arm's own, tolerance-
+  // widened, edge): `edge`'s runs from its tip corner `start` up to the top of its side, `next`'s
+  // from the top of its side down to its own tip corner. An arm without ears (the foot) has its
+  // side start right at the tip corner.
+  const radOne = edge.earRadius;
+  const radTwo = next.earRadius;
+  const earOne = (
+    radOne > 0
+      ? circleArcPoints([start[0] - radOne, start[1]], radOne, 0, 90, EAR_ARC_SEGMENTS)
+      : [start]
+  ).map((p) => rotate2D(p, edgeAngle));
+  const earTwo = (
+    radTwo > 0
+      ? circleArcPoints(
+          [nextLocalStart[0] - radTwo, nextLocalStart[1]],
+          radTwo,
+          -90,
+          0,
+          EAR_ARC_SEGMENTS,
+        )
+      : [nextLocalStart]
   ).map((p) => rotate2D(p, nextAngle));
 
   // Where the two plate sides run into the vertex's own neighbourhood - the inner ends of their
   // outer edges.
-  const sideOneInner = rotate2D([0, params.minSide + edge.thicknessMm / 2], edgeAngle);
-  const sideTwoInner = rotate2D([0, -params.minSide - next.thicknessMm / 2], nextAngle);
+  const sideOneInner = rotate2D([0, edge.sideHalfWidth], edgeAngle);
+  const sideTwoInner = rotate2D([0, -next.sideHalfWidth], nextAngle);
 
   let bridge: Point2D[];
   if (edge.angleToNextEdgeDeg > 180) {
@@ -548,9 +722,9 @@ function computeWedgePoints(
     );
     bridge = sideOneHit && sideTwoHit ? [sideOneHit, sideTwoHit] : [sideOneInner, sideTwoInner];
   } else if (edge.angleToNextEdgeDeg < 180) {
-    bridge = computeWedgeRoundingPoints(edge, next, params);
+    bridge = computeWedgeRoundingPoints(edge, next);
   } else {
-    bridge = computeWedgeRoundingPoints(edge, next, params);
+    bridge = computeWedgeRoundingPoints(edge, next);
 
     // bridge = [sideOneInner, sideTwoInner];
   }
@@ -558,21 +732,20 @@ function computeWedgePoints(
   return [...earOne, ...bridge, ...earTwo];
 }
 
-// The end of `edge`'s arm, from its -y corner to its +y corner. Normally that's a straight cut
-// across the arm. With an overshoot, the plate's corners reach past the arm's own (tolerance-
-// shortened) end, so the arm's flat end steps back from them - along the plate side if there's no
-// face in that wedge, or along the ray from the vertex to the corner if there is one.
+// The end of `arm`, from its -y corner to its +y corner. Normally that's a straight cut across the
+// arm. With an overshoot, the plate's corners reach past the arm's own (tolerance-shortened) end, so
+// the arm's flat end steps back from them - along the plate side if there's no face in that wedge,
+// or along the ray from the vertex to the corner if there is one.
 function computeTipPoints(
-  edge: FlangeEdgeInput,
+  arm: PlateArm,
   prevHasFace: boolean,
   nextHasFace: boolean,
   params: FlangeShapeParams,
 ): Point2D[] {
-  const halfWidth = edge.thicknessMm / 2 + params.toleranceTransverse;
-  const cornerX = edge.strutEnd.cornerLength + params.overshoot;
-  const armEndX =
-    edge.strutEnd.cornerLength - (params.overshoot > 0 ? params.toleranceLongitudinal : 0);
-  const rayY = params.overshoot > 0 ? (halfWidth * armEndX) / cornerX : halfWidth;
+  const halfWidth = arm.halfWidth;
+  const cornerX = arm.cornerLength + arm.overshoot;
+  const armEndX = arm.cornerLength - (arm.overshoot > 0 ? params.toleranceLongitudinal : 0);
+  const rayY = arm.overshoot > 0 ? (halfWidth * armEndX) / cornerX : halfWidth;
 
   const local: Point2D[] = [
     [cornerX, -halfWidth],
@@ -580,12 +753,12 @@ function computeTipPoints(
     [armEndX, nextHasFace ? rayY : halfWidth],
     [cornerX, halfWidth],
   ];
-  return local.map((p) => rotate2D(p, edge.projectedAngleDeg));
+  return local.map((p) => rotate2D(p, arm.projectedAngleDeg));
 }
 
-// The whole plate's outline: counter-clockwise points around it, no repeated points, not closed
+// The plate's outline around these arms: counter-clockwise points, no repeated points, not closed
 // (the last point implicitly connects back to the first).
-export function computeFlangeOutline(edges: FlangeEdgeInput[], params: FlangeShapeParams): Point2D[] {
+function computeArmsOutline(arms: PlateArm[], params: FlangeShapeParams): Point2D[] {
   const outline: Point2D[] = [];
   const isSamePoint = (a: Point2D, b: Point2D) =>
     Math.hypot(a[0] - b[0], a[1] - b[1]) <= OUTLINE_POINT_TOLERANCE;
@@ -593,20 +766,28 @@ export function computeFlangeOutline(edges: FlangeEdgeInput[], params: FlangeSha
     if (outline.length === 0 || !isSamePoint(outline[outline.length - 1], p)) outline.push(p);
   };
 
-  edges.forEach((edge, i) => {
-    const prev = edges[(i - 1 + edges.length) % edges.length];
-    const next = edges[(i + 1) % edges.length];
+  arms.forEach((arm, i) => {
+    const prev = arms[(i - 1 + arms.length) % arms.length];
+    const next = arms[(i + 1) % arms.length];
 
-    computeTipPoints(edge, prev.hasFaceToNextEdge, edge.hasFaceToNextEdge, params).forEach(
-      addPoint,
-    );
-    computeWedgePoints(edge, next, params).forEach(addPoint);
+    computeTipPoints(arm, prev.hasFaceToNextEdge, arm.hasFaceToNextEdge, params).forEach(addPoint);
+    computeWedgePoints(arm, next).forEach(addPoint);
   });
 
   while (outline.length > 1 && isSamePoint(outline[0], outline[outline.length - 1])) {
     outline.pop();
   }
   return outline;
+}
+
+// The whole plate's outline: counter-clockwise points around it, no repeated points, not closed
+// (the last point implicitly connects back to the first). With a foot, its arm is part of it.
+export function computeFlangeOutline(
+  edges: FlangeEdgeInput[],
+  params: FlangeShapeParams,
+  foot?: FlangeFoot,
+): Point2D[] {
+  return computeArmsOutline(buildPlateArms(edges, params, foot, "outline").arms, params);
 }
 
 // A closed drawing tracing straight lines through `points`, in order.
@@ -618,61 +799,35 @@ function drawPolygon(points: Point2D[]): Drawing {
   return pen.close();
 }
 
-// The cutout across this strut's own tenon span, cleared out of the plate so the tenon has room
-// to seat.
-function computeRectCut(edge: FlangeEdgeInput, params: FlangeShapeParams): Drawing {
+// A rectangular cutout spanning [x0, x1] x [y0, y1] in an arm's own frame, turned to the arm's angle.
+function computeRectangleCut(x0: number, x1: number, y0: number, y1: number, angleDeg: number): Drawing {
   return draw()
-    .movePointerTo([
-      edge.strutEnd.tenonStart - params.toleranceLongitudinal,
-      edge.thicknessMm / 2 + params.toleranceTransverse,
-    ])
-    .hLineTo(edge.strutEnd.tenonEnd + params.toleranceLongitudinal)
-    .vLineTo(-edge.thicknessMm / 2 - params.toleranceTransverse)
-    .hLineTo(edge.strutEnd.tenonStart - params.toleranceLongitudinal)
+    .movePointerTo([x0, y1])
+    .hLineTo(x1)
+    .vLineTo(y0)
+    .hLineTo(x0)
     .close()
-    .rotate(edge.projectedAngleDeg);
+    .rotate(angleDeg);
 }
 
-// Mill-relief cuts at this strut's own tenon cutout's four (otherwise square) inside corners.
-function computeTenonCornerMillingCuts(
-  edge: FlangeEdgeInput,
-  params: FlangeShapeParams,
+// Mill-relief cuts at the four (otherwise square) inside corners of such a rectangular cutout.
+function computeRectangleCornerMillingCuts(
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  angleDeg: number,
+  millingDiameter: number,
 ): Drawing[] {
   const corners: { point: Point2D; direction: MillingDirection }[] = [
-    {
-      point: [
-        edge.strutEnd.tenonStart - params.toleranceLongitudinal,
-        edge.thicknessMm / 2 + params.toleranceTransverse,
-      ],
-      direction: "bottom-right",
-    },
-    {
-      point: [
-        edge.strutEnd.tenonEnd + params.toleranceLongitudinal,
-        edge.thicknessMm / 2 + params.toleranceTransverse,
-      ],
-      direction: "bottom-left",
-    },
-    {
-      point: [
-        edge.strutEnd.tenonStart - params.toleranceLongitudinal,
-        -edge.thicknessMm / 2 - params.toleranceTransverse,
-      ],
-      direction: "top-right",
-    },
-    {
-      point: [
-        edge.strutEnd.tenonEnd + params.toleranceLongitudinal,
-        -edge.thicknessMm / 2 - params.toleranceTransverse,
-      ],
-      direction: "top-left",
-    },
+    { point: [x0, y1], direction: "bottom-right" },
+    { point: [x1, y1], direction: "bottom-left" },
+    { point: [x0, y0], direction: "top-right" },
+    { point: [x1, y0], direction: "top-left" },
   ];
 
   return corners.map((corner) =>
-    drawMillingCircle(corner.point, corner.direction, params.millingDiameter).rotate(
-      edge.projectedAngleDeg,
-    ),
+    drawMillingCircle(corner.point, corner.direction, millingDiameter).rotate(angleDeg),
   );
 }
 
@@ -690,18 +845,14 @@ export function computeFlangeBoundary2D(
 
   if (vertex.edges.length === 0) return { main: null, edgeMarks: [], helpers };
 
-  // Foot geometry isn't built yet - for now the params just get logged, to show they arrive here.
-  if (vertex.foot) {
-    console.log(`[flange] vertex ${vertex.vertexId} is a foot`, {
-      length: vertex.foot.length,
-      thickness: vertex.foot.thickness,
-      grooveLength: vertex.foot.grooveLength,
-    });
-  }
+  const { arms, footInRing } = buildPlateArms(
+    vertex.edges,
+    params,
+    vertex.foot,
+    `vertex ${vertex.vertexId}`,
+  );
 
-  vertex.edges.forEach((edge, i) => {
-    const next = vertex.edges[(i + 1) % vertex.edges.length];
-
+  vertex.edges.forEach((edge) => {
     if (params.sideHoleDiameter > 0) {
       const { holeA, holeB } = computeSideHoles(edge, params);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
@@ -710,16 +861,11 @@ export function computeFlangeBoundary2D(
       addNegative(holeB);
     }
 
-    const wedgeCornerMillingCuts = computeWedgeCornerMillingCuts(edge, next, params);
-    if (wedgeCornerMillingCuts) {
-      const { millingCutA, millingCutB } = wedgeCornerMillingCuts;
-      helpers.push({ drawing: millingCutA, color: "red", name: `milling cut ${edge.edgeId}` });
-      addNegative(millingCutA);
-      helpers.push({ drawing: millingCutB, color: "red", name: `milling cut ${edge.edgeId}` });
-      addNegative(millingCutB);
-    }
-
-    const rectCut = computeRectCut(edge, params);
+    // The tenon's own cutout: the plate is cleared across the strut's tenon span, so it has room to seat.
+    const rectX0 = edge.strutEnd.tenonStart - params.toleranceLongitudinal;
+    const rectX1 = edge.strutEnd.tenonEnd + params.toleranceLongitudinal;
+    const rectHalfY = edge.thicknessMm / 2 + params.toleranceTransverse;
+    const rectCut = computeRectangleCut(rectX0, rectX1, -rectHalfY, rectHalfY, edge.projectedAngleDeg);
     helpers.push({ drawing: rectCut, color: "cyan", name: `rect cut ${edge.edgeId}` });
     addNegative(rectCut);
     edgeMarks.push({
@@ -732,11 +878,57 @@ export function computeFlangeBoundary2D(
       holeWidth: edge.thicknessMm + 2 * params.toleranceTransverse,
     });
 
-    computeTenonCornerMillingCuts(edge, params).forEach((cutDrawing) => {
+    computeRectangleCornerMillingCuts(
+      rectX0,
+      rectX1,
+      -rectHalfY,
+      rectHalfY,
+      edge.projectedAngleDeg,
+      params.millingDiameter,
+    ).forEach((cutDrawing) => {
       helpers.push({ drawing: cutDrawing, color: "red", name: `milling cut ${edge.edgeId}` });
       addNegative(cutDrawing);
     });
   });
+
+  // Where an overshoot pushes a wedge's corner out past its arm's own end.
+  arms.forEach((arm, i) => {
+    const next = arms[(i + 1) % arms.length];
+    computeWedgeCornerMillingCuts(arm, next, params).forEach((cutDrawing) => {
+      helpers.push({ drawing: cutDrawing, color: "red", name: `milling cut ${arm.label}` });
+      addNegative(cutDrawing);
+    });
+  });
+
+  // The foot's own cutouts: its rectangular hole (across its axis) with mill reliefs, and the side
+  // bolt holes on its axis either side of it.
+  const foot = vertex.foot;
+  if (foot) {
+    if (params.sideHoleDiameter > 0) {
+      const { holeA, holeB } = computeFootSideHoles(foot, params);
+      helpers.push({ drawing: holeA, color: HOLE_COLOR, name: "foot side hole (+)" });
+      addNegative(holeA);
+      helpers.push({ drawing: holeB, color: HOLE_COLOR, name: "foot side hole (-)" });
+      addNegative(holeB);
+    }
+
+    const { holeX0, holeX1, holeHalfY } = computeFootLayout(foot, params);
+    const footRectCut = computeRectangleCut(holeX0, holeX1, -holeHalfY, holeHalfY, foot.projectedAngleDeg);
+    helpers.push({ drawing: footRectCut, color: "cyan", name: "foot rect cut" });
+    addNegative(footRectCut);
+
+    computeRectangleCornerMillingCuts(
+      holeX0,
+      holeX1,
+      -holeHalfY,
+      holeHalfY,
+      foot.projectedAngleDeg,
+      params.millingDiameter,
+    ).forEach((cutDrawing) => {
+      helpers.push({ drawing: cutDrawing, color: "red", name: "foot milling cut" });
+      addNegative(cutDrawing);
+    });
+  }
 
   // Center bolt hole, shared by every strut arm at the vertex itself.
   if (params.centerHoleDiameter > 0) {
@@ -748,7 +940,19 @@ export function computeFlangeBoundary2D(
   helpers.push({ drawing: drawCircle(5), color: "#f5e050", name: `vertex ${vertex.vertexId}` });
 
   // The plate is drawn in one go from its outline, then everything negative is cut out of it.
-  let main = drawPolygon(computeFlangeOutline(vertex.edges, params));
+  let main = drawPolygon(computeArmsOutline(arms, params));
+  if (foot && !footInRing) {
+    // A foot that couldn't join the outline (see buildPlateArms) still gets its body: a plain
+    // rectangle from the vertex out to its tip, fused onto the plate.
+    const { tipX } = computeFootLayout(foot, params);
+    const body: Point2D[] = [
+      [0, -foot.length / 2],
+      [tipX, -foot.length / 2],
+      [tipX, foot.length / 2],
+      [0, foot.length / 2],
+    ];
+    main = main.fuse(drawPolygon(body.map((p) => rotate2D(p, foot.projectedAngleDeg))));
+  }
   negativeShapes.forEach((s) => {
     main = main.cut(s);
   });
