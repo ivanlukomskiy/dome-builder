@@ -54,6 +54,8 @@ interface FootDebugParams {
   grooveLength: number
   holeOffset: number
   tipOffset: number
+  holeDiameter: number
+  straightLength: number
 }
 
 interface Params {
@@ -107,6 +109,8 @@ const DEFAULT_PARAMS: Params = {
     grooveLength: 20,
     holeOffset: 20,
     tipOffset: 20,
+    holeDiameter: 8,
+    straightLength: 40,
   },
 }
 
@@ -273,6 +277,8 @@ export function FlangeShapeDebug() {
                 grooveLength: foot.grooveLength,
                 holeOffset: foot.holeOffset,
                 tipOffset: foot.tipOffset,
+                holeDiameter: foot.holeDiameter,
+                straightLength: foot.straightLength,
               }
             : undefined,
         }
@@ -484,6 +490,14 @@ export function FlangeShapeDebug() {
           <div className="transform-field">
             <label>Foot tip offset (mm)</label>
             <NumberField value={params.foot.tipOffset} step={1} min={0} onCommit={setFoot('tipOffset')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot hole diameter (mm)</label>
+            <NumberField value={params.foot.holeDiameter} step={1} min={0} onCommit={setFoot('holeDiameter')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot straight length (mm)</label>
+            <NumberField value={params.foot.straightLength} step={1} min={0} onCommit={setFoot('straightLength')} />
           </div>
           <p className="hint">
             The foot is one more plate arm, pointing along the projected angle (in the app: the

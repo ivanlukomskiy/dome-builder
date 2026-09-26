@@ -1,13 +1,14 @@
 // The kinds of parts the Preview is made of, each drawn as its own mesh so its transparency can be
 // set on its own (view-only - it doesn't touch the geometry, so changing it never rebuilds the
 // preview, and it isn't saved with the dome).
-export type PreviewPartKind = 'flanges' | 'struts' | 'braces' | 'bracePlates'
+export type PreviewPartKind = 'flanges' | 'struts' | 'braces' | 'bracePlates' | 'foot'
 
 export const PREVIEW_PART_KINDS: { kind: PreviewPartKind; label: string }[] = [
   { kind: 'flanges', label: 'Flanges' },
   { kind: 'struts', label: 'Struts' },
   { kind: 'braces', label: 'Braces' },
   { kind: 'bracePlates', label: 'Brace plates' },
+  { kind: 'foot', label: 'Foot' },
 ]
 
 // Transparency, in percent: 0 is fully opaque, and it can't go past this - a part that's nearly
@@ -23,6 +24,7 @@ export const DEFAULT_PART_TRANSPARENCY: PartTransparency = {
   struts: 0,
   braces: 0,
   bracePlates: 0,
+  foot: 0,
 }
 
 export function clampPartTransparency(percent: number): number {

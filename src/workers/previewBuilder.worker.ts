@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFootPartBoundary2D } from '../lib/footGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
@@ -29,6 +30,7 @@ declare const self: DedicatedWorkerGlobalScope
 
 // Same magenta the brace lines are drawn in in Edit mode.
 const BRACE_PLATE_COLOR: [number, number, number] = [0.878, 0.353, 0.816]
+const FOOT_COLOR: [number, number, number] = [0.753, 0.518, 0.961]
 
 export interface StrutBuildJob extends StrutGeometryEntry {
   color: [number, number, number]
@@ -46,6 +48,9 @@ export interface PreviewBuildRequest {
   // Flanges to build, one per group of identical hubs (see flangeInstances.ts) - the main thread
   // places the resulting mesh at every vertex of the group.
   flangeJobs: FlangeBuildJob[]
+  // Separate foot parts, one at each foot vertex. These are built directly in world space because
+  // their plane depends on the vertex normal and projected foot axis.
+  footJobs: FootBuildJob[]
   flangeParams: FlangeShapeParams
   // Opt-in profiling (see previewProfile.ts): the worker times its steps and returns them.
   profile?: boolean
@@ -54,6 +59,10 @@ export interface PreviewBuildRequest {
 export interface FlangeBuildJob {
   // Signature of the group this flange stands for - echoed back so the main thread can match it.
   key: string
+  vertex: VertexEdgesInfo
+}
+
+export interface FootBuildJob {
   vertex: VertexEdgesInfo
 }
 
@@ -73,7 +82,7 @@ export interface PreviewPiece {
   part: PreviewPartKind
 }
 
-export type PreviewBuildPhase = 'struts' | 'flanges'
+export type PreviewBuildPhase = 'struts' | 'flanges' | 'foot'
 
 export type PreviewWorkerMessage =
   | { type: 'ready'; requestId: number }
@@ -90,6 +99,29 @@ export type PreviewWorkerMessage =
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(t[0], t[1], t[2])
+}
+
+function footPartPlane(vertex: VertexEdgesInfo) {
+  const foot = vertex.foot
+  if (!foot) return null
+
+  const origin = toVector3(vertex.position)
+  const normal = toVector3(vertex.tangentPlane.normal).normalize()
+  const e1 = toVector3(vertex.tangentPlane.e1).normalize()
+  const e2 = toVector3(vertex.tangentPlane.e2).normalize()
+  const angle = (foot.projectedAngleDeg * Math.PI) / 180
+  const axis = e1.multiplyScalar(Math.cos(angle)).add(e2.multiplyScalar(Math.sin(angle))).normalize()
+  if (axis.lengthSq() < 1e-12) return null
+
+  let xDir = normal.clone().cross(axis)
+  if (xDir.lengthSq() < 1e-12) xDir = toVector3(vertex.tangentPlane.e1)
+  xDir.normalize()
+
+  return {
+    origin: origin.addScaledVector(axis, foot.holeOffset + foot.thickness / 2),
+    normal: axis,
+    xDir,
+  }
 }
 
 async function buildPreview(
@@ -250,6 +282,36 @@ async function buildPreview(
     }
     flangeMeshes.push({ key: job.key, mesh })
     prof?.items.push({ kind: 'flange', id: vertex.vertexId, boundaryMs: flangeBoundaryMs, solidMs: flangeSolidMs })
+  })
+
+  req.footJobs.forEach((job, i) => {
+    const { vertex } = job
+    const foot = vertex.foot
+    if (!foot) return
+
+    const boundary = timed('footBoundary2D', () =>
+      computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth),
+    )
+    self.postMessage({
+      type: 'progress',
+      requestId: req.requestId,
+      phase: 'foot',
+      done: i + 1,
+      total: req.footJobs.length,
+    } satisfies PreviewWorkerMessage)
+
+    const drawing = boundary.main
+    const plane = footPartPlane(vertex)
+    if (!drawing || !plane || foot.thickness <= 0) return
+
+    try {
+      const mesh = timed('footSolid (sketch+extrude+mesh)', () =>
+        buildStrutMeshFromDrawing(drawing, plane, foot.thickness),
+      )
+      if (mesh) pieces.push({ ...mesh, color: FOOT_COLOR, part: 'foot' })
+    } catch (err) {
+      console.error(`Failed to build foot solid for vertex ${vertex.vertexId}`, err)
+    }
   })
 
   const profile: WorkerProfile | undefined = prof

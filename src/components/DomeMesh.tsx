@@ -25,6 +25,7 @@ import {
 } from '../lib/flangeInstances'
 import type {
   FlangeBuildJob,
+  FootBuildJob,
   PreviewBuildPhase,
   PreviewBuildRequest,
   PreviewPiece,
@@ -49,7 +50,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export interface PreviewProgress {
-  phase: 'loading' | 'struts' | 'flanges'
+  phase: 'loading' | PreviewBuildPhase
   done: number
   total: number
 }
@@ -351,18 +352,24 @@ export function DomeMesh({
       }
     }
     const flangeGroupByKey = new Map(flangeGroups.map((g) => [g.key, g]))
+    const footJobs: FootBuildJob[] = vertices
+      .filter((vertex) => vertex.foot !== undefined)
+      .map((vertex) => ({ vertex }))
 
     const poolSize = Math.max(1, Math.min(MAX_WORKERS, (navigator.hardwareConcurrency || 2) - 1))
 
     // Progress, in units the user recognizes: struts, and vertices (a built flange counts for
     // every vertex it stands for). Batches run concurrently, so each reports into shared counters.
-    const progress = { struts: 0, flanges: cachedVertexCount }
+    const progress = { struts: 0, flanges: cachedVertexCount, foot: 0 }
     const strutTotal = strutJobs.length
     const flangeTotal = vertices.length
+    const footTotal = footJobs.length
     const emitProgress = () => {
       // Flange batches are scheduled first (they're the long ones), so show them while any remain.
       if (progress.flanges < flangeTotal) {
         onPreviewProgress({ phase: 'flanges', done: progress.flanges, total: flangeTotal })
+      } else if (progress.foot < footTotal) {
+        onPreviewProgress({ phase: 'foot', done: progress.foot, total: footTotal })
       } else {
         onPreviewProgress({ phase: 'struts', done: progress.struts, total: strutTotal })
       }
@@ -375,7 +382,7 @@ export function DomeMesh({
     // than one batch's worth of accumulated geometry before its whole heap gets reclaimed.
     // `weights[k]` is how many progress units the batch's k-th item is worth.
     const runBatch = (
-      batch: { strutJobs: StrutBuildJob[]; flangeJobs: FlangeBuildJob[] },
+      batch: { strutJobs: StrutBuildJob[]; flangeJobs: FlangeBuildJob[]; footJobs: FootBuildJob[] },
       phase: PreviewBuildPhase,
       weights: number[],
     ): Promise<Extract<PreviewWorkerMessage, { type: 'result' }>> =>
@@ -433,6 +440,7 @@ export function DomeMesh({
           ...sharedRequestFields,
           strutJobs: batch.strutJobs,
           flangeJobs: batch.flangeJobs,
+          footJobs: batch.footJobs,
           profile: profiler !== null,
         }
         worker.postMessage(request)
@@ -456,7 +464,7 @@ export function DomeMesh({
         tasks.push(async () => {
           try {
             const weights = jobs.map((job) => flangeGroupByKey.get(job.key)?.members.length ?? 1)
-            const result = await runBatch({ strutJobs: [], flangeJobs: jobs }, 'flanges', weights)
+            const result = await runBatch({ strutJobs: [], flangeJobs: jobs, footJobs: [] }, 'flanges', weights)
             for (const { key, mesh } of result.flangeMeshes) {
               const group = flangeGroupByKey.get(key)
               if (!mesh || !group) continue
@@ -472,10 +480,24 @@ export function DomeMesh({
           }
         })
       }
+      chunk(footJobs, BATCH_SIZE).forEach((jobs) => {
+        tasks.push(async () => {
+          try {
+            const result = await runBatch(
+              { strutJobs: [], flangeJobs: [], footJobs: jobs },
+              'foot',
+              jobs.map(() => 1),
+            )
+            allPieces.push(...result.pieces)
+          } catch (err) {
+            console.error(`Failed to build foot parts for vertices ${jobs.map((j) => j.vertex.vertexId).join(', ')}`, err)
+          }
+        })
+      })
       chunk(strutJobs, BATCH_SIZE).forEach((jobs, i) => {
         tasks.push(async () => {
           strutResults[i] = await runBatch(
-            { strutJobs: jobs, flangeJobs: [] },
+            { strutJobs: jobs, flangeJobs: [], footJobs: [] },
             'struts',
             jobs.map(() => 1),
           )
@@ -553,6 +575,7 @@ export function DomeMesh({
         profiler?.finish({
           struts: strutJobs.length,
           vertices: vertices.length,
+          foot: footJobs.length,
           poolSize,
           flangeGroups: flangeGroups.length,
           flangeGroupsBuilt: flangesToBuild.length,

@@ -32,6 +32,7 @@ const PREVIEW_PHASE_LABEL: Record<PreviewProgress['phase'], string> = {
   loading: 'Loading CAD engine…',
   struts: 'Building struts',
   flanges: 'Building flanges',
+  foot: 'Building foot',
 }
 
 function PreviewProgressBar({ progress }: { progress: PreviewProgress }) {

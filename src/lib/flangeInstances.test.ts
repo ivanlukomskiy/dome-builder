@@ -72,7 +72,15 @@ describe('computeFlangeSignature', () => {
   })
 
   it('includes the foot: same when turned with the hub, different when it points elsewhere or is shaped differently', () => {
-    const foot = { length: 50, thickness: 10, grooveLength: 20, holeOffset: 20, tipOffset: 20 }
+    const foot = {
+      length: 50,
+      thickness: 10,
+      grooveLength: 20,
+      holeOffset: 20,
+      tipOffset: 20,
+      holeDiameter: 8,
+      straightLength: 40,
+    }
     const withFoot = (v: VertexEdgesInfo, projectedAngleDeg: number, shape = foot): VertexEdgesInfo => ({
       ...v,
       foot: { ...shape, projectedAngleDeg },

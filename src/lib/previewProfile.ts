@@ -76,7 +76,7 @@ export function createWorkerProfiler(): WorkerProfiler {
 // ---- main-thread side -------------------------------------------------------------------------
 
 interface BatchRecord {
-  phase: 'struts' | 'flanges'
+  phase: 'struts' | 'flanges' | 'foot'
   items: number
   // worker constructed -> its 'ready' message (script load + module eval + WASM init)
   createToReadyMs: number
