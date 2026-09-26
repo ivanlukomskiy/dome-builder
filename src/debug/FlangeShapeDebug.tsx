@@ -57,6 +57,7 @@ interface FootDebugParams {
   holeDiameter: number
   straightLength: number
   chamferLength: number
+  millingDiameter: number
 }
 
 interface Params {
@@ -113,6 +114,7 @@ const DEFAULT_PARAMS: Params = {
     holeDiameter: 8,
     straightLength: 40,
     chamferLength: 4,
+    millingDiameter: 5,
   },
 }
 
@@ -282,6 +284,7 @@ export function FlangeShapeDebug() {
                 holeDiameter: foot.holeDiameter,
                 straightLength: foot.straightLength,
                 chamferLength: foot.chamferLength,
+                millingDiameter: foot.millingDiameter,
               }
             : undefined,
         }
@@ -505,6 +508,10 @@ export function FlangeShapeDebug() {
           <div className="transform-field">
             <label>Foot chamfer length (mm)</label>
             <NumberField value={params.foot.chamferLength} step={1} min={0} onCommit={setFoot('chamferLength')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot milling diameter (mm)</label>
+            <NumberField value={params.foot.millingDiameter} step={1} min={0} onCommit={setFoot('millingDiameter')} />
           </div>
           <p className="hint">
             The foot is one more plate arm, pointing along the projected angle (in the app: the

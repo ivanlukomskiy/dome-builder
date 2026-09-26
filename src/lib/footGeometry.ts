@@ -2,8 +2,32 @@ import { draw, drawCircle } from 'replicad'
 import type { Drawing } from 'replicad'
 import type { FootParams } from './flangeGeometry'
 
+type Point2D = [number, number]
+
 export interface FootPartBoundaryResult {
   main: Drawing | null
+}
+
+type MillingDirection =
+  | 'top-right'
+  | 'top-left'
+  | 'bottom-left'
+  | 'bottom-right'
+
+function drawMillingCircle(
+  p: Point2D,
+  direction: MillingDirection,
+  millingDiameter: number,
+): Drawing {
+  const offset = millingDiameter / 2 / Math.sqrt(2)
+  const rightSign =
+    direction === 'top-right' || direction === 'bottom-right' ? 1 : -1
+  const upSign = direction === 'top-right' || direction === 'top-left' ? 1 : -1
+  const circleCenter: Point2D = [
+    p[0] + rightSign * offset,
+    p[1] + upSign * offset,
+  ]
+  return drawCircle(millingDiameter / 2).translate(circleCenter)
 }
 
 // The separate "foot" part that slots through the two flange plates at a foot vertex.
@@ -81,6 +105,22 @@ export function computeFootPartBoundary2D(
     main = main
       .cut(drawCircle(holeRadius).translate([straightEndX, 0]))
       .cut(drawCircle(holeRadius).translate([-straightEndX, 0]))
+  }
+
+  if (foot.millingDiameter > 0) {
+    const corners: { point: Point2D; direction: MillingDirection }[] = [
+      { point: [halfTabX, halfBodyY], direction: 'top-right' },
+      { point: [-halfTabX, halfBodyY], direction: 'top-left' },
+      { point: [halfTabX, -halfBodyY], direction: 'bottom-right' },
+      { point: [-halfTabX, -halfBodyY], direction: 'bottom-left' },
+      { point: [halfBodyX, halfBodyY], direction: 'top-left' },
+      { point: [halfBodyX, -halfBodyY], direction: 'bottom-left' },
+      { point: [-halfBodyX, halfBodyY], direction: 'top-right' },
+      { point: [-halfBodyX, -halfBodyY], direction: 'bottom-right' },
+    ]
+    for (const corner of corners) {
+      main = main.cut(drawMillingCircle(corner.point, corner.direction, foot.millingDiameter))
+    }
   }
 
   return { main }

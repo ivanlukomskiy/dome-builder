@@ -12,6 +12,7 @@ interface FootDebugParams {
   holeDiameter: number
   straightLength: number
   chamferLength: number
+  millingDiameter: number
 }
 
 interface Params {
@@ -30,6 +31,7 @@ const DEFAULT_PARAMS: Params = {
     holeDiameter: 8,
     straightLength: 40,
     chamferLength: 4,
+    millingDiameter: 5,
   },
   strutWidth: 125,
   flangeThickness: 30,
@@ -176,6 +178,10 @@ export function FootShapeDebug() {
           <div className="transform-field">
             <label>Foot chamfer length (mm)</label>
             <NumberField value={params.foot.chamferLength} step={1} min={0} onCommit={setFoot('chamferLength')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot milling diameter (mm)</label>
+            <NumberField value={params.foot.millingDiameter} step={1} min={0} onCommit={setFoot('millingDiameter')} />
           </div>
         </section>
 

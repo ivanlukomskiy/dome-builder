@@ -137,6 +137,8 @@ export interface FootParams {
   straightLength: number;
   // Chamfer length (mm) for the separate foot part's tab corners and inner side-rectangle corners.
   chamferLength: number;
+  // Diameter (mm) of dogbone-style milling relief holes at the separate foot part's inside corners.
+  millingDiameter: number;
 }
 
 // A foot as one vertex's flange sees it: the shared dimensions, plus the direction it points in.
@@ -155,6 +157,7 @@ export const DEFAULT_FOOT_PARAMS: FootParams = {
   holeDiameter: 8,
   straightLength: 40,
   chamferLength: 4,
+  millingDiameter: 5,
 };
 
 // The foot parameters, with the labels the Sidebar shows for them.
@@ -167,6 +170,7 @@ export const FOOT_PARAM_FIELDS: { key: keyof FootParams; label: string }[] = [
   { key: "holeDiameter", label: "Foot hole diameter (mm)" },
   { key: "straightLength", label: "Foot straight length (mm)" },
   { key: "chamferLength", label: "Foot chamfer length (mm)" },
+  { key: "millingDiameter", label: "Foot milling diameter (mm)" },
 ];
 
 export function footParamsEqual(a: FootParams, b: FootParams): boolean {
