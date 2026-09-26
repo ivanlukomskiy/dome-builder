@@ -1,4 +1,4 @@
-import { draw } from 'replicad'
+import { draw, drawCircle } from 'replicad'
 import type { Drawing } from 'replicad'
 import type { FootParams } from './flangeGeometry'
 
@@ -41,7 +41,7 @@ export function computeFootPartBoundary2D(
     return { main: null }
   }
 
-  const main = draw()
+  let main = draw()
     .movePointerTo([halfTabX, -halfTotalY])
     .vLineTo(-halfBodyY)
     .hLineTo(halfBodyX)
@@ -63,6 +63,13 @@ export function computeFootPartBoundary2D(
     .hLineTo(-halfTabX)
     .vLineTo(-halfTotalY)
     .close()
+
+  if (foot.holeDiameter > 0) {
+    const holeRadius = foot.holeDiameter / 2
+    main = main
+      .cut(drawCircle(holeRadius).translate([straightEndX, 0]))
+      .cut(drawCircle(holeRadius).translate([-straightEndX, 0]))
+  }
 
   return { main }
 }
