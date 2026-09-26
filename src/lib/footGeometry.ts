@@ -17,6 +17,8 @@ export interface FootPartBoundaryResult {
 // flange thickness (`flangeThickness` / groove depth), and their x-width is foot.grooveLength.
 // On either x side of the tab/body cross, the foot continues as a strut-width rectangle, then a
 // semicircle whose center is on the rectangle's far edge and whose radius is strutWidth / 2.
+// The tab's four outer corners and each side rectangle's two center-side outside corners are
+// chamfered by foot.chamferLength, clamped to the local edge lengths.
 export function computeFootPartBoundary2D(
   foot: FootParams,
   strutWidth: number,
@@ -29,6 +31,8 @@ export function computeFootPartBoundary2D(
   const halfBodyY = bodyHeight / 2
   const halfTotalY = halfBodyY + flangeThickness
   const straightEndX = halfBodyX + foot.straightLength
+  const tabChamfer = Math.min(Math.max(foot.chamferLength, 0), halfTabX, flangeThickness)
+  const rectChamfer = Math.min(Math.max(foot.chamferLength, 0), foot.straightLength, halfStrutY - halfBodyY)
 
   if (
     foot.length <= 0 ||
@@ -42,26 +46,34 @@ export function computeFootPartBoundary2D(
   }
 
   let main = draw()
-    .movePointerTo([halfTabX, -halfTotalY])
+    .movePointerTo([halfTabX, -halfTotalY + tabChamfer])
     .vLineTo(-halfBodyY)
     .hLineTo(halfBodyX)
-    .vLineTo(-halfStrutY)
+    .vLineTo(-halfStrutY + rectChamfer)
+    .lineTo([halfBodyX + rectChamfer, -halfStrutY])
     .hLineTo(straightEndX)
     .threePointsArcTo([straightEndX, halfStrutY], [straightEndX + halfStrutY, 0])
-    .hLineTo(halfBodyX)
+    .hLineTo(halfBodyX + rectChamfer)
+    .lineTo([halfBodyX, halfStrutY - rectChamfer])
     .vLineTo(halfBodyY)
     .hLineTo(halfTabX)
-    .vLineTo(halfTotalY)
-    .hLineTo(-halfTabX)
+    .vLineTo(halfTotalY - tabChamfer)
+    .lineTo([halfTabX - tabChamfer, halfTotalY])
+    .hLineTo(-halfTabX + tabChamfer)
+    .lineTo([-halfTabX, halfTotalY - tabChamfer])
     .vLineTo(halfBodyY)
     .hLineTo(-halfBodyX)
-    .vLineTo(halfStrutY)
+    .vLineTo(halfStrutY - rectChamfer)
+    .lineTo([-halfBodyX - rectChamfer, halfStrutY])
     .hLineTo(-straightEndX)
     .threePointsArcTo([-straightEndX, -halfStrutY], [-straightEndX - halfStrutY, 0])
-    .hLineTo(-halfBodyX)
+    .hLineTo(-halfBodyX - rectChamfer)
+    .lineTo([-halfBodyX, -halfStrutY + rectChamfer])
     .vLineTo(-halfBodyY)
     .hLineTo(-halfTabX)
-    .vLineTo(-halfTotalY)
+    .vLineTo(-halfTotalY + tabChamfer)
+    .lineTo([-halfTabX + tabChamfer, -halfTotalY])
+    .hLineTo(halfTabX - tabChamfer)
     .close()
 
   if (foot.holeDiameter > 0) {

@@ -11,6 +11,7 @@ interface FootDebugParams {
   tipOffset: number
   holeDiameter: number
   straightLength: number
+  chamferLength: number
 }
 
 interface Params {
@@ -28,6 +29,7 @@ const DEFAULT_PARAMS: Params = {
     tipOffset: 20,
     holeDiameter: 8,
     straightLength: 40,
+    chamferLength: 4,
   },
   strutWidth: 125,
   flangeThickness: 30,
@@ -138,9 +140,7 @@ export function FootShapeDebug() {
           </button>
         </div>
         <p className="hint">
-          Renders the separate foot part from <code>computeFootPartBoundary2D</code>. The hole
-          diameter and straight length are carried as parameters but are not used by this first
-          shape yet.
+          Renders the separate foot part from <code>computeFootPartBoundary2D</code>.
         </p>
 
         <section className="control-group">
@@ -172,6 +172,10 @@ export function FootShapeDebug() {
           <div className="transform-field">
             <label>Foot straight length (mm)</label>
             <NumberField value={params.foot.straightLength} step={1} min={0} onCommit={setFoot('straightLength')} />
+          </div>
+          <div className="transform-field">
+            <label>Foot chamfer length (mm)</label>
+            <NumberField value={params.foot.chamferLength} step={1} min={0} onCommit={setFoot('chamferLength')} />
           </div>
         </section>
 

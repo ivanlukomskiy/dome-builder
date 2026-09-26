@@ -80,6 +80,7 @@ describe('computeFlangeSignature', () => {
       tipOffset: 20,
       holeDiameter: 8,
       straightLength: 40,
+      chamferLength: 4,
     }
     const withFoot = (v: VertexEdgesInfo, projectedAngleDeg: number, shape = foot): VertexEdgesInfo => ({
       ...v,

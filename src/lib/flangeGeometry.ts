@@ -130,11 +130,13 @@ export interface FootParams {
   // Distance (mm) along the axis from where the rectangular hole ends (before tolerance) to the
   // arm's flat tip.
   tipOffset: number;
-  // Diameter (mm) reserved for the separate foot part's hole. The hole is not cut yet.
+  // Diameter (mm) of the holes drilled at the separate foot part's rounded ends.
   holeDiameter: number;
   // Straight body length (mm) reserved for the separate foot part. The current foot part body width
   // comes from the strut width minus two flange grooves; this value is kept for the next layout pass.
   straightLength: number;
+  // Chamfer length (mm) for the separate foot part's tab corners and inner side-rectangle corners.
+  chamferLength: number;
 }
 
 // A foot as one vertex's flange sees it: the shared dimensions, plus the direction it points in.
@@ -152,6 +154,7 @@ export const DEFAULT_FOOT_PARAMS: FootParams = {
   tipOffset: 20,
   holeDiameter: 8,
   straightLength: 40,
+  chamferLength: 4,
 };
 
 // The foot parameters, with the labels the Sidebar shows for them.
@@ -163,6 +166,7 @@ export const FOOT_PARAM_FIELDS: { key: keyof FootParams; label: string }[] = [
   { key: "tipOffset", label: "Foot tip offset (mm)" },
   { key: "holeDiameter", label: "Foot hole diameter (mm)" },
   { key: "straightLength", label: "Foot straight length (mm)" },
+  { key: "chamferLength", label: "Foot chamfer length (mm)" },
 ];
 
 export function footParamsEqual(a: FootParams, b: FootParams): boolean {
