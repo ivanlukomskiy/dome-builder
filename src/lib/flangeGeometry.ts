@@ -333,6 +333,8 @@ function computeFootSideHoles(
 interface PlateArm {
   // For helper names.
   label: string;
+  // Foot arms need a rectangular outer body even when the neighbouring wedge is face-filled.
+  isFoot: boolean;
   projectedAngleDeg: number;
   // The wedge from this arm to the next one in the ring - see FlangeEdgeInput.
   angleToNextEdgeDeg: number;
@@ -358,6 +360,7 @@ function strutArm(edge: FlangeEdgeInput, params: FlangeShapeParams): PlateArm {
   const halfWidth = edge.thicknessMm / 2 + params.toleranceTransverse;
   return {
     label: String(edge.edgeId),
+    isFoot: false,
     projectedAngleDeg: edge.projectedAngleDeg,
     angleToNextEdgeDeg: edge.angleToNextEdgeDeg,
     hasFaceToNextEdge: edge.hasFaceToNextEdge,
@@ -384,6 +387,7 @@ function footArm(
   const halfWidth = foot.length / 2;
   return {
     label: "foot",
+    isFoot: true,
     projectedAngleDeg: foot.projectedAngleDeg,
     angleToNextEdgeDeg,
     hasFaceToNextEdge,
@@ -674,6 +678,29 @@ function computeWedgePoints(edge: PlateArm, next: PlateArm): Point2D[] {
   const nextAngle = edge.projectedAngleDeg + edge.angleToNextEdgeDeg;
 
   if (edge.hasFaceToNextEdge) {
+    if (edge.isFoot || next.isFoot) {
+      const points: Point2D[] = [start];
+      if (edge.isFoot) {
+        points.push([
+          edge.cornerLength + edge.overshoot - edge.roundingInset,
+          edge.roundedHalfWidth,
+        ]);
+      }
+      if (next.isFoot) {
+        points.push(
+          rotate2D(
+            [
+              next.cornerLength + next.overshoot - next.roundingInset,
+              -next.roundedHalfWidth,
+            ],
+            edge.angleToNextEdgeDeg,
+          ),
+        );
+      }
+      points.push(end);
+      return points.map((p) => rotate2D(p, edgeAngle));
+    }
+
     return computeConnectionCurvePoints(start, end, edge).map((p) =>
       rotate2D(p, edgeAngle),
     );

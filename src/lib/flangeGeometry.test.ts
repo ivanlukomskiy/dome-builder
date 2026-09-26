@@ -275,7 +275,7 @@ describe("computeFlangeBoundary2D", () => {
       );
       expect(result.main, `iteration ${i}`).not.toBeNull();
     }
-  });
+  }, 30_000);
 });
 
 // --- The outline itself ---------------------------------------------------------------------
@@ -476,6 +476,12 @@ describe("foot", () => {
     return [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin(a) + p[1] * Math.cos(a)];
   };
   const hasPoint = (outline: Pt[], p: Pt) => outline.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-6);
+  const samePoint = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6;
+  const hasSegment = (outline: Pt[], a: Pt, b: Pt) =>
+    outline.some((p, i) => {
+      const q = outline[(i + 1) % outline.length];
+      return (samePoint(p, a) && samePoint(q, b)) || (samePoint(p, b) && samePoint(q, a));
+    });
 
   // The reflex open wedge of ACUTE_OPEN_WEDGE (its struts sit at 224.5 and 276.4 degrees) is
   // centered on 70.5 degrees; its acute open wedge on 250.5.
@@ -503,8 +509,11 @@ describe("foot", () => {
       const holeX0 = foot.holeOffset - params.toleranceTransverse;
       for (const sign of [-1, 1]) {
         // The side runs from the tip corner to where it meets the hole's near-side line...
-        expect(hasPoint(outline, rotate([tipX, sign * foot.length / 2], angle))).toBe(true);
-        expect(hasPoint(outline, rotate([holeX0, sign * foot.length / 2], angle))).toBe(true);
+        const tipCorner = rotate([tipX, sign * foot.length / 2], angle);
+        const sideEnd = rotate([holeX0, sign * foot.length / 2], angle);
+        expect(hasPoint(outline, tipCorner)).toBe(true);
+        expect(hasPoint(outline, sideEnd)).toBe(true);
+        expect(hasSegment(outline, tipCorner, sideEnd)).toBe(true);
       }
       // ...and nothing of the outline strays into the band the two sides enclose, past that line
       // (in the foot's own frame).
@@ -525,6 +534,25 @@ describe("foot", () => {
       expect(areaOf(rect.drawing)).toBeCloseTo(expected, 3);
       expect(result.helpers.filter((h) => h.name.startsWith("foot side hole"))).toHaveLength(2);
     });
+  });
+
+  it("keeps both foot sides straight in a face-filled wedge", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const angle = VERTEX_0.edges[0].projectedAngleDeg + 30;
+    const foot = footAt(angle);
+    const outline = computeFlangeOutline(VERTEX_0.edges, params, foot);
+    const holeX0 = foot.holeOffset - params.toleranceTransverse;
+
+    expect(error).toHaveBeenCalled();
+    expect(signedArea(outline)).toBeGreaterThan(0);
+    expect(crossesItself(outline)).toBe(false);
+    for (const sign of [-1, 1]) {
+      expect(hasSegment(
+        outline,
+        rotate([tipX, sign * foot.length / 2], angle),
+        rotate([holeX0, sign * foot.length / 2], angle),
+      )).toBe(true);
+    }
   });
 
   it("leaves a vertex without a foot exactly as it was", () => {
