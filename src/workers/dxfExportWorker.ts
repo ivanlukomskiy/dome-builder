@@ -69,8 +69,42 @@ function labelBeside(center: [number, number], angleDeg: number, distance: numbe
   return add2(center, offset)
 }
 
+function arcMidpoint2(a: [number, number], b: [number, number], center: [number, number]): [number, number] {
+  const radius = (Math.hypot(a[0] - center[0], a[1] - center[1]) + Math.hypot(b[0] - center[0], b[1] - center[1])) / 2
+  const angleA = Math.atan2(a[1] - center[1], a[0] - center[0])
+  const angleB = Math.atan2(b[1] - center[1], b[0] - center[0])
+  let delta = angleB - angleA
+  while (delta > Math.PI) delta -= 2 * Math.PI
+  while (delta < -Math.PI) delta += 2 * Math.PI
+  const angle = angleA + delta / 2
+  return [center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle) * radius]
+}
+
 function toVector3(t: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(t[0], t[1], t[2])
+}
+
+function projectToPlane2D(
+  p: THREE.Vector3,
+  plane: { origin: THREE.Vector3; normal: THREE.Vector3; xDir: THREE.Vector3 },
+): [number, number] {
+  const yDir = plane.normal.clone().cross(plane.xDir).normalize()
+  const rel = p.clone().sub(plane.origin)
+  return [rel.dot(plane.xDir), rel.dot(yDir)]
+}
+
+function strutLabelAnchor(posA: THREE.Vector3, posB: THREE.Vector3, center: THREE.Vector3): { x: number; y: number } {
+  const plane = computeStrutPlane(posA, posB, center)
+  const a = projectToPlane2D(posA, plane)
+  const b = projectToPlane2D(posB, plane)
+  const c = projectToPlane2D(center, plane)
+  const [x, y] = arcMidpoint2(a, b, c)
+  return { x, y }
+}
+
+function footTabOffset(strutWidth: number, flangeThickness: number): number {
+  const bodyHeight = Math.max(strutWidth - 2 * flangeThickness, 0)
+  return bodyHeight / 2 + flangeThickness / 2
 }
 
 async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[] }> {
@@ -143,7 +177,13 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
             height: HELPER_HEIGHT,
           })
         }
-        parts.push({ name: req.names.struts[job.index] ?? `strut-${job.index}`, kind: 'strut', loops: drawingToPolylines(boundary.main), helpers })
+        parts.push({
+          name: req.names.struts[job.index] ?? `strut-${job.index}`,
+          kind: 'strut',
+          loops: drawingToPolylines(boundary.main),
+          labelAnchor: strutLabelAnchor(posA, posB, center),
+          helpers,
+        })
       }
     } catch (err) {
       console.error(`Failed to read strut outline for edge ${job.index}`, err)
@@ -217,6 +257,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           name: req.names.flanges[flangeNameKey(vertex.vertexId, side)] ?? `flange-${vertex.vertexId}-${side}`,
           kind: 'flange',
           loops: drawingToPolylines(boundary.main),
+          labelAnchor: { x: 0, y: req.flangeParams.centerHoleDiameter / 2 + 8 },
           helpers,
         })
       } catch (err) {
@@ -229,13 +270,27 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       try {
         const boundary = computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth)
         if (boundary.main) {
+          const tabOffset = footTabOffset(req.halfWidth * 2, req.grooveDepth)
           parts.push({
             name: req.names.feet[vertex.vertexId] ?? `foot-${vertex.vertexId}`,
             kind: 'foot',
             loops: drawingToPolylines(boundary.main),
-            helpers: req.names.flangePairs[vertex.vertexId]
-              ? [{ text: req.names.flangePairs[vertex.vertexId], x: 0, y: 0, angleDeg: 0, height: HELPER_HEIGHT }]
-              : undefined,
+            helpers: [
+              {
+                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'outer')] ?? `FE${vertex.vertexId}`,
+                x: 0,
+                y: tabOffset,
+                angleDeg: 0,
+                height: HELPER_HEIGHT,
+              },
+              {
+                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'inner')] ?? `FI${vertex.vertexId}`,
+                x: 0,
+                y: -tabOffset,
+                angleDeg: 0,
+                height: HELPER_HEIGHT,
+              },
+            ],
           })
         }
       } catch (err) {

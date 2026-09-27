@@ -66,6 +66,13 @@ describe('layoutDxfParts', () => {
     expect(first.label.y).toBeLessThan(b.maxY)
   })
 
+  it('uses a part-provided label anchor when present', () => {
+    const [placed] = layoutDxfParts([{ ...part('anchored', 'flange', 20, 20, -10, -10), labelAnchor: { x: 0, y: 6 } }], { scale: 2 })
+    const b = bbox(placed.loops)
+    expect(placed.label.x).toBeCloseTo(b.minX + 20, 5)
+    expect(placed.label.y).toBeCloseTo(b.minY + 32, 5)
+  })
+
   it('drops parts with no geometry', () => {
     expect(layoutDxfParts([{ name: 'x', kind: 'strut', loops: [] }], { scale: 1 })).toEqual([])
   })

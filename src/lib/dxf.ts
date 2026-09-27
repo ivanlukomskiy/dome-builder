@@ -13,6 +13,9 @@ export interface DxfPart {
   name: string
   kind: DxfPartKind
   loops: DxfPolyline[]
+  // Optional preferred red-label center in the part's own coordinates. When absent, the label is
+  // centered in the part's bounding box.
+  labelAnchor?: { x: number; y: number }
   // Green annotations about how the part connects to the others (which vertex/strut/brace goes
   // where), in the part's own 2D coordinates - not part of its outline.
   helpers?: DxfHelperText[]
@@ -142,6 +145,7 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
     width: number
     height: number
     helpers: DxfHelperText[]
+    labelAnchor: { x: number; y: number } | null
     slotWidth: number
   }
 
@@ -160,7 +164,10 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
       y: (h.y - box.minY) * scale,
       height: h.height * scale,
     }))
-    items.push({ part, loops, helpers, width, height, slotWidth: Math.max(width, labelWidth) })
+    const labelAnchor = part.labelAnchor
+      ? { x: (part.labelAnchor.x - box.minX) * scale, y: (part.labelAnchor.y - box.minY) * scale }
+      : null
+    items.push({ part, loops, helpers, labelAnchor, width, height, slotWidth: Math.max(width, labelWidth) })
   }
   items.sort((a, b) => KIND_ORDER.indexOf(a.part.kind) - KIND_ORDER.indexOf(b.part.kind))
 
@@ -192,7 +199,9 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
       ...item.part,
       loops: transformLoops(item.loops, x + slotInset, rowY, 1),
       helpers: item.helpers.map((h) => ({ ...h, x: h.x + x + slotInset, y: h.y + rowY })),
-      label: { x: x + slotInset + item.width / 2, y: rowY + item.height / 2, height: labelHeight },
+      label: item.part.labelAnchor
+        ? { x: item.labelAnchor!.x + x + slotInset, y: item.labelAnchor!.y + rowY, height: labelHeight }
+        : { x: x + slotInset + item.width / 2, y: rowY + item.height / 2, height: labelHeight },
     })
     x += item.slotWidth + gap
     rowHeight = Math.max(rowHeight, item.height)
