@@ -471,6 +471,7 @@ describe("foot", () => {
     projectedAngleDeg,
   });
   const tipX = DEFAULT_FOOT_PARAMS.holeOffset + DEFAULT_FOOT_PARAMS.thickness + DEFAULT_FOOT_PARAMS.tipOffset;
+  const footHalfWidth = (foot: FlangeFoot) => foot.length / 2 - params.toleranceLongitudinal;
   const rotate = (p: Pt, deg: number): Pt => {
     const a = (deg * Math.PI) / 180;
     return [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin(a) + p[1] * Math.cos(a)];
@@ -500,17 +501,19 @@ describe("foot", () => {
       expect(crossesItself(outline)).toBe(false);
     });
 
-    it("ends in a flat tip, foot.length wide, tipX from the vertex", () => {
-      expect(hasPoint(outline, rotate([tipX, -foot.length / 2], angle))).toBe(true);
-      expect(hasPoint(outline, rotate([tipX, foot.length / 2], angle))).toBe(true);
+    it("ends in a flat tip, foot.length minus longitudinal tolerance on both sides wide", () => {
+      const halfWidth = footHalfWidth(foot);
+      expect(hasPoint(outline, rotate([tipX, -halfWidth], angle))).toBe(true);
+      expect(hasPoint(outline, rotate([tipX, halfWidth], angle))).toBe(true);
     });
 
     it("has flat sides parallel to the axis, ending on the line of the hole's near side", () => {
       const holeX0 = foot.holeOffset - params.toleranceTransverse;
+      const halfWidth = footHalfWidth(foot);
       for (const sign of [-1, 1]) {
         // The side runs from the tip corner to where it meets the hole's near-side line...
-        const tipCorner = rotate([tipX, sign * foot.length / 2], angle);
-        const sideEnd = rotate([holeX0, sign * foot.length / 2], angle);
+        const tipCorner = rotate([tipX, sign * halfWidth], angle);
+        const sideEnd = rotate([holeX0, sign * halfWidth], angle);
         expect(hasPoint(outline, tipCorner)).toBe(true);
         expect(hasPoint(outline, sideEnd)).toBe(true);
         expect(hasSegment(outline, tipCorner, sideEnd)).toBe(true);
@@ -519,7 +522,7 @@ describe("foot", () => {
       // (in the foot's own frame).
       const strays = outline
         .map((p) => rotate(p, -angle))
-        .filter((p) => p[0] > holeX0 + 1e-6 && p[0] < tipX - 1e-6 && Math.abs(p[1]) < foot.length / 2 - 1e-6);
+        .filter((p) => p[0] > holeX0 + 1e-6 && p[0] < tipX - 1e-6 && Math.abs(p[1]) < halfWidth - 1e-6);
       expect(strays).toHaveLength(0);
     });
 
@@ -546,11 +549,12 @@ describe("foot", () => {
     expect(error).toHaveBeenCalled();
     expect(signedArea(outline)).toBeGreaterThan(0);
     expect(crossesItself(outline)).toBe(false);
+    const halfWidth = footHalfWidth(foot);
     for (const sign of [-1, 1]) {
       expect(hasSegment(
         outline,
-        rotate([tipX, sign * foot.length / 2], angle),
-        rotate([holeX0, sign * foot.length / 2], angle),
+        rotate([tipX, sign * halfWidth], angle),
+        rotate([holeX0, sign * halfWidth], angle),
       )).toBe(true);
     }
   });

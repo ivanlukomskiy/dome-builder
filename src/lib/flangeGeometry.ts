@@ -118,7 +118,7 @@ export function resolveFlangeParams(
 // a strut's tenon length (and gets the longitudinal tolerance), `thickness` the part of a strut's
 // thickness (and gets the transverse one).
 export interface FootParams {
-  // Distance (mm) between the arm's two flat sides - its width across its axis.
+  // Distance (mm) between the arm's two flat sides before longitudinal tolerance is applied.
   length: number;
   // Size (mm) of the rectangular hole along the foot's axis, before tolerance.
   thickness: number;
@@ -321,6 +321,10 @@ function computeFootLayout(foot: FootParams, params: FlangeShapeParams) {
   };
 }
 
+function computeFootHalfWidth(foot: FootParams, params: FlangeShapeParams): number {
+  return Math.max(foot.length / 2 - params.toleranceLongitudinal, 0);
+}
+
 // Side bolt holes either side of the foot's rectangular hole. The hole runs across the axis, so
 // they sit on the axis itself, a foot-thickness/2 + sideHoleDiameterOffset away from the hole's middle.
 function computeFootSideHoles(
@@ -391,9 +395,10 @@ function strutArm(edge: FlangeEdgeInput, params: FlangeShapeParams): PlateArm {
   };
 }
 
-// The foot as an arm: a flat tip `length` wide, with straight sides (no ears) parallel to its axis.
-// The sides run back from the tip only as far as the line through the near (vertex-side) edge of the
-// rectangular hole, perpendicular to the axis; there the wedge to the neighbouring arm takes over.
+// The foot as an arm: a flat tip narrowed by longitudinal tolerance, with straight sides (no ears)
+// parallel to its axis. The sides run back from the tip only as far as the line through the near
+// (vertex-side) edge of the rectangular hole, perpendicular to the axis; there the wedge to the
+// neighbouring arm takes over.
 function footArm(
   foot: FlangeFoot,
   params: FlangeShapeParams,
@@ -401,7 +406,7 @@ function footArm(
   hasFaceToNextEdge: boolean,
 ): PlateArm {
   const { tipX, holeX0 } = computeFootLayout(foot, params);
-  const halfWidth = foot.length / 2;
+  const halfWidth = computeFootHalfWidth(foot, params);
   return {
     label: "foot",
     isFoot: true,
@@ -989,11 +994,12 @@ export function computeFlangeBoundary2D(
     // A foot that couldn't join the outline (see buildPlateArms) still gets its body: a plain
     // rectangle from the vertex out to its tip, fused onto the plate.
     const { tipX } = computeFootLayout(foot, params);
+    const halfWidth = computeFootHalfWidth(foot, params);
     const body: Point2D[] = [
-      [0, -foot.length / 2],
-      [tipX, -foot.length / 2],
-      [tipX, foot.length / 2],
-      [0, foot.length / 2],
+      [0, -halfWidth],
+      [tipX, -halfWidth],
+      [tipX, halfWidth],
+      [0, halfWidth],
     ];
     main = main.fuse(drawPolygon(body.map((p) => rotate2D(p, foot.projectedAngleDeg))));
   }
