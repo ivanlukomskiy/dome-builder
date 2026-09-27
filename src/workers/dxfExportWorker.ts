@@ -42,6 +42,13 @@ export type DxfExportWorkerMessage =
 
 // Height (mm at scale 1) of the green connection labels.
 const HELPER_HEIGHT = 5
+const RED_LABEL_HEIGHT = 8
+const TEXT_WIDTH_FACTOR = 0.8
+
+interface LabelAvoidArea {
+  center: [number, number]
+  radius: number
+}
 
 function axisAngleDeg(axis: [number, number]): number {
   return (Math.atan2(axis[1], axis[0]) * 180) / Math.PI
@@ -70,13 +77,17 @@ function labelBeside(center: [number, number], angleDeg: number, distance: numbe
 }
 
 function arcMidpoint2(a: [number, number], b: [number, number], center: [number, number]): [number, number] {
+  return arcPoint2(a, b, center, 0.5)
+}
+
+function arcPoint2(a: [number, number], b: [number, number], center: [number, number], fraction: number): [number, number] {
   const radius = (Math.hypot(a[0] - center[0], a[1] - center[1]) + Math.hypot(b[0] - center[0], b[1] - center[1])) / 2
   const angleA = Math.atan2(a[1] - center[1], a[0] - center[0])
   const angleB = Math.atan2(b[1] - center[1], b[0] - center[0])
   let delta = angleB - angleA
   while (delta > Math.PI) delta -= 2 * Math.PI
   while (delta < -Math.PI) delta += 2 * Math.PI
-  const angle = angleA + delta / 2
+  const angle = angleA + delta * fraction
   return [center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle) * radius]
 }
 
@@ -93,13 +104,55 @@ function projectToPlane2D(
   return [rel.dot(plane.xDir), rel.dot(yDir)]
 }
 
-function strutLabelAnchor(posA: THREE.Vector3, posB: THREE.Vector3, center: THREE.Vector3): { x: number; y: number } {
+function angleDegOf(a: [number, number], b: [number, number]): number {
+  return (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI
+}
+
+function pointTuple(p: { x: number; y: number } | [number, number]): [number, number] {
+  return Array.isArray(p) ? p : [p.x, p.y]
+}
+
+function distance2(a: [number, number], b: [number, number]): number {
+  const dx = a[0] - b[0]
+  const dy = a[1] - b[1]
+  return dx * dx + dy * dy
+}
+
+function labelAvoidArea(ends: [{ x: number; y: number } | [number, number], { x: number; y: number } | [number, number]], label: string): LabelAvoidArea {
+  const a = pointTuple(ends[0])
+  const b = pointTuple(ends[1])
+  const center: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  const plateHalfLength = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2
+  const labelHalfLength = (label.length * RED_LABEL_HEIGHT * TEXT_WIDTH_FACTOR) / 2
+  return { center, radius: plateHalfLength + labelHalfLength + RED_LABEL_HEIGHT * 0.5 }
+}
+
+function strutLabel(
+  posA: THREE.Vector3,
+  posB: THREE.Vector3,
+  center: THREE.Vector3,
+  avoidAreas: LabelAvoidArea[],
+): { anchor: { x: number; y: number }; angleDeg: number } {
   const plane = computeStrutPlane(posA, posB, center)
   const a = projectToPlane2D(posA, plane)
   const b = projectToPlane2D(posB, plane)
   const c = projectToPlane2D(center, plane)
-  const [x, y] = arcMidpoint2(a, b, c)
-  return { x, y }
+  const [x, y] =
+    avoidAreas.length === 0
+      ? arcMidpoint2(a, b, c)
+      : Array.from({ length: 17 }, (_, i) => 0.18 + (i * 0.64) / 16)
+        .sort((left, right) => Math.abs(left - 0.5) - Math.abs(right - 0.5))
+        .map((fraction) => {
+          const point = arcPoint2(a, b, c, fraction)
+          const clear = avoidAreas.every((avoid) => distance2(point, avoid.center) >= avoid.radius * avoid.radius)
+          const clearance = Math.min(...avoidAreas.map((avoid) => distance2(point, avoid.center) - avoid.radius * avoid.radius))
+          return { point, clear, clearance }
+        }).reduce((best, candidate) => {
+          if (best.clear) return best
+          if (candidate.clear) return candidate
+          return candidate.clearance > best.clearance ? candidate : best
+        }).point
+  return { anchor: { x, y }, angleDeg: angleDegOf(a, b) }
 }
 
 function footTabOffset(strutWidth: number, flangeThickness: number): number {
@@ -177,11 +230,17 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
             height: HELPER_HEIGHT,
           })
         }
+        const partName = req.names.struts[job.index] ?? `strut-${job.index}`
+        const avoidAreas = [boundary.bracePlateEndsA, boundary.bracePlateEndsB].flatMap((ends) =>
+          ends ? [labelAvoidArea(ends, partName)] : [],
+        )
+        const label = strutLabel(posA, posB, center, avoidAreas)
         parts.push({
-          name: req.names.struts[job.index] ?? `strut-${job.index}`,
+          name: partName,
           kind: 'strut',
           loops: drawingToPolylines(boundary.main),
-          labelAnchor: strutLabelAnchor(posA, posB, center),
+          labelAnchor: label.anchor,
+          labelAngleDeg: label.angleDeg,
           helpers,
         })
       }
@@ -206,6 +265,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)] ?? `brace-plate-${brace.braceId}-strut-${job.index}-${end}`,
           kind: 'brace-plate',
           loops: drawingToPolylines(plate),
+          labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
         })
       } catch (err) {
         console.error(`Failed to read brace plate ${brace.braceId} outline for edge ${job.index}`, err)
@@ -233,12 +293,13 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       try {
         // Which strut goes into each rectangular hole, in green along the hole.
         const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => {
-          const [x, y] = labelBeside(mark.center, mark.angleDeg, mark.holeWidth / 2 + HELPER_HEIGHT * 0.9)
+          const [dx, dy] = polar2(mark.angleDeg, HELPER_HEIGHT * 0.9)
+          const [x, y] = add2(mark.farSideCenter, [dx, dy])
           return {
             text: req.names.struts[mark.edgeId] ?? `S${mark.edgeId}`,
             x,
             y,
-            angleDeg: mark.angleDeg,
+            angleDeg: mark.angleDeg + 90,
             height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
           }
         })

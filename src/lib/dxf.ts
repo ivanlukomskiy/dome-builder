@@ -16,6 +16,8 @@ export interface DxfPart {
   // Optional preferred red-label center in the part's own coordinates. When absent, the label is
   // centered in the part's bounding box.
   labelAnchor?: { x: number; y: number }
+  // Optional red-label angle, in degrees, in the part's own coordinates.
+  labelAngleDeg?: number
   // Green annotations about how the part connects to the others (which vertex/strut/brace goes
   // where), in the part's own 2D coordinates - not part of its outline.
   helpers?: DxfHelperText[]
@@ -34,7 +36,7 @@ export interface DxfHelperText {
 export interface PlacedDxfPart extends DxfPart {
   helpers: DxfHelperText[]
   // Label center and height, in sheet coordinates.
-  label: { x: number; y: number; height: number }
+  label: { x: number; y: number; height: number; angleDeg: number }
 }
 
 // Layer per part kind (so a CAM package can treat them separately) and one for the ID labels;
@@ -200,8 +202,8 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
       loops: transformLoops(item.loops, x + slotInset, rowY, 1),
       helpers: item.helpers.map((h) => ({ ...h, x: h.x + x + slotInset, y: h.y + rowY })),
       label: item.part.labelAnchor
-        ? { x: item.labelAnchor!.x + x + slotInset, y: item.labelAnchor!.y + rowY, height: labelHeight }
-        : { x: x + slotInset + item.width / 2, y: rowY + item.height / 2, height: labelHeight },
+        ? { x: item.labelAnchor!.x + x + slotInset, y: item.labelAnchor!.y + rowY, height: labelHeight, angleDeg: item.part.labelAngleDeg ?? 0 }
+        : { x: x + slotInset + item.width / 2, y: rowY + item.height / 2, height: labelHeight, angleDeg: item.part.labelAngleDeg ?? 0 },
     })
     x += item.slotWidth + gap
     rowHeight = Math.max(rowHeight, item.height)
@@ -263,6 +265,7 @@ export function writeDxf(parts: PlacedDxfPart[]): string {
       pair(30, 0) +
       pair(40, num(part.label.height)) +
       pair(1, part.name) +
+      pair(50, num(readableAngle(part.label.angleDeg))) +
       pair(72, 1) +
       pair(11, num(part.label.x)) +
       pair(21, num(part.label.y)) +

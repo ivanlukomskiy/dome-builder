@@ -65,7 +65,7 @@ const PREFIXES: Record<
 
 const ALPHABETS: Record<Lang, string[]> = {
   en: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
-  ru: 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'.split(''),
+  ru: 'АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'.split(''),
 }
 
 export function flangeNameKey(vertexId: number, side: FlangeNameSide): string {

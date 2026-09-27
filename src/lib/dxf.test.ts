@@ -111,7 +111,7 @@ describe('arcs', () => {
 
 describe('writeDxf', () => {
   it('writes a well-formed file with outlines and colored labels', () => {
-    const text = writeDxf(layoutDxfParts([part('strut-7', 'strut', 10, 5)], { scale: 1 }))
+    const text = writeDxf(layoutDxfParts([{ ...part('strut-7', 'strut', 10, 5), labelAngleDeg: 200 }], { scale: 1 }))
     const lines = text.split('\n')
     expect(lines.slice(0, 2)).toEqual(['0', 'SECTION'])
     expect(text.trimEnd().endsWith('EOF')).toBe(true)
@@ -120,6 +120,7 @@ describe('writeDxf', () => {
     expect(text.includes('\nstrut-7\n')).toBe(true)
     expect(text.includes('\n72\n1\n')).toBe(true)
     expect(text.includes('\n73\n2\n')).toBe(true)
+    expect(text.includes('\n50\n20.0000\n')).toBe(true)
     // Labels sit on their own layer, defined with a different color (red) than the outlines.
     expect(text.includes('LAYER\n2\nLABELS\n70\n0\n62\n1\n')).toBe(true)
     expect(text.includes('LAYER\n2\nSTRUTS\n70\n0\n62\n7\n')).toBe(true)

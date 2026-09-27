@@ -243,6 +243,7 @@ export async function runDxfExport(
       name: names.braces[body.braceId] ?? `brace-${body.braceId}`,
       kind: 'brace',
       loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
+      labelAngleDeg: (Math.atan2(unit[1], unit[0]) * 180) / Math.PI,
       helpers,
     })
   }

@@ -182,10 +182,12 @@ export function footParamsEqual(a: FootParams, b: FootParams): boolean {
 }
 
 // The middle of one strut's rectangular tenon hole in the flange plate: which strut (edge), where,
-// the direction along the hole (degrees) and how wide the hole is across it.
+// the direction along the hole (degrees), how wide the hole is across it, and where its far
+// short side sits (away from the dome center).
 export interface FlangeEdgeMark {
   edgeId: number;
   center: Point2D;
+  farSideCenter: Point2D;
   angleDeg: number;
   holeWidth: number;
 }
@@ -937,6 +939,7 @@ export function computeFlangeBoundary2D(
         edge.projectedAngleDeg,
         (edge.strutEnd.tenonStart + edge.strutEnd.tenonEnd) / 2,
       ),
+      farSideCenter: polar(edge.projectedAngleDeg, rectX1),
       angleDeg: edge.projectedAngleDeg,
       holeWidth: edge.thicknessMm + 2 * params.toleranceTransverse,
     });

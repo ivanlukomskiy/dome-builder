@@ -60,4 +60,21 @@ describe('createPartNameMaps', () => {
     expect(names.braces[6]).toBe('Р-1')
     expect(names.braces[5]).toBe('Р-2')
   })
+
+  it('does not use Ё in Russian elevation letters', () => {
+    const names = createPartNameMaps(
+      {
+        struts: Array.from({ length: 8 }, (_, i) => ({ id: i, center: [1, 100 - i, 0] as [number, number, number] })),
+        flanges: [],
+        feet: [],
+        bracePlates: [],
+        braces: [],
+      },
+      'ru',
+    )
+
+    expect(names.struts[5]).toBe('П-Е1')
+    expect(names.struts[6]).toBe('П-Ж1')
+    expect(Object.values(names.struts).some((name) => name.includes('Ё'))).toBe(false)
+  })
 })
