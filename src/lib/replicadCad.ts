@@ -1,5 +1,5 @@
-import { Plane, Sketcher, setOC } from 'replicad'
-import type { Drawing } from 'replicad'
+import { exportSTEP, Plane, Sketcher, setOC } from 'replicad'
+import type { Drawing, Shape3D } from 'replicad'
 import type * as THREE from 'three'
 import type { StrutSketch } from './strutGeometry'
 
@@ -88,7 +88,7 @@ export interface StrutPlane {
 // (rather than the default XY plane `meshDrawing` below uses), extrudes by the sheet thickness,
 // and centers the material on that plane. Returns null for an empty drawing. Caller owns disposing
 // the returned solid (`.delete()`) once done with it - mirrors every other builder here.
-function buildCenteredSolidFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number) {
+function buildCenteredSolidFromDrawing(drawing: Drawing, plane: StrutPlane, thicknessMm: number): Shape3D | null {
   const ocPlane = new Plane(
     [plane.origin.x, plane.origin.y, plane.origin.z],
     [plane.xDir.x, plane.xDir.y, plane.xDir.z],
@@ -110,7 +110,7 @@ function buildCenteredSolidFromDrawing(drawing: Drawing, plane: StrutPlane, thic
 
   const { x: nx, y: ny, z: nz } = plane.normal
   // `.translate()` deletes `solid` itself and returns a distinct object, mirroring buildStrutMesh.
-  return solid.translate([(-nx * thicknessMm) / 2, (-ny * thicknessMm) / 2, (-nz * thicknessMm) / 2])
+  return solid.translate([(-nx * thicknessMm) / 2, (-ny * thicknessMm) / 2, (-nz * thicknessMm) / 2]).asShape3D()
 }
 
 // Builds one strut's solid from a flat `Drawing` already in the strut's own 2D coordinates (see
@@ -130,6 +130,25 @@ export function buildStrutMeshFromDrawing(drawing: Drawing, plane: StrutPlane, t
   }
 }
 
+// Same solid as buildStrutMeshFromDrawing, but returned as a live CAD shape so callers can either
+// export it by itself or keep it around for a multi-shape STEP assembly. `scale` (1 = no change)
+// uniformly resizes the solid around the world origin.
+// `ensureReplicadReady` must have resolved before calling this. Caller owns disposing the returned
+// shape (`.delete()`) once done with it.
+export function buildStrutSolidFromDrawing(
+  drawing: Drawing,
+  plane: StrutPlane,
+  thicknessMm: number,
+  scale = 1,
+): Shape3D | null {
+  let centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
+  if (!centered) return null
+
+  if (scale !== 1) centered = centered.scale(scale).asShape3D()
+
+  return centered
+}
+
 // Same solid as buildStrutMeshFromDrawing, exported as a STEP file Blob instead of a tessellated
 // mesh - used by the "download as STEP" export rather than live Preview rendering. `scale` (1 =
 // no change) uniformly resizes the solid, around the world origin, before export - so every
@@ -141,14 +160,21 @@ export function buildStrutStepFromDrawing(
   thicknessMm: number,
   scale = 1,
 ): Blob | null {
-  let centered = buildCenteredSolidFromDrawing(drawing, plane, thicknessMm)
+  const centered = buildStrutSolidFromDrawing(drawing, plane, thicknessMm, scale)
   if (!centered) return null
-
-  if (scale !== 1) centered = centered.scale(scale)
 
   const blob = centered.blobSTEP()
   centered.delete()
   return blob
+}
+
+export interface StepAssemblyShape {
+  name: string
+  shape: Shape3D
+}
+
+export function buildStepAssembly(shapes: StepAssemblyShape[]): Blob {
+  return exportSTEP(shapes.map(({ name, shape }) => ({ name, shape })))
 }
 
 // Meshes an arbitrary flat `Drawing` (e.g. from replicad's own `draw()`/boolean-op primitives -

@@ -8,6 +8,7 @@ import type {
   StepExportPiece,
   StepExportRequest,
   StepExportWorkerMessage,
+  StepExportWorkerPhase,
 } from '../workers/stepExportWorker'
 
 // Same per-worker item cap as DomeMesh.tsx's live Preview build, and for the same reason: no
@@ -22,7 +23,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export interface StepExportProgress {
-  phase: StepExportPhase | 'zipping'
+  phase: StepExportWorkerPhase | 'zipping'
   done: number
   total: number
 }
@@ -75,6 +76,51 @@ function runBatch(
     }
 
     const request: StepExportRequest = { ...shared, requestId, strutJobs, vertices, braceBodies }
+    worker.postMessage(request)
+  })
+}
+
+function runAssembly(
+  strutJobs: StrutGeometryEntry[],
+  vertices: VertexEdgesInfo[],
+  shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies' | 'mode'>,
+  requestId: number,
+  onProgress: (progress: StepExportProgress) => void,
+): Promise<Blob | null> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/stepExportWorker.ts', import.meta.url), {
+      type: 'module',
+    })
+
+    const settle = (fn: () => void) => {
+      worker.terminate()
+      fn()
+    }
+
+    worker.onmessage = (event: MessageEvent<StepExportWorkerMessage>) => {
+      const msg = event.data
+      if (msg.requestId !== requestId) return
+
+      if (msg.type === 'progress') {
+        onProgress({ phase: msg.phase, done: msg.done, total: msg.total })
+      } else if (msg.type === 'result') {
+        settle(() => resolve(msg.assemblyBlob ?? null))
+      } else if (msg.type === 'error') {
+        settle(() => reject(new Error(msg.message)))
+      }
+    }
+    worker.onerror = (event) => {
+      settle(() => reject(new Error(event.message)))
+    }
+
+    const request: StepExportRequest = {
+      ...shared,
+      requestId,
+      mode: 'assembly',
+      strutJobs,
+      vertices,
+      braceBodies: [],
+    }
     worker.postMessage(request)
   })
 }
@@ -187,4 +233,31 @@ export async function runStepExport(
   const zipBlob = await zip.generateAsync({ type: 'blob' })
 
   return isCancelled() ? null : zipBlob
+}
+
+// Builds one STEP assembly containing every visible strut, flange plate, brace plate and brace in
+// its Preview position. Unlike runStepExport, this has to keep all shapes in one OpenCascade
+// worker long enough for the STEP assembly writer to reference them together.
+export async function runStepAssemblyExport(
+  params: RunStepExportParams,
+  onProgress: (progress: StepExportProgress | null) => void,
+  isCancelled: () => boolean,
+): Promise<Blob | null> {
+  const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
+
+  const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies' | 'mode'> = {
+    halfWidth,
+    endGrooveLengthPercent: params.endGrooveLengthPercent,
+    midGrooveLengthPercent: params.midGrooveLengthPercent,
+    grooveDepth: params.grooveDepth,
+    millingDiameter: params.millingDiameter,
+    chamferLength: params.chamferLength,
+    flangeParams: params.flangeParams,
+    scale: params.scale,
+  }
+
+  if (isCancelled()) return null
+
+  const blob = await runAssembly(strutEntries, vertices, shared, 1, onProgress)
+  return isCancelled() ? null : blob
 }

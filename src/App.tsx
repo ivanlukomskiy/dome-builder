@@ -55,7 +55,7 @@ import {
   type FlangeShapeParams,
   type FootParams,
 } from './lib/flangeGeometry'
-import { runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
+import { runStepAssemblyExport, runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
 import {
@@ -883,8 +883,9 @@ function App() {
   // - per vertex - which adjacent edges have a face between them and which don't, and the
   // tangent plane those edges were projected onto to work that out.
   const [stepExportProgress, setStepExportProgress] = useState<StepExportProgress | null>(null)
-  // Uniform scale factor (1 = no change) applied to every solid in the STEP archive - lets the
-  // export double as a scaled-down physical model rather than only the true-size parts.
+  const [stepAssemblyExportProgress, setStepAssemblyExportProgress] = useState<StepExportProgress | null>(null)
+  // Uniform scale factor (1 = no change) applied to every solid in the STEP exports - lets the
+  // exports double as a scaled-down physical model rather than only the true-size parts.
   const [stepExportScale, setStepExportScale] = useState(1)
 
   const handleGetEdgesInfo = () => {
@@ -908,7 +909,8 @@ function App() {
     downloadJson(edgesInfo, 'edges-info.json')
   }
 
-  // Everything the STEP and DXF exports build their parts from - the applied Preview params.
+  // Everything the STEP archive/assembly and DXF exports build their parts from - the applied
+  // Preview params.
   const buildExportParams = (): RunStepExportParams => (
     {
       data: sceneData,
@@ -942,7 +944,7 @@ function App() {
   )
 
   const handleDownloadSteps = async () => {
-    if (stepExportProgress) return
+    if (stepExportProgress || stepAssemblyExportProgress) return
     setStepExportProgress({ phase: 'struts', done: 0, total: 0 })
     try {
       const zipBlob = await runStepExport(
@@ -955,6 +957,23 @@ function App() {
       console.error('Failed to export STEP archive', err)
     } finally {
       setStepExportProgress(null)
+    }
+  }
+
+  const handleDownloadStepAssembly = async () => {
+    if (stepExportProgress || stepAssemblyExportProgress) return
+    setStepAssemblyExportProgress({ phase: 'struts', done: 0, total: 0 })
+    try {
+      const stepBlob = await runStepAssemblyExport(
+        buildExportParams(),
+        setStepAssemblyExportProgress,
+        () => false,
+      )
+      if (stepBlob) downloadBlob(stepBlob, 'dome-assembly.step')
+    } catch (err) {
+      console.error('Failed to export STEP assembly', err)
+    } finally {
+      setStepAssemblyExportProgress(null)
     }
   }
 
@@ -982,9 +1001,11 @@ function App() {
         onImportConfig={handleImportConfig}
         onGetEdgesInfo={handleGetEdgesInfo}
         onDownloadSteps={handleDownloadSteps}
+        onDownloadStepAssembly={handleDownloadStepAssembly}
         onDownloadDxf={handleDownloadDxf}
         dxfExportProgress={dxfExportProgress}
         stepExportProgress={stepExportProgress}
+        stepAssemblyExportProgress={stepAssemblyExportProgress}
         stepExportScale={stepExportScale}
         onStepExportScaleChange={setStepExportScale}
         mode={mode}

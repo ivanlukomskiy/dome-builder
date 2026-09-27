@@ -53,9 +53,11 @@ interface SidebarProps {
   onImportConfig: (file: File) => void
   onGetEdgesInfo: () => void
   onDownloadSteps: () => void
+  onDownloadStepAssembly: () => void
   onDownloadDxf: () => void
   dxfExportProgress: DxfExportProgress | null
   stepExportProgress: StepExportProgress | null
+  stepAssemblyExportProgress: StepExportProgress | null
   stepExportScale: number
   onStepExportScaleChange: (scale: number) => void
   mode: ViewMode
@@ -277,9 +279,11 @@ export function Sidebar({
   onImportConfig,
   onGetEdgesInfo,
   onDownloadSteps,
+  onDownloadStepAssembly,
   onDownloadDxf,
   dxfExportProgress,
   stepExportProgress,
+  stepAssemblyExportProgress,
   stepExportScale,
   onStepExportScaleChange,
   mode,
@@ -419,6 +423,17 @@ export function Sidebar({
   const someSelectedAreFeet = selectedFootCount > 0 && !allSelectedAreFeet
 
   const importInputRef = useRef<HTMLInputElement>(null)
+  const stepExportBusy = stepExportProgress !== null || stepAssemblyExportProgress !== null
+
+  const stepProgressText = (progress: StepExportProgress) => {
+    if (progress.phase === 'zipping') return t('Zipping…')
+    if (progress.phase === 'writing') return t('Writing STEP…')
+    return t('Building {phase} — {done} / {total}', {
+      phase: t(progress.phase),
+      done: progress.done,
+      total: progress.total,
+    })
+  }
 
   const handleImportFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -843,8 +858,11 @@ export function Sidebar({
             />
           </div>
           <div className="button-row">
-            <button onClick={onDownloadSteps} disabled={stepExportProgress !== null}>
+            <button onClick={onDownloadSteps} disabled={stepExportBusy}>
               {t('Download STEP Archive')}
+            </button>
+            <button onClick={onDownloadStepAssembly} disabled={stepExportBusy}>
+              {t('Download STEP Assembly')}
             </button>
             <button onClick={onDownloadDxf} disabled={dxfExportProgress !== null}>
               {t('Download DXF')}
@@ -852,13 +870,13 @@ export function Sidebar({
           </div>
           <p className="hint">
             {stepExportProgress
-              ? stepExportProgress.phase === 'zipping'
-                ? t('Zipping…')
-                : t('Building {phase} — {done} / {total}', { phase: t(stepExportProgress.phase), done: stepExportProgress.done, total: stepExportProgress.total })
+              ? stepProgressText(stepExportProgress)
+              : stepAssemblyExportProgress
+                ? stepProgressText(stepAssemblyExportProgress)
               : t(
                 stepExportScale !== 1
-                  ? 'Exports every visible strut, flange plate, brace plate and brace as its own STEP file (same shapes as this Preview, scaled {scale}x), zipped into one archive.'
-                  : 'Exports every visible strut, flange plate, brace plate and brace as its own STEP file (same shapes as this Preview), zipped into one archive.',
+                  ? 'STEP Archive exports every visible part as its own STEP file zipped together; STEP Assembly exports the same visible parts as one positioned STEP file. Both use the same shapes as this Preview, scaled {scale}x.'
+                  : 'STEP Archive exports every visible part as its own STEP file zipped together; STEP Assembly exports the same visible parts as one positioned STEP file. Both use the same shapes as this Preview.',
                 { scale: stepExportScale },
               )}
           </p>
