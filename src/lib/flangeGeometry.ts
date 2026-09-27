@@ -57,8 +57,10 @@ export interface FlangeShapeParams {
   toleranceTransverse: number;
   // Diameter (mm) of the bolt hole at the vertex itself, shared by every strut arm's plate.
   centerHoleDiameter: number;
-  // Diameter (mm) of each strut arm's own bolt holes - one on either side of its centerline.
-  sideHoleDiameter: number;
+  // Diameter (mm) of each outer flange strut arm's own bolt holes - one on either side of its centerline.
+  sideHoleDiameterOuter: number;
+  // Diameter (mm) of each inner flange strut arm's own bolt holes - one on either side of its centerline.
+  sideHoleDiameterInner: number;
   // Distance (mm) from a strut's own centerline to each of its two side holes' centers.
   sideHoleDiameterOffset: number;
   // How far (mm) the plate's outer edge extends past a strut's own effectiveCornerLength - a
@@ -79,7 +81,8 @@ export const DEFAULT_FLANGE_SHAPE_PARAMS: FlangeShapeParams = {
   toleranceLongitudinal: 2,
   toleranceTransverse: 1,
   centerHoleDiameter: 8,
-  sideHoleDiameter: 6,
+  sideHoleDiameterOuter: 6,
+  sideHoleDiameterInner: 6,
   sideHoleDiameterOffset: 6,
   overshoot: 0,
   minSide: 20,
@@ -92,7 +95,8 @@ export const FLANGE_PARAM_FIELDS: { key: keyof FlangeShapeParams; label: string 
   { key: "toleranceLongitudinal", label: "Tolerance longitudinal (mm)" },
   { key: "toleranceTransverse", label: "Tolerance transverse (mm)" },
   { key: "centerHoleDiameter", label: "Center hole diameter (mm)" },
-  { key: "sideHoleDiameter", label: "Side hole diameter (mm)" },
+  { key: "sideHoleDiameterOuter", label: "Side hole diameter outer (mm)" },
+  { key: "sideHoleDiameterInner", label: "Side hole diameter inner (mm)" },
   { key: "sideHoleDiameterOffset", label: "Side hole diameter offset (mm)" },
   { key: "overshoot", label: "Overshoot (mm)" },
   { key: "minSide", label: "Min side (mm)" },
@@ -191,6 +195,8 @@ export interface FlangeBoundaryResult {
   edgeMarks: FlangeEdgeMark[];
   helpers: HelperDrawing[];
 }
+
+export type FlangeSide = "outer" | "inner";
 
 type MillingDirection =
   | "top-right"
@@ -292,6 +298,7 @@ const HOLE_COLOR = "#12141a";
 function computeSideHoles(
   edge: FlangeEdgeInput,
   params: FlangeShapeParams,
+  sideHoleDiameter: number,
 ): { holeA: Drawing; holeB: Drawing } {
   const holeBasis = (edge.strutEnd.tenonStart + edge.strutEnd.tenonEnd) / 2;
   const holeShift = edge.thicknessMm / 2 + params.sideHoleDiameterOffset;
@@ -301,8 +308,8 @@ function computeSideHoles(
   const holeB = add2(tip, polar(edge.projectedAngleDeg - 90, holeShift));
 
   return {
-    holeA: drawCircle(params.sideHoleDiameter / 2).translate(holeA),
-    holeB: drawCircle(params.sideHoleDiameter / 2).translate(holeB),
+    holeA: drawCircle(sideHoleDiameter / 2).translate(holeA),
+    holeB: drawCircle(sideHoleDiameter / 2).translate(holeB),
   };
 }
 
@@ -330,6 +337,7 @@ function computeFootHalfWidth(foot: FootParams, params: FlangeShapeParams): numb
 function computeFootSideHoles(
   foot: FlangeFoot,
   params: FlangeShapeParams,
+  sideHoleDiameter: number,
 ): { holeA: Drawing; holeB: Drawing } {
   const { holeCenterX } = computeFootLayout(foot, params);
   const holeShift = foot.thickness / 2 + params.sideHoleDiameterOffset;
@@ -338,8 +346,8 @@ function computeFootSideHoles(
   const holeB = polar(foot.projectedAngleDeg, holeCenterX - holeShift);
 
   return {
-    holeA: drawCircle(params.sideHoleDiameter / 2).translate(holeA),
-    holeB: drawCircle(params.sideHoleDiameter / 2).translate(holeB),
+    holeA: drawCircle(sideHoleDiameter / 2).translate(holeA),
+    holeB: drawCircle(sideHoleDiameter / 2).translate(holeB),
   };
 }
 
@@ -880,12 +888,18 @@ function computeRectangleCornerMillingCuts(
   );
 }
 
+function sideHoleDiameterFor(params: FlangeShapeParams, side: FlangeSide): number {
+  return side === "outer" ? params.sideHoleDiameterOuter : params.sideHoleDiameterInner;
+}
+
 export function computeFlangeBoundary2D(
   vertex: FlangeVertexInput,
   params: FlangeShapeParams,
+  side: FlangeSide = "outer",
 ): FlangeBoundaryResult {
   let helpers: HelperDrawing[] = [];
   const edgeMarks: FlangeEdgeMark[] = [];
+  const sideHoleDiameter = sideHoleDiameterFor(params, side);
 
   const negativeShapes: Drawing[] = [];
   const addNegative = (drawing: Drawing) => {
@@ -902,8 +916,8 @@ export function computeFlangeBoundary2D(
   );
 
   vertex.edges.forEach((edge) => {
-    if (params.sideHoleDiameter > 0) {
-      const { holeA, holeB } = computeSideHoles(edge, params);
+    if (sideHoleDiameter > 0) {
+      const { holeA, holeB } = computeSideHoles(edge, params, sideHoleDiameter);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
       addNegative(holeA);
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, -)` });
@@ -953,8 +967,8 @@ export function computeFlangeBoundary2D(
   // bolt holes on its axis either side of it.
   const foot = vertex.foot;
   if (foot) {
-    if (params.sideHoleDiameter > 0) {
-      const { holeA, holeB } = computeFootSideHoles(foot, params);
+    if (sideHoleDiameter > 0) {
+      const { holeA, holeB } = computeFootSideHoles(foot, params, sideHoleDiameter);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: "foot side hole (+)" });
       addNegative(holeA);
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: "foot side hole (-)" });

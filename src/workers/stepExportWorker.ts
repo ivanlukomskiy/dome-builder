@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
-import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
@@ -145,10 +145,7 @@ async function buildStepExports(
   const flangeSpan = req.halfWidth - req.grooveDepth / 2
 
   req.vertices.forEach((vertex, i) => {
-    const boundary = computeFlangeBoundary2D(
-      { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
-      resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
-    )
+    const flangeParams = resolveFlangeParams(req.flangeParams, vertex.flangeOverrides)
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
@@ -156,24 +153,29 @@ async function buildStepExports(
       done: i + 1,
       total: req.vertices.length,
     } satisfies StepExportWorkerMessage)
-    if (!boundary.main) return
 
     const vertexPos = toVector3(vertex.position)
     const normal = toVector3(vertex.tangentPlane.normal)
     const xDir = toVector3(vertex.tangentPlane.e1)
 
     try {
-      const sides: { sign: 1 | -1; label: string }[] = [
-        { sign: 1, label: 'outer' },
-        { sign: -1, label: 'inner' },
+      const sides: { sign: 1 | -1; side: FlangeSide }[] = [
+        { sign: 1, side: 'outer' },
+        { sign: -1, side: 'inner' },
       ]
-      for (const { sign, label } of sides) {
+      for (const { sign, side } of sides) {
+        const boundary = computeFlangeBoundary2D(
+          { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
+          flangeParams,
+          side,
+        )
+        if (!boundary.main) continue
         const plane = {
           origin: vertexPos.clone().addScaledVector(normal, sign * flangeSpan),
           normal,
           xDir,
         }
-        addStepShape(`flange-${vertex.vertexId}-${label}.step`, boundary.main, plane, req.grooveDepth)
+        addStepShape(`flange-${vertex.vertexId}-${side}.step`, boundary.main, plane, req.grooveDepth)
       }
     } catch (err) {
       console.error(`Failed to export flange solid for vertex ${vertex.vertexId}`, err)

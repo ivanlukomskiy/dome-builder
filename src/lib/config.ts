@@ -9,7 +9,7 @@ import { downloadJson } from './download'
 // while still choosing a shape), which tab is active, or the undo history (session-only, not
 // worth persisting).
 export interface DomeConfig {
-  version: 16
+  version: 17
   // The dome's sphere diameter in mm (SceneData.diameter).
   diameter: number
   // Polar coordinates about the origin: [r (mm), azimuth (rad), elevation (rad)] - see PolarCoord.
@@ -44,7 +44,8 @@ export interface DomeConfig {
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
-  sideHoleDiameter: number
+  sideHoleDiameterOuter: number
+  sideHoleDiameterInner: number
   sideHoleDiameterOffset: number
   overshoot: number
   minSide: number
@@ -65,6 +66,21 @@ export interface DomeConfig {
   footVertices?: number[]
 }
 
+type LegacyFlangeShapeParamsV16 = Omit<FlangeShapeParams, 'sideHoleDiameterOuter' | 'sideHoleDiameterInner'> & {
+  sideHoleDiameter: number
+}
+
+type LegacyDomeConfigV16 = Omit<
+  DomeConfig,
+  'version' | 'sideHoleDiameterOuter' | 'sideHoleDiameterInner' | 'vertexFlangeParams'
+> & {
+  version: 16
+  sideHoleDiameter: number
+  vertexFlangeParams?: [number, Partial<LegacyFlangeShapeParamsV16>][]
+}
+
+type LoadableDomeConfig = DomeConfig | LegacyDomeConfigV16
+
 // The subset of App's state a config captures - plain data in, plain data out, so App can
 // build one straight from its own state variables and apply one straight back onto them.
 export interface DomeState {
@@ -82,7 +98,8 @@ export interface DomeState {
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
-  sideHoleDiameter: number
+  sideHoleDiameterOuter: number
+  sideHoleDiameterInner: number
   sideHoleDiameterOffset: number
   overshoot: number
   minSide: number
@@ -97,7 +114,7 @@ export interface DomeState {
 
 export function serializeConfig(state: DomeState): DomeConfig {
   return {
-    version: 16,
+    version: 17,
     diameter: state.sceneData.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
       id,
@@ -123,7 +140,8 @@ export function serializeConfig(state: DomeState): DomeConfig {
     toleranceLongitudinal: state.toleranceLongitudinal,
     toleranceTransverse: state.toleranceTransverse,
     centerHoleDiameter: state.centerHoleDiameter,
-    sideHoleDiameter: state.sideHoleDiameter,
+    sideHoleDiameterOuter: state.sideHoleDiameterOuter,
+    sideHoleDiameterInner: state.sideHoleDiameterInner,
     sideHoleDiameterOffset: state.sideHoleDiameterOffset,
     overshoot: state.overshoot,
     minSide: state.minSide,
@@ -137,7 +155,29 @@ export function serializeConfig(state: DomeState): DomeConfig {
   }
 }
 
-export function deserializeConfig(config: DomeConfig): DomeState {
+function migrateFlangeOverrides(
+  entries: LoadableDomeConfig['vertexFlangeParams'],
+): [number, Partial<FlangeShapeParams>][] {
+  return (entries ?? []).map(([id, overrides]) => {
+    if (!('sideHoleDiameter' in overrides)) return [id, overrides as Partial<FlangeShapeParams>]
+    const { sideHoleDiameter, ...rest } = overrides
+    return [
+      id,
+      {
+        ...rest,
+        sideHoleDiameterOuter: sideHoleDiameter,
+        sideHoleDiameterInner: sideHoleDiameter,
+      },
+    ]
+  })
+}
+
+export function deserializeConfig(config: LoadableDomeConfig): DomeState {
+  const sideHoleDiameterOuter =
+    config.version === 16 ? config.sideHoleDiameter : config.sideHoleDiameterOuter
+  const sideHoleDiameterInner =
+    config.version === 16 ? config.sideHoleDiameter : config.sideHoleDiameterInner
+
   return {
     sceneData: {
       diameter: config.diameter,
@@ -169,7 +209,8 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     toleranceLongitudinal: config.toleranceLongitudinal,
     toleranceTransverse: config.toleranceTransverse,
     centerHoleDiameter: config.centerHoleDiameter,
-    sideHoleDiameter: config.sideHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
     sideHoleDiameterOffset: config.sideHoleDiameterOffset,
     overshoot: config.overshoot,
     minSide: config.minSide,
@@ -177,7 +218,7 @@ export function deserializeConfig(config: DomeConfig): DomeState {
     vertexTransforms: new Map(config.vertexTransforms),
     edgeThickness: new Map(config.edgeThickness),
     vertexCornerLength: new Map(config.vertexCornerLength ?? []),
-    vertexFlangeParams: new Map(config.vertexFlangeParams ?? []),
+    vertexFlangeParams: new Map(migrateFlangeOverrides(config.vertexFlangeParams)),
     footParams: { ...DEFAULT_FOOT_PARAMS, ...config.footParams },
     footVertices: new Set(config.footVertices ?? []),
   }
@@ -189,12 +230,12 @@ export function saveConfigToLocalStorage(config: DomeConfig): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
 }
 
-export function loadConfigFromLocalStorage(): DomeConfig | null {
+export function loadConfigFromLocalStorage(): LoadableDomeConfig | null {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return null
   try {
-    const parsed = JSON.parse(raw) as DomeConfig
-    return parsed.version === 16 ? parsed : null
+    const parsed = JSON.parse(raw) as LoadableDomeConfig
+    return parsed.version === 16 || parsed.version === 17 ? parsed : null
   } catch {
     return null
   }
@@ -217,6 +258,6 @@ export function downloadConfigAsJson(config: DomeConfig, filename = 'dome-config
   downloadJson(config, filename)
 }
 
-export function readConfigFromFile(file: File): Promise<DomeConfig> {
-  return file.text().then((text) => JSON.parse(text) as DomeConfig)
+export function readConfigFromFile(file: File): Promise<LoadableDomeConfig> {
+  return file.text().then((text) => JSON.parse(text) as LoadableDomeConfig)
 }

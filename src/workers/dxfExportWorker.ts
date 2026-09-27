@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
-import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D } from '../lib/braces'
@@ -125,10 +125,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
   })
 
   req.vertices.forEach((vertex, i) => {
-    const boundary = computeFlangeBoundary2D(
-      { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
-      resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
-    )
+    const flangeParams = resolveFlangeParams(req.flangeParams, vertex.flangeOverrides)
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
@@ -136,20 +133,27 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       done: i + 1,
       total: req.vertices.length,
     } satisfies DxfExportWorkerMessage)
-    if (!boundary.main) return
-    try {
-      // The outer and inner plate of a vertex share this one shape.
-      // Which strut goes into each rectangular hole, in green along the hole.
-      const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => ({
-        text: `S${mark.edgeId}`,
-        x: mark.center[0],
-        y: mark.center[1],
-        angleDeg: mark.angleDeg,
-        height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
-      }))
-      parts.push({ name: `flange-${vertex.vertexId} (x2)`, kind: 'flange', loops: drawingToPolylines(boundary.main), helpers })
-    } catch (err) {
-      console.error(`Failed to read flange outline for vertex ${vertex.vertexId}`, err)
+
+    for (const side of ['outer', 'inner'] as const satisfies readonly FlangeSide[]) {
+      const boundary = computeFlangeBoundary2D(
+        { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
+        flangeParams,
+        side,
+      )
+      if (!boundary.main) continue
+      try {
+        // Which strut goes into each rectangular hole, in green along the hole.
+        const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => ({
+          text: `S${mark.edgeId}`,
+          x: mark.center[0],
+          y: mark.center[1],
+          angleDeg: mark.angleDeg,
+          height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
+        }))
+        parts.push({ name: `flange-${vertex.vertexId}-${side}`, kind: 'flange', loops: drawingToPolylines(boundary.main), helpers })
+      } catch (err) {
+        console.error(`Failed to read ${side} flange outline for vertex ${vertex.vertexId}`, err)
+      }
     }
   })
 

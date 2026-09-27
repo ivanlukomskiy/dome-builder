@@ -35,7 +35,8 @@ interface FlangeParams {
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
-  sideHoleDiameter: number
+  sideHoleDiameterOuter: number
+  sideHoleDiameterInner: number
   sideHoleDiameterOffset: number
   overshoot: number
   minSide: number
@@ -62,6 +63,7 @@ interface FootDebugParams {
 
 interface Params {
   vertexId: number
+  flangeSide: 'outer' | 'inner'
   edges: EdgeParams[]
   shared: SharedParams
   flange: FlangeParams
@@ -79,6 +81,7 @@ interface Params {
 // Flange section below to match whatever they were actually set to for this vertex.
 const DEFAULT_PARAMS: Params = {
   vertexId: 6,
+  flangeSide: 'outer',
   edges: [
     { edgeId: 15, neighborId: 8, thicknessMm: 30, offsetMm: 20.906422372020057, projectedAngleDeg: 78.97858388338848, hasFaceToNextEdge: false, faceIdToNextEdge: null },
     { edgeId: 63, neighborId: 26, thicknessMm: 30, offsetMm: 20.906422372020057, projectedAngleDeg: 150.29616749171055, hasFaceToNextEdge: true, faceIdToNextEdge: 37 },
@@ -96,7 +99,8 @@ const DEFAULT_PARAMS: Params = {
     toleranceLongitudinal: 0,
     toleranceTransverse: 0,
     centerHoleDiameter: 8,
-    sideHoleDiameter: 4,
+    sideHoleDiameterOuter: 4,
+    sideHoleDiameterInner: 4,
     sideHoleDiameterOffset: 6,
     overshoot: 2,
     minSide: 6,
@@ -194,6 +198,8 @@ export function FlangeShapeDebug() {
     setParams((prev) => ({ ...prev, shared: { ...prev.shared, [field]: value } }))
   const setFlange = (field: keyof FlangeParams) => (value: number) =>
     setParams((prev) => ({ ...prev, flange: { ...prev.flange, [field]: value } }))
+  const setFlangeSide = (value: Params['flangeSide']) =>
+    setParams((prev) => ({ ...prev, flangeSide: value }))
   const setFoot = <K extends keyof FootDebugParams>(field: K) => (value: FootDebugParams[K]) =>
     setParams((prev) => ({ ...prev, foot: { ...prev.foot, [field]: value } }))
   const setEdgeField = <K extends keyof EdgeParams>(index: number, field: K) => (value: EdgeParams[K]) =>
@@ -289,7 +295,7 @@ export function FlangeShapeDebug() {
             : undefined,
         }
 
-        const result = computeFlangeBoundary2D(vertexInput, params.flange)
+        const result = computeFlangeBoundary2D(vertexInput, params.flange, params.flangeSide)
         if (cancelled) return
 
         const main = result.main ? meshDrawing(result.main) : null
@@ -402,6 +408,16 @@ export function FlangeShapeDebug() {
         <section className="control-group">
           <h2>Flange</h2>
           <div className="transform-field">
+            <label>Side</label>
+            <select
+              value={params.flangeSide}
+              onChange={(event) => setFlangeSide(event.currentTarget.value as Params['flangeSide'])}
+            >
+              <option value="outer">Outer</option>
+              <option value="inner">Inner</option>
+            </select>
+          </div>
+          <div className="transform-field">
             <label>Tolerance longitudinal (mm)</label>
             <NumberField
               value={params.flange.toleranceLongitudinal}
@@ -427,12 +443,21 @@ export function FlangeShapeDebug() {
             />
           </div>
           <div className="transform-field">
-            <label>Side hole diameter (mm)</label>
+            <label>Side hole diameter outer (mm)</label>
             <NumberField
-              value={params.flange.sideHoleDiameter}
+              value={params.flange.sideHoleDiameterOuter}
               step={1}
               min={0}
-              onCommit={setFlange('sideHoleDiameter')}
+              onCommit={setFlange('sideHoleDiameterOuter')}
+            />
+          </div>
+          <div className="transform-field">
+            <label>Side hole diameter inner (mm)</label>
+            <NumberField
+              value={params.flange.sideHoleDiameterInner}
+              step={1}
+              min={0}
+              onCommit={setFlange('sideHoleDiameterInner')}
             />
           </div>
           <div className="transform-field">

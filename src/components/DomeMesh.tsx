@@ -14,7 +14,7 @@ import {
   type PreviewPartKind,
 } from '../lib/previewParts'
 import { createPreviewProfileRecorder, isPreviewProfilingEnabled } from '../lib/previewProfile'
-import type { FlangeShapeParams, FootParams } from '../lib/flangeGeometry'
+import type { FlangeShapeParams, FlangeSide, FootParams } from '../lib/flangeGeometry'
 import {
   flangeFrame,
   flangeMeshCache,
@@ -64,6 +64,8 @@ const EDGE_OVERRIDE_COLOR_REFERENCE = 300
 // A neutral steel-plate tone for flange solids, distinct from any strut color so the hub
 // hardware reads as its own part rather than blending into the beams it connects.
 const FLANGE_COLOR = new THREE.Color('#b0b4bc')
+const FLANGE_SIDES = ['outer', 'inner'] as const satisfies readonly FlangeSide[]
+const flangeMeshKey = (groupKey: string, side: FlangeSide) => `${groupKey}#${side}`
 // Marks a vertex (Edit) and its flanges (Preview) that have any override of their own (corner
 // length or flange parameters).
 const CORNER_OVERRIDE_COLOR = new THREE.Color('#22d3ee')
@@ -153,7 +155,8 @@ interface DomeMeshProps {
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
-  sideHoleDiameter: number
+  sideHoleDiameterOuter: number
+  sideHoleDiameterInner: number
   sideHoleDiameterOffset: number
   overshoot: number
   minSide: number
@@ -194,7 +197,8 @@ export function DomeMesh({
   toleranceLongitudinal,
   toleranceTransverse,
   centerHoleDiameter,
-  sideHoleDiameter,
+  sideHoleDiameterOuter,
+  sideHoleDiameterInner,
   sideHoleDiameterOffset,
   overshoot,
   minSide,
@@ -315,7 +319,8 @@ export function DomeMesh({
       toleranceLongitudinal,
       toleranceTransverse,
       centerHoleDiameter,
-      sideHoleDiameter,
+      sideHoleDiameterOuter,
+      sideHoleDiameterInner,
       sideHoleDiameterOffset,
       overshoot,
       minSide,
@@ -333,9 +338,9 @@ export function DomeMesh({
       flangeParams,
     }
 
-    // Flanges: hubs with identical inputs (up to rotation about their normal) share one built
-    // mesh, and meshes built earlier are reused as they are - see flangeInstances.ts. Only the
-    // groups without a cached mesh are sent to the workers.
+    // Flanges: hubs with identical inputs (up to rotation about their normal) share built
+    // side-specific meshes, and meshes built earlier are reused as they are - see flangeInstances.ts.
+    // Only the group sides without a cached mesh are sent to the workers.
     const flangeGroups = timedMain('groupFlanges', () =>
       groupFlanges(vertices, flangeSignatureContext(flangeParams, grooveDepth)),
     )
@@ -343,15 +348,23 @@ export function DomeMesh({
     const flangesToBuild: FlangeBuildJob[] = []
     let cachedVertexCount = 0
     for (const group of flangeGroups) {
-      const cached = flangeMeshCache.get(group.key)
-      if (cached) {
-        builtFlanges.set(group.key, cached)
-        cachedVertexCount += group.members.length
-      } else {
-        flangesToBuild.push({ key: group.key, vertex: group.representative.vertex })
+      for (const side of FLANGE_SIDES) {
+        const key = flangeMeshKey(group.key, side)
+        const cached = flangeMeshCache.get(key)
+        if (cached) {
+          builtFlanges.set(key, cached)
+          cachedVertexCount += group.members.length
+        } else {
+          flangesToBuild.push({ key, side, vertex: group.representative.vertex })
+        }
       }
     }
-    const flangeGroupByKey = new Map(flangeGroups.map((g) => [g.key, g]))
+    const flangeGroupByMeshKey = new Map<string, (typeof flangeGroups)[number]>()
+    for (const group of flangeGroups) {
+      for (const side of FLANGE_SIDES) {
+        flangeGroupByMeshKey.set(flangeMeshKey(group.key, side), group)
+      }
+    }
     const footJobs: FootBuildJob[] = vertices
       .filter((vertex) => vertex.foot !== undefined)
       .map((vertex) => ({ vertex }))
@@ -362,7 +375,7 @@ export function DomeMesh({
     // every vertex it stands for). Batches run concurrently, so each reports into shared counters.
     const progress = { struts: 0, flanges: cachedVertexCount, foot: 0 }
     const strutTotal = strutJobs.length
-    const flangeTotal = vertices.length
+    const flangeTotal = vertices.length * FLANGE_SIDES.length
     const footTotal = footJobs.length
     const emitProgress = () => {
       // Flange batches are scheduled first (they're the long ones), so show them while any remain.
@@ -463,10 +476,10 @@ export function DomeMesh({
       for (const jobs of chunk(flangesToBuild, flangeBatchSize)) {
         tasks.push(async () => {
           try {
-            const weights = jobs.map((job) => flangeGroupByKey.get(job.key)?.members.length ?? 1)
+            const weights = jobs.map((job) => flangeGroupByMeshKey.get(job.key)?.members.length ?? 1)
             const result = await runBatch({ strutJobs: [], flangeJobs: jobs, footJobs: [] }, 'flanges', weights)
             for (const { key, mesh } of result.flangeMeshes) {
-              const group = flangeGroupByKey.get(key)
+              const group = flangeGroupByMeshKey.get(key)
               if (!mesh || !group) continue
               const local: LocalFlange = { mesh, startAngleDeg: group.representative.startAngleDeg }
               builtFlanges.set(key, local)
@@ -522,7 +535,7 @@ export function DomeMesh({
           allBracePoints.push(...result.bracePoints)
         }
 
-        // Both plates of every hub: the group's mesh, turned to this vertex's orientation and
+        // Both plates of every hub: the group's side-specific mesh, turned to this vertex's orientation and
         // pushed out `flangeSpan` either way along its normal. Each plate is `grooveDepth` thick
         // and seated flush in the shoulder notch cut into the struts' own ends - one plate's outer
         // face level with the struts' own outer surface (halfWidth from the vertex), the other's
@@ -531,14 +544,18 @@ export function DomeMesh({
         timedMain('placeFlanges', () => {
           const flangeSpan = halfWidth - grooveDepth / 2
           for (const group of flangeGroups) {
-            const built = builtFlanges.get(group.key)
-            if (!built) continue
             for (const { vertex, startAngleDeg } of group.members) {
               const color =
                 vertex.cornerLengthOverride !== undefined || vertex.flangeOverrides !== undefined
                   ? CORNER_OVERRIDE_COLOR
                   : FLANGE_COLOR
-              for (const sign of [1, -1] as const) {
+              const placements: { side: FlangeSide; sign: 1 | -1 }[] = [
+                { side: 'outer', sign: 1 },
+                { side: 'inner', sign: -1 },
+              ]
+              for (const { side, sign } of placements) {
+                const built = builtFlanges.get(flangeMeshKey(group.key, side))
+                if (!built) continue
                 const placed = placeMesh(
                   built.mesh,
                   flangeFrame(vertex, startAngleDeg - built.startAngleDeg, sign * flangeSpan),
@@ -615,7 +632,8 @@ export function DomeMesh({
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
-    sideHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
     sideHoleDiameterOffset,
     overshoot,
     minSide,

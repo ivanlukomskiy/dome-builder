@@ -262,6 +262,22 @@ describe("computeFlangeBoundary2D", () => {
     expect(result.main).not.toBeNull();
   });
 
+  it("uses side-specific diameters for strut side bolt holes", () => {
+    const params = {
+      ...DEFAULT_FLANGE_SHAPE_PARAMS,
+      sideHoleDiameterOuter: 4,
+      sideHoleDiameterInner: 10,
+    };
+    const vertex = { vertexId: ACUTE_OPEN_WEDGE.vertexId, edges: ACUTE_OPEN_WEDGE.edges };
+    const outer = computeFlangeBoundary2D(vertex, params, "outer");
+    const inner = computeFlangeBoundary2D(vertex, params, "inner");
+    const outerHole = outer.helpers.find((h) => h.name.startsWith("side hole"))!;
+    const innerHole = inner.helpers.find((h) => h.name.startsWith("side hole"))!;
+
+    expect(areaOf(outerHole.drawing)).toBeCloseTo(Math.PI * 2 * 2, 3);
+    expect(areaOf(innerHole.drawing)).toBeCloseTo(Math.PI * 5 * 5, 3);
+  });
+
   // Vertex 0 alone (previous test above) doesn't crash, but the app hit "memory access out of
   // bounds" while building a *batch* of 12 vertices (including 0) in one worker/opencascade
   // instance - repeating the same, individually-fine vertex many times in a row, in this one
@@ -562,6 +578,22 @@ describe("foot", () => {
   it("leaves a vertex without a foot exactly as it was", () => {
     const edges = ACUTE_OPEN_WEDGE.edges;
     expect(computeFlangeOutline(edges, params, undefined)).toEqual(computeFlangeOutline(edges, params));
+  });
+
+  it("uses side-specific diameters for foot side bolt holes", () => {
+    const sideParams = {
+      ...params,
+      sideHoleDiameterOuter: 4,
+      sideHoleDiameterInner: 10,
+    };
+    const vertex = { vertexId: 2003, edges: ACUTE_OPEN_WEDGE.edges, foot: footAt(70.49) };
+    const outer = computeFlangeBoundary2D(vertex, sideParams, "outer");
+    const inner = computeFlangeBoundary2D(vertex, sideParams, "inner");
+    const outerHole = outer.helpers.find((h) => h.name === "foot side hole (+)")!;
+    const innerHole = inner.helpers.find((h) => h.name === "foot side hole (+)")!;
+
+    expect(areaOf(outerHole.drawing)).toBeCloseTo(Math.PI * 2 * 2, 3);
+    expect(areaOf(innerHole.drawing)).toBeCloseTo(Math.PI * 5 * 5, 3);
   });
 
   it("puts the side bolt holes on the foot's axis, either side of the rectangular hole", () => {

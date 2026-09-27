@@ -142,8 +142,10 @@ interface SidebarProps {
   onToleranceTransverseChange: (value: number) => void
   centerHoleDiameter: number
   onCenterHoleDiameterChange: (value: number) => void
-  sideHoleDiameter: number
-  onSideHoleDiameterChange: (value: number) => void
+  sideHoleDiameterOuter: number
+  onSideHoleDiameterOuterChange: (value: number) => void
+  sideHoleDiameterInner: number
+  onSideHoleDiameterInnerChange: (value: number) => void
   sideHoleDiameterOffset: number
   onSideHoleDiameterOffsetChange: (value: number) => void
   overshoot: number
@@ -365,8 +367,10 @@ export function Sidebar({
   onToleranceTransverseChange,
   centerHoleDiameter,
   onCenterHoleDiameterChange,
-  sideHoleDiameter,
-  onSideHoleDiameterChange,
+  sideHoleDiameterOuter,
+  onSideHoleDiameterOuterChange,
+  sideHoleDiameterInner,
+  onSideHoleDiameterInnerChange,
   sideHoleDiameterOffset,
   onSideHoleDiameterOffsetChange,
   overshoot,
@@ -403,7 +407,8 @@ export function Sidebar({
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
-    sideHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
     sideHoleDiameterOffset,
     overshoot,
     minSide,
@@ -742,12 +747,21 @@ export function Sidebar({
             />
           </div>
           <div className="transform-field">
-            <label>{t('Side hole diameter (mm)')}</label>
+            <label>{t('Side hole diameter outer (mm)')}</label>
             <NumberField
-              value={sideHoleDiameter}
+              value={sideHoleDiameterOuter}
               step={1}
               min={0}
-              onCommit={onSideHoleDiameterChange}
+              onCommit={onSideHoleDiameterOuterChange}
+            />
+          </div>
+          <div className="transform-field">
+            <label>{t('Side hole diameter inner (mm)')}</label>
+            <NumberField
+              value={sideHoleDiameterInner}
+              step={1}
+              min={0}
+              onCommit={onSideHoleDiameterInnerChange}
             />
           </div>
           <div className="transform-field">

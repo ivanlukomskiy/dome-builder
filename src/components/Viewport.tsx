@@ -38,7 +38,8 @@ interface ViewportProps {
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
-  sideHoleDiameter: number
+  sideHoleDiameterOuter: number
+  sideHoleDiameterInner: number
   sideHoleDiameterOffset: number
   overshoot: number
   minSide: number
@@ -78,7 +79,8 @@ export function Viewport({
   toleranceLongitudinal,
   toleranceTransverse,
   centerHoleDiameter,
-  sideHoleDiameter,
+  sideHoleDiameterOuter,
+  sideHoleDiameterInner,
   sideHoleDiameterOffset,
   overshoot,
   minSide,
@@ -210,7 +212,8 @@ export function Viewport({
           toleranceLongitudinal={toleranceLongitudinal}
           toleranceTransverse={toleranceTransverse}
           centerHoleDiameter={centerHoleDiameter}
-          sideHoleDiameter={sideHoleDiameter}
+          sideHoleDiameterOuter={sideHoleDiameterOuter}
+          sideHoleDiameterInner={sideHoleDiameterInner}
           sideHoleDiameterOffset={sideHoleDiameterOffset}
           overshoot={overshoot}
           minSide={minSide}

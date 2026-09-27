@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
-import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams } from '../lib/flangeGeometry'
+import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
 import { computeFootPartBoundary2D } from '../lib/footGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
@@ -45,8 +45,8 @@ export interface PreviewBuildRequest {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
-  // Flanges to build, one per group of identical hubs (see flangeInstances.ts) - the main thread
-  // places the resulting mesh at every vertex of the group.
+  // Flanges to build, one per side of each group of identical hubs (see flangeInstances.ts) - the
+  // main thread places the resulting mesh at every vertex of the group.
   flangeJobs: FlangeBuildJob[]
   // Separate foot parts, one at each foot vertex. These are built directly in world space because
   // their plane depends on the vertex normal and projected foot axis.
@@ -59,6 +59,7 @@ export interface PreviewBuildRequest {
 export interface FlangeBuildJob {
   // Signature of the group this flange stands for - echoed back so the main thread can match it.
   key: string
+  side: FlangeSide
   vertex: VertexEdgesInfo
 }
 
@@ -252,6 +253,7 @@ async function buildPreview(
       computeFlangeBoundary2D(
         { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
         resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
+        job.side,
       ),
     )
     const flangeBoundaryMs = lastMs()

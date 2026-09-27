@@ -86,7 +86,8 @@ export interface PreviewShapeParams {
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
-  sideHoleDiameter: number
+  sideHoleDiameterOuter: number
+  sideHoleDiameterInner: number
   sideHoleDiameterOffset: number
   overshoot: number
   minSide: number
@@ -275,8 +276,11 @@ function App() {
   const [centerHoleDiameter, setCenterHoleDiameter] = useState(
     initial?.centerHoleDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
   )
-  const [sideHoleDiameter, setSideHoleDiameter] = useState(
-    initial?.sideHoleDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameter,
+  const [sideHoleDiameterOuter, setSideHoleDiameterOuter] = useState(
+    initial?.sideHoleDiameterOuter ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter,
+  )
+  const [sideHoleDiameterInner, setSideHoleDiameterInner] = useState(
+    initial?.sideHoleDiameterInner ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner,
   )
   const [sideHoleDiameterOffset, setSideHoleDiameterOffset] = useState(
     initial?.sideHoleDiameterOffset ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
@@ -305,7 +309,8 @@ function App() {
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
-    sideHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
     sideHoleDiameterOffset,
     overshoot,
     minSide,
@@ -325,7 +330,8 @@ function App() {
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
-    sideHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
     sideHoleDiameterOffset,
     overshoot,
     minSide,
@@ -720,7 +726,8 @@ function App() {
     setToleranceLongitudinal(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal)
     setToleranceTransverse(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse)
     setCenterHoleDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter)
-    setSideHoleDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameter)
+    setSideHoleDiameterOuter(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter)
+    setSideHoleDiameterInner(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner)
     setSideHoleDiameterOffset(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset)
     setOvershoot(DEFAULT_FLANGE_SHAPE_PARAMS.overshoot)
     setMinSide(DEFAULT_FLANGE_SHAPE_PARAMS.minSide)
@@ -739,7 +746,8 @@ function App() {
       toleranceLongitudinal: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
       toleranceTransverse: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
       centerHoleDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
-      sideHoleDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameter,
+      sideHoleDiameterOuter: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter,
+      sideHoleDiameterInner: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner,
       sideHoleDiameterOffset: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
       overshoot: DEFAULT_FLANGE_SHAPE_PARAMS.overshoot,
       minSide: DEFAULT_FLANGE_SHAPE_PARAMS.minSide,
@@ -769,7 +777,8 @@ function App() {
     setToleranceLongitudinal(state.toleranceLongitudinal)
     setToleranceTransverse(state.toleranceTransverse)
     setCenterHoleDiameter(state.centerHoleDiameter)
-    setSideHoleDiameter(state.sideHoleDiameter)
+    setSideHoleDiameterOuter(state.sideHoleDiameterOuter)
+    setSideHoleDiameterInner(state.sideHoleDiameterInner)
     setSideHoleDiameterOffset(state.sideHoleDiameterOffset)
     setOvershoot(state.overshoot)
     setMinSide(state.minSide)
@@ -788,7 +797,8 @@ function App() {
       toleranceLongitudinal: state.toleranceLongitudinal,
       toleranceTransverse: state.toleranceTransverse,
       centerHoleDiameter: state.centerHoleDiameter,
-      sideHoleDiameter: state.sideHoleDiameter,
+      sideHoleDiameterOuter: state.sideHoleDiameterOuter,
+      sideHoleDiameterInner: state.sideHoleDiameterInner,
       sideHoleDiameterOffset: state.sideHoleDiameterOffset,
       overshoot: state.overshoot,
       minSide: state.minSide,
@@ -825,7 +835,8 @@ function App() {
       toleranceLongitudinal,
       toleranceTransverse,
       centerHoleDiameter,
-      sideHoleDiameter,
+      sideHoleDiameterOuter,
+      sideHoleDiameterInner,
       sideHoleDiameterOffset,
       overshoot,
       minSide,
@@ -856,7 +867,8 @@ function App() {
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
-    sideHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
     sideHoleDiameterOffset,
     overshoot,
     minSide,
@@ -933,7 +945,8 @@ function App() {
         toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
         toleranceTransverse: appliedPreviewParams.toleranceTransverse,
         centerHoleDiameter: appliedPreviewParams.centerHoleDiameter,
-        sideHoleDiameter: appliedPreviewParams.sideHoleDiameter,
+        sideHoleDiameterOuter: appliedPreviewParams.sideHoleDiameterOuter,
+        sideHoleDiameterInner: appliedPreviewParams.sideHoleDiameterInner,
         sideHoleDiameterOffset: appliedPreviewParams.sideHoleDiameterOffset,
         overshoot: appliedPreviewParams.overshoot,
         minSide: appliedPreviewParams.minSide,
@@ -1087,8 +1100,10 @@ function App() {
         onToleranceTransverseChange={setToleranceTransverse}
         centerHoleDiameter={centerHoleDiameter}
         onCenterHoleDiameterChange={setCenterHoleDiameter}
-        sideHoleDiameter={sideHoleDiameter}
-        onSideHoleDiameterChange={setSideHoleDiameter}
+        sideHoleDiameterOuter={sideHoleDiameterOuter}
+        onSideHoleDiameterOuterChange={setSideHoleDiameterOuter}
+        sideHoleDiameterInner={sideHoleDiameterInner}
+        onSideHoleDiameterInnerChange={setSideHoleDiameterInner}
         sideHoleDiameterOffset={sideHoleDiameterOffset}
         onSideHoleDiameterOffsetChange={setSideHoleDiameterOffset}
         overshoot={overshoot}
@@ -1136,7 +1151,8 @@ function App() {
         toleranceLongitudinal={appliedPreviewParams.toleranceLongitudinal}
         toleranceTransverse={appliedPreviewParams.toleranceTransverse}
         centerHoleDiameter={appliedPreviewParams.centerHoleDiameter}
-        sideHoleDiameter={appliedPreviewParams.sideHoleDiameter}
+        sideHoleDiameterOuter={appliedPreviewParams.sideHoleDiameterOuter}
+        sideHoleDiameterInner={appliedPreviewParams.sideHoleDiameterInner}
         sideHoleDiameterOffset={appliedPreviewParams.sideHoleDiameterOffset}
         overshoot={appliedPreviewParams.overshoot}
         minSide={appliedPreviewParams.minSide}
