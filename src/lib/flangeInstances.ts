@@ -8,7 +8,7 @@ import type { FlangeFoot } from './flangeGeometry'
 //   1. group vertices by a rotation-invariant signature of their flange inputs,
 //   2. build ONE mesh per group, in a canonical local frame (origin at 0, normal +z, xDir +x,
 //      extrusion centered on z = 0 - see previewBuilder.worker.ts),
-//   3. place that mesh at every vertex of the group (both plates of the pair) with a rigid
+//   3. place those meshes at every vertex of the group with rigid
 //      transform - pure JS, no opencascade - and
 //   4. remember the local meshes across rebuilds (flangeMeshCache), so changing something that
 //      doesn't affect the flanges doesn't rebuild them at all.
