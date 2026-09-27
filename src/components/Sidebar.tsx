@@ -899,7 +899,7 @@ export function Sidebar({
               ? dxfExportProgress.phase === 'writing'
                 ? t('Writing DXF…')
                 : t('DXF: building {phase} — {done} / {total}', { phase: t(dxfExportProgress.phase), done: dxfExportProgress.done, total: dxfExportProgress.total })
-              : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its ID in red. Green labels show how parts connect: on flanges the strut (S) in each hole, on struts the vertex (V) at each end and the brace (B) at its center, on braces the struts (S) at each end.')}
+              : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its localized part ID in red. Green labels show matching localized part IDs where parts connect.')}
           </p>
         </section>
       )}

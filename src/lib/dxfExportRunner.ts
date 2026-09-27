@@ -4,6 +4,9 @@ import type { RunStepExportParams } from './stepExportRunner'
 import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, projectToFrame2D, type BracePoints } from './braceSolid'
 import { layoutDxfParts, writeDxf, type DxfHelperText, type DxfPart } from './dxf'
 import type { Vec3 } from './braceSolid'
+import { computeBraceEndpoints } from './braces'
+import type { Lang } from './i18n'
+import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './partNames'
 import type { DxfExportPhase, DxfExportRequest, DxfExportWorkerMessage } from '../workers/dxfExportWorker'
 
 // Same per-worker item cap as the STEP export and the live Preview build, for the same reason.
@@ -25,6 +28,101 @@ export interface DxfExportProgress {
 }
 
 type Shared = Omit<DxfExportRequest, 'requestId' | 'strutJobs' | 'vertices'>
+
+type Tuple3 = [number, number, number]
+
+function add(a: Tuple3, b: Tuple3): Tuple3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+function sub(a: Tuple3, b: Tuple3): Tuple3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+function scale(v: Tuple3, s: number): Tuple3 {
+  return [v[0] * s, v[1] * s, v[2] * s]
+}
+
+function length(v: Tuple3): number {
+  return Math.hypot(v[0], v[1], v[2])
+}
+
+function normalize(v: Tuple3): Tuple3 {
+  const len = length(v)
+  return len > 0 ? scale(v, 1 / len) : [0, 0, 0]
+}
+
+function midpoint(a: Tuple3, b: Tuple3): Tuple3 {
+  return scale(add(a, b), 0.5)
+}
+
+function footPartCenter(vertex: VertexEdgesInfo): Tuple3 | null {
+  const foot = vertex.foot
+  if (!foot) return null
+  const e1 = normalize(vertex.tangentPlane.e1)
+  const e2 = normalize(vertex.tangentPlane.e2)
+  const angle = (foot.projectedAngleDeg * Math.PI) / 180
+  const axis = normalize(add(scale(e1, Math.cos(angle)), scale(e2, Math.sin(angle))))
+  if (length(axis) < 1e-12) return null
+  return add(vertex.position, scale(axis, foot.holeOffset + foot.thickness / 2))
+}
+
+function buildDxfPartNames(
+  params: RunStepExportParams,
+  strutEntries: StrutGeometryEntry[],
+  vertices: VertexEdgesInfo[],
+  halfWidth: number,
+  lang: Lang,
+): PartNameMaps {
+  const flangeSpan = halfWidth - params.grooveDepth / 2
+  const flanges = vertices.flatMap((vertex) => {
+    const normal = normalize(vertex.tangentPlane.normal)
+    return [
+      { vertexId: vertex.vertexId, side: 'outer' as const, center: add(vertex.position, scale(normal, flangeSpan)) },
+      { vertexId: vertex.vertexId, side: 'inner' as const, center: add(vertex.position, scale(normal, -flangeSpan)) },
+    ]
+  })
+
+  const feet = vertices.flatMap((vertex) => {
+    const center = footPartCenter(vertex)
+    return center ? [{ id: vertex.vertexId, center }] : []
+  })
+
+  const bracePlates = strutEntries.flatMap((job) => {
+    const posA = job.posA
+    const posB = job.posB
+    const axisAB = normalize(sub(posB, posA))
+    return [
+      ...job.braces.a.slice(0, 1).map((brace) => ({
+        id: bracePlateNameKey(brace.braceId, job.index, 'A'),
+        center: add(posA, scale(axisAB, brace.distanceFromVertex)),
+      })),
+      ...job.braces.b.slice(0, 1).map((brace) => ({
+        id: bracePlateNameKey(brace.braceId, job.index, 'B'),
+        center: add(posB, scale(axisAB, -brace.distanceFromVertex)),
+      })),
+    ]
+  })
+
+  const braces = Array.from(params.data.braces.entries()).flatMap(([braceId, brace]) => {
+    const endpoints = computeBraceEndpoints(brace, params.data.edges, (vertexId) => params.transformedVertices.get(vertexId)!)
+    if (!endpoints) return []
+    const a = endpoints[0].toArray() as Tuple3
+    const b = endpoints[1].toArray() as Tuple3
+    return [{ id: braceId, center: midpoint(a, b) }]
+  })
+
+  return createPartNameMaps(
+    {
+      struts: strutEntries.map((job) => ({ id: job.index, center: midpoint(job.posA, job.posB) })),
+      flanges,
+      feet,
+      bracePlates,
+      braces,
+    },
+    lang,
+  )
+}
 
 function runBatch(
   strutJobs: StrutGeometryEntry[],
@@ -54,15 +152,17 @@ function runBatch(
   })
 }
 
-// Builds a single DXF sheet with the flat 2D outline of every visible strut, flange plate, brace
-// plate and brace (each with its ID as a label in its own color - see dxf.ts), scaled by
+// Builds a single DXF sheet with the flat 2D outline of every visible strut, flange plate, foot,
+// brace plate and brace (each with its ID as a label in its own color - see dxf.ts), scaled by
 // `params.scale`. `isCancelled` is polled between batches. Returns null if cancelled.
 export async function runDxfExport(
   params: RunStepExportParams,
+  lang: Lang,
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
 ): Promise<Blob | null> {
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
+  const names = buildDxfPartNames(params, strutEntries, vertices, halfWidth, lang)
 
   const shared: Shared = {
     halfWidth,
@@ -72,6 +172,7 @@ export async function runDxfExport(
     millingDiameter: params.millingDiameter,
     chamferLength: params.chamferLength,
     flangeParams: params.flangeParams,
+    names,
   }
 
   let nextRequestId = 0
@@ -120,8 +221,8 @@ export async function runDxfExport(
       return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
     }
     const ends: [string, [number, number]][] = [
-      [`S${body.edgeIdA}`, mid(body.a)],
-      [`S${body.edgeIdB}`, mid(body.b)],
+      [names.struts[body.edgeIdA] ?? `S${body.edgeIdA}`, mid(body.a)],
+      [names.struts[body.edgeIdB] ?? `S${body.edgeIdB}`, mid(body.b)],
     ]
     const dir: [number, number] = [ends[1][1][0] - ends[0][1][0], ends[1][1][1] - ends[0][1][1]]
     const len = Math.hypot(dir[0], dir[1]) || 1
@@ -139,7 +240,7 @@ export async function runDxfExport(
       }
     })
     parts.push({
-      name: `brace-${body.braceId}`,
+      name: names.braces[body.braceId] ?? `brace-${body.braceId}`,
       kind: 'brace',
       loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
       helpers,

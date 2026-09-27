@@ -55,7 +55,7 @@ describe('layoutDxfParts', () => {
     const b = bbox(strut.loops)
     expect(b.maxX - b.minX).toBeCloseTo(200, 5)
     expect(b.maxY - b.minY).toBeCloseTo(25, 5)
-    expect(placed.map((p) => p.kind)).toEqual(['strut', 'strut', 'flange', 'brace'])
+    expect(placed.map((p) => p.kind)).toEqual(['flange', 'strut', 'strut', 'brace'])
   })
 
   it('puts each label under its part', () => {

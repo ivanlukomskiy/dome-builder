@@ -2,12 +2,14 @@
 import * as THREE from 'three'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
+import { computeFootPartBoundary2D } from '../lib/footGeometry'
 import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D } from '../lib/braces'
 import type { BracePoints } from '../lib/braceSolid'
 import { drawingToPolylines } from '../lib/dxfExport'
 import type { DxfHelperText, DxfPart } from '../lib/dxf'
+import { bracePlateNameKey, flangeNameKey, type PartNameMaps } from '../lib/partNames'
 
 // The DXF-export counterpart to stepExportWorker.ts: builds the same 2D drawings (strut outlines,
 // flange plates, brace plates) but, instead of extruding them, reads their outlines back as
@@ -28,6 +30,7 @@ export interface DxfExportRequest {
   chamferLength: number
   vertices: VertexEdgesInfo[]
   flangeParams: FlangeShapeParams
+  names: PartNameMaps
 }
 
 export type DxfExportPhase = 'struts' | 'flanges'
@@ -42,6 +45,11 @@ const HELPER_HEIGHT = 5
 
 function axisAngleDeg(axis: [number, number]): number {
   return (Math.atan2(axis[1], axis[0]) * 180) / Math.PI
+}
+
+function polar2(angleDeg: number, radius: number): [number, number] {
+  const angle = (angleDeg * Math.PI) / 180
+  return [Math.cos(angle) * radius, Math.sin(angle) * radius]
 }
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
@@ -89,12 +97,24 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         const helpers: DxfHelperText[] = []
         for (const mark of boundary.endMarks) {
           const vertexId = mark.end === 'A' ? job.vertexA : job.vertexB
-          helpers.push({ text: `V${vertexId}`, x: mark.point[0], y: mark.point[1], angleDeg: axisAngleDeg(mark.axis), height: HELPER_HEIGHT })
+          helpers.push({
+            text: req.names.flangePairs[vertexId] ?? `V${vertexId}`,
+            x: mark.point[0],
+            y: mark.point[1],
+            angleDeg: axisAngleDeg(mark.axis),
+            height: HELPER_HEIGHT,
+          })
         }
         for (const mark of boundary.braceMarks) {
-          helpers.push({ text: `B${mark.braceId}`, x: mark.point[0], y: mark.point[1], angleDeg: axisAngleDeg(mark.axis), height: HELPER_HEIGHT })
+          helpers.push({
+            text: req.names.braces[mark.braceId] ?? `B${mark.braceId}`,
+            x: mark.point[0],
+            y: mark.point[1],
+            angleDeg: axisAngleDeg(mark.axis),
+            height: HELPER_HEIGHT,
+          })
         }
-        parts.push({ name: `strut-${job.index}`, kind: 'strut', loops: drawingToPolylines(boundary.main), helpers })
+        parts.push({ name: req.names.struts[job.index] ?? `strut-${job.index}`, kind: 'strut', loops: drawingToPolylines(boundary.main), helpers })
       }
     } catch (err) {
       console.error(`Failed to read strut outline for edge ${job.index}`, err)
@@ -114,7 +134,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       if (!plate) continue
       try {
         parts.push({
-          name: `brace-plate-${brace.braceId}-strut-${job.index}-${end}`,
+          name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)] ?? `brace-plate-${brace.braceId}-strut-${job.index}-${end}`,
           kind: 'brace-plate',
           loops: drawingToPolylines(plate),
         })
@@ -144,15 +164,49 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       try {
         // Which strut goes into each rectangular hole, in green along the hole.
         const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => ({
-          text: `S${mark.edgeId}`,
+          text: req.names.struts[mark.edgeId] ?? `S${mark.edgeId}`,
           x: mark.center[0],
           y: mark.center[1],
           angleDeg: mark.angleDeg,
           height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
         }))
-        parts.push({ name: `flange-${vertex.vertexId}-${side}`, kind: 'flange', loops: drawingToPolylines(boundary.main), helpers })
+        if (vertex.foot) {
+          const [x, y] = polar2(vertex.foot.projectedAngleDeg, vertex.foot.holeOffset + vertex.foot.thickness / 2)
+          helpers.push({
+            text: req.names.feet[vertex.vertexId] ?? `F${vertex.vertexId}`,
+            x,
+            y,
+            angleDeg: vertex.foot.projectedAngleDeg,
+            height: Math.min(HELPER_HEIGHT, vertex.foot.grooveLength * 0.7),
+          })
+        }
+        parts.push({
+          name: req.names.flanges[flangeNameKey(vertex.vertexId, side)] ?? `flange-${vertex.vertexId}-${side}`,
+          kind: 'flange',
+          loops: drawingToPolylines(boundary.main),
+          helpers,
+        })
       } catch (err) {
         console.error(`Failed to read ${side} flange outline for vertex ${vertex.vertexId}`, err)
+      }
+    }
+
+    const foot = vertex.foot
+    if (foot) {
+      try {
+        const boundary = computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth)
+        if (boundary.main) {
+          parts.push({
+            name: req.names.feet[vertex.vertexId] ?? `foot-${vertex.vertexId}`,
+            kind: 'foot',
+            loops: drawingToPolylines(boundary.main),
+            helpers: req.names.flangePairs[vertex.vertexId]
+              ? [{ text: req.names.flangePairs[vertex.vertexId], x: 0, y: 0, angleDeg: 0, height: HELPER_HEIGHT }]
+              : undefined,
+          })
+        }
+      } catch (err) {
+        console.error(`Failed to read foot outline for vertex ${vertex.vertexId}`, err)
       }
     }
   })

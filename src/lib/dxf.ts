@@ -5,7 +5,7 @@ import type { DxfPolyline, DxfVertex } from './dxfExport'
 // only, no handles or subclass markers - which every CAD/CAM package still opens).
 // Pure math and string building: no replicad, so it runs anywhere and is unit-tested.
 
-export type DxfPartKind = 'strut' | 'flange' | 'brace-plate' | 'brace'
+export type DxfPartKind = 'strut' | 'flange' | 'foot' | 'brace-plate' | 'brace'
 
 // One flat part: its outlines (outer boundary and holes) in its own 2D coordinates, and the ID
 // it is labeled with.
@@ -40,6 +40,7 @@ export interface PlacedDxfPart extends DxfPart {
 export const DXF_LAYERS: { name: string; color: number }[] = [
   { name: 'STRUTS', color: 7 },
   { name: 'FLANGES', color: 7 },
+  { name: 'FOOT', color: 7 },
   { name: 'BRACE_PLATES', color: 7 },
   { name: 'BRACES', color: 7 },
   { name: 'LABELS', color: 1 },
@@ -49,12 +50,13 @@ export const DXF_LAYERS: { name: string; color: number }[] = [
 const LAYER_OF_KIND: Record<DxfPartKind, string> = {
   strut: 'STRUTS',
   flange: 'FLANGES',
+  foot: 'FOOT',
   'brace-plate': 'BRACE_PLATES',
   brace: 'BRACES',
 }
 
 // Order the kinds appear on the sheet in (each kind starts a fresh row).
-const KIND_ORDER: DxfPartKind[] = ['strut', 'flange', 'brace-plate', 'brace']
+const KIND_ORDER: DxfPartKind[] = ['flange', 'strut', 'foot', 'brace-plate', 'brace']
 
 export interface DxfLayoutOptions {
   // Uniform scale applied to every part (and to the label size and gaps, so the sheet stays

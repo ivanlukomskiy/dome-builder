@@ -57,6 +57,7 @@ import {
 } from './lib/flangeGeometry'
 import { runStepAssemblyExport, runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
+import { useI18n } from './lib/i18n'
 import { useHistory } from './lib/useHistory'
 import {
   clampPartTransparency,
@@ -138,6 +139,7 @@ const EMPTY_VERTEX_CORNER_LENGTH: ReadonlyMap<number, number> = new Map()
 const EMPTY_VERTEX_FLANGE_PARAMS: ReadonlyMap<number, Partial<FlangeShapeParams>> = new Map()
 
 function App() {
+  const { lang } = useI18n()
   // Restored once, on first render, from whatever was auto-saved last time (see the autosave
   // effect below); null if there's nothing saved, in which case every field below falls back
   // to its hardcoded default and the app opens on the "New" tab.
@@ -996,7 +998,7 @@ function App() {
     if (dxfExportProgress) return
     setDxfExportProgress({ phase: 'struts', done: 0, total: 0 })
     try {
-      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => false)
+      const blob = await runDxfExport(buildExportParams(), lang, setDxfExportProgress, () => false)
       if (blob) downloadBlob(blob, 'dome-parts.dxf')
     } catch (err) {
       console.error('Failed to export DXF', err)
