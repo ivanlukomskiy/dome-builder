@@ -36,8 +36,7 @@ describe('layoutDxfParts', () => {
     const placed = layoutDxfParts(parts, { scale: 1 })
     const boxes = placed.map((p) => {
       const b = bbox(p.loops)
-      // The part plus the label strip under it.
-      return { name: p.name, minX: b.minX, maxX: b.maxX, minY: p.label.y, maxY: b.maxY }
+      return { name: p.name, minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY }
     })
     for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) {
@@ -58,9 +57,13 @@ describe('layoutDxfParts', () => {
     expect(placed.map((p) => p.kind)).toEqual(['flange', 'strut', 'strut', 'brace'])
   })
 
-  it('puts each label under its part', () => {
+  it('puts each label on its part', () => {
     const [first] = layoutDxfParts(parts, { scale: 1 })
-    expect(first.label.y).toBeLessThan(bbox(first.loops).minY)
+    const b = bbox(first.loops)
+    expect(first.label.x).toBeGreaterThan(b.minX)
+    expect(first.label.x).toBeLessThan(b.maxX)
+    expect(first.label.y).toBeGreaterThan(b.minY)
+    expect(first.label.y).toBeLessThan(b.maxY)
   })
 
   it('drops parts with no geometry', () => {
@@ -89,9 +92,8 @@ describe('arcs', () => {
     const [placed] = layoutDxfParts([halfDisc], { scale: 2 })
     const b = bbox(placed.loops)
     expect(b.maxX - b.minX).toBeCloseTo(20, 4)
-    // The arc bulges 5 mm (10 scaled) below the axis, so the part is lifted by that much above its
-    // label strip (8 * 2 * 1.8 tall) - the axis vertices aren't its lowest point.
-    expect(b.minY).toBeCloseTo(8 * 2 * 1.8 + 10, 3)
+    // The arc bulges 5 mm (10 scaled) below the axis - the axis vertices aren't its lowest point.
+    expect(b.minY).toBeCloseTo(10, 3)
     expect(placed.loops[0].vertices[1].bulge).toBe(-1)
   })
 
@@ -109,6 +111,8 @@ describe('writeDxf', () => {
     expect(text.split('\nPOLYLINE\n').length - 1).toBe(1)
     expect(text.split('\nVERTEX\n').length - 1).toBe(4)
     expect(text.includes('\nstrut-7\n')).toBe(true)
+    expect(text.includes('\n72\n1\n')).toBe(true)
+    expect(text.includes('\n73\n2\n')).toBe(true)
     // Labels sit on their own layer, defined with a different color (red) than the outlines.
     expect(text.includes('LAYER\n2\nLABELS\n70\n0\n62\n1\n')).toBe(true)
     expect(text.includes('LAYER\n2\nSTRUTS\n70\n0\n62\n7\n')).toBe(true)

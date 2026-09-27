@@ -30,7 +30,7 @@ export interface DxfHelperText {
 
 export interface PlacedDxfPart extends DxfPart {
   helpers: DxfHelperText[]
-  // Label position (left/baseline) and height, in sheet coordinates.
+  // Label center and height, in sheet coordinates.
   label: { x: number; y: number; height: number }
 }
 
@@ -129,13 +129,12 @@ function transformLoops(loops: DxfPolyline[], dx: number, dy: number, scale: num
 }
 
 // Arranges the parts on one sheet: scaled, without rotation, in rows (one kind per row group, in
-// KIND_ORDER, IDs ascending as given), each part with its label just under it. Parts with no
+// KIND_ORDER, IDs ascending as given), each part with its label centered on it. Parts with no
 // geometry are dropped.
 export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): PlacedDxfPart[] {
   const { scale } = options
   const labelHeight = LABEL_HEIGHT * scale
   const gap = GAP * scale
-  const labelBlock = labelHeight * 1.8
 
   interface Item {
     part: DxfPart
@@ -165,7 +164,7 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
   }
   items.sort((a, b) => KIND_ORDER.indexOf(a.part.kind) - KIND_ORDER.indexOf(b.part.kind))
 
-  const totalArea = items.reduce((sum, it) => sum + (it.slotWidth + gap) * (it.height + labelBlock + gap), 0)
+  const totalArea = items.reduce((sum, it) => sum + (it.slotWidth + gap) * (it.height + gap), 0)
   const widest = items.reduce((m, it) => Math.max(m, it.slotWidth), 0)
   const rowWidth =
     options.maxRowWidth !== undefined
@@ -187,15 +186,16 @@ export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): Pla
       rowHeight = 0
     }
     rowKind = item.part.kind
+    const slotInset = (item.slotWidth - item.width) / 2
 
     placed.push({
       ...item.part,
-      loops: transformLoops(item.loops, x, rowY + labelBlock, 1),
-      helpers: item.helpers.map((h) => ({ ...h, x: h.x + x, y: h.y + rowY + labelBlock })),
-      label: { x, y: rowY + labelHeight * 0.4, height: labelHeight },
+      loops: transformLoops(item.loops, x + slotInset, rowY, 1),
+      helpers: item.helpers.map((h) => ({ ...h, x: h.x + x + slotInset, y: h.y + rowY })),
+      label: { x: x + slotInset + item.width / 2, y: rowY + item.height / 2, height: labelHeight },
     })
     x += item.slotWidth + gap
-    rowHeight = Math.max(rowHeight, item.height + labelBlock)
+    rowHeight = Math.max(rowHeight, item.height)
   }
   return placed
 }
@@ -253,7 +253,12 @@ export function writeDxf(parts: PlacedDxfPart[]): string {
       pair(20, num(part.label.y)) +
       pair(30, 0) +
       pair(40, num(part.label.height)) +
-      pair(1, part.name)
+      pair(1, part.name) +
+      pair(72, 1) +
+      pair(11, num(part.label.x)) +
+      pair(21, num(part.label.y)) +
+      pair(31, 0) +
+      pair(73, 2)
     for (const h of part.helpers) {
       // Centered on its point (horizontal/vertical alignment 1/2, whose reference point is the
       // 11/21 pair), turned so it never reads upside down.

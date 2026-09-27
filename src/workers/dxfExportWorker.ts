@@ -52,6 +52,23 @@ function polar2(angleDeg: number, radius: number): [number, number] {
   return [Math.cos(angle) * radius, Math.sin(angle) * radius]
 }
 
+function add2(a: [number, number], b: [number, number]): [number, number] {
+  return [a[0] + b[0], a[1] + b[1]]
+}
+
+function scale2(v: [number, number], s: number): [number, number] {
+  return [v[0] * s, v[1] * s]
+}
+
+function rightOf(axis: [number, number]): [number, number] {
+  return [axis[1], -axis[0]]
+}
+
+function labelBeside(center: [number, number], angleDeg: number, distance: number): [number, number] {
+  const offset = polar2(angleDeg + 90, distance)
+  return add2(center, offset)
+}
+
 function toVector3(t: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(t[0], t[1], t[2])
 }
@@ -97,11 +114,23 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         const helpers: DxfHelperText[] = []
         for (const mark of boundary.endMarks) {
           const vertexId = mark.end === 'A' ? job.vertexA : job.vertexB
+          const tabOffset = Math.max(req.halfWidth - req.grooveDepth / 2, HELPER_HEIGHT)
+          const side = scale2(rightOf(mark.axis), mark.end === 'A' ? 1 : -1)
+          const outer = add2(mark.point, scale2(side, tabOffset))
+          const inner = add2(mark.point, scale2(side, -tabOffset))
+          const angleDeg = axisAngleDeg(mark.axis)
           helpers.push({
-            text: req.names.flangePairs[vertexId] ?? `V${vertexId}`,
-            x: mark.point[0],
-            y: mark.point[1],
-            angleDeg: axisAngleDeg(mark.axis),
+            text: req.names.flanges[flangeNameKey(vertexId, 'outer')] ?? `FE${vertexId}`,
+            x: outer[0],
+            y: outer[1],
+            angleDeg,
+            height: HELPER_HEIGHT,
+          })
+          helpers.push({
+            text: req.names.flanges[flangeNameKey(vertexId, 'inner')] ?? `FI${vertexId}`,
+            x: inner[0],
+            y: inner[1],
+            angleDeg,
             height: HELPER_HEIGHT,
           })
         }
@@ -163,19 +192,23 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       if (!boundary.main) continue
       try {
         // Which strut goes into each rectangular hole, in green along the hole.
-        const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => ({
-          text: req.names.struts[mark.edgeId] ?? `S${mark.edgeId}`,
-          x: mark.center[0],
-          y: mark.center[1],
-          angleDeg: mark.angleDeg,
-          height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
-        }))
-        if (vertex.foot) {
-          const [x, y] = polar2(vertex.foot.projectedAngleDeg, vertex.foot.holeOffset + vertex.foot.thickness / 2)
-          helpers.push({
-            text: req.names.feet[vertex.vertexId] ?? `F${vertex.vertexId}`,
+        const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => {
+          const [x, y] = labelBeside(mark.center, mark.angleDeg, mark.holeWidth / 2 + HELPER_HEIGHT * 0.9)
+          return {
+            text: req.names.struts[mark.edgeId] ?? `S${mark.edgeId}`,
             x,
             y,
+            angleDeg: mark.angleDeg,
+            height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
+          }
+        })
+        if (vertex.foot) {
+          const [x, y] = polar2(vertex.foot.projectedAngleDeg, vertex.foot.holeOffset + vertex.foot.thickness / 2)
+          const [labelX, labelY] = labelBeside([x, y], vertex.foot.projectedAngleDeg, vertex.foot.grooveLength / 2 + HELPER_HEIGHT * 0.9)
+          helpers.push({
+            text: req.names.feet[vertex.vertexId] ?? `F${vertex.vertexId}`,
+            x: labelX,
+            y: labelY,
             angleDeg: vertex.foot.projectedAngleDeg,
             height: Math.min(HELPER_HEIGHT, vertex.foot.grooveLength * 0.7),
           })
