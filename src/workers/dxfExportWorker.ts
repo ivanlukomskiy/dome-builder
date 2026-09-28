@@ -28,6 +28,7 @@ export interface DxfExportRequest {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
   vertices: VertexEdgesInfo[]
   flangeParams: FlangeShapeParams
   names: PartNameMaps
@@ -76,10 +77,6 @@ function labelBeside(center: [number, number], angleDeg: number, distance: numbe
   return add2(center, offset)
 }
 
-function arcMidpoint2(a: [number, number], b: [number, number], center: [number, number]): [number, number] {
-  return arcPoint2(a, b, center, 0.5)
-}
-
 function arcPoint2(a: [number, number], b: [number, number], center: [number, number], fraction: number): [number, number] {
   const radius = (Math.hypot(a[0] - center[0], a[1] - center[1]) + Math.hypot(b[0] - center[0], b[1] - center[1])) / 2
   const angleA = Math.atan2(a[1] - center[1], a[0] - center[0])
@@ -89,6 +86,10 @@ function arcPoint2(a: [number, number], b: [number, number], center: [number, nu
   while (delta < -Math.PI) delta += 2 * Math.PI
   const angle = angleA + delta * fraction
   return [center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle) * radius]
+}
+
+function linePoint2(a: [number, number], b: [number, number], fraction: number): [number, number] {
+  return [a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction]
 }
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
@@ -132,18 +133,20 @@ function strutLabel(
   posB: THREE.Vector3,
   center: THREE.Vector3,
   avoidAreas: LabelAvoidArea[],
+  roundBridge: boolean,
 ): { anchor: { x: number; y: number }; angleDeg: number } {
   const plane = computeStrutPlane(posA, posB, center)
   const a = projectToPlane2D(posA, plane)
   const b = projectToPlane2D(posB, plane)
   const c = projectToPlane2D(center, plane)
+  const pointAt = (fraction: number) => roundBridge ? arcPoint2(a, b, c, fraction) : linePoint2(a, b, fraction)
   const [x, y] =
     avoidAreas.length === 0
-      ? arcMidpoint2(a, b, c)
+      ? pointAt(0.5)
       : Array.from({ length: 17 }, (_, i) => 0.18 + (i * 0.64) / 16)
         .sort((left, right) => Math.abs(left - 0.5) - Math.abs(right - 0.5))
         .map((fraction) => {
-          const point = arcPoint2(a, b, c, fraction)
+          const point = pointAt(fraction)
           const clear = avoidAreas.every((avoid) => distance2(point, avoid.center) >= avoid.radius * avoid.radius)
           const clearance = Math.min(...avoidAreas.map((avoid) => distance2(point, avoid.center) - avoid.radius * avoid.radius))
           return { point, clear, clearance }
@@ -186,6 +189,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       req.millingDiameter,
       req.chamferLength,
       job.braces,
+      req.roundStrutBridge,
     )
     self.postMessage({
       type: 'progress',
@@ -234,7 +238,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         const avoidAreas = [boundary.bracePlateEndsA, boundary.bracePlateEndsB].flatMap((ends) =>
           ends ? [labelAvoidArea(ends, partName)] : [],
         )
-        const label = strutLabel(posA, posB, center, avoidAreas)
+        const label = strutLabel(posA, posB, center, avoidAreas, req.roundStrutBridge)
         parts.push({
           name: partName,
           kind: 'strut',

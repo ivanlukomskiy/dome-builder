@@ -10,6 +10,7 @@ import {
   bracePlateHoleCenters,
   placeInPlateFrame,
   braceRectInArcBand,
+  rectCorners,
   type BraceRect,
   type ArcEndpoints,
 } from "./braceGeometry";
@@ -264,6 +265,9 @@ function computeStrutBoundaryUnguarded(
   chamferLength: number,
   // Braces lying on the A / B end of this strut (see braces.ts); empty lists mean none.
   braces: StrutBraces = NO_STRUT_BRACES,
+  // True keeps the existing sphere-centered curved bridge; false connects the tangent sections
+  // with straight sides.
+  roundBridge = true,
 ): StrutBoundaryResult {
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
@@ -291,6 +295,7 @@ function computeStrutBoundaryUnguarded(
     millingDiameter,
     chamferLength,
     braces,
+    roundBridge,
   );
 }
 
@@ -312,6 +317,7 @@ export interface StrutBoundaryInput {
   millingDiameter: number;
   chamferLength: number;
   braces: StrutBraces;
+  roundBridge?: boolean;
 }
 
 const NON_FINITE_NUMBERS = new Set(["NaN", "Infinity", "-Infinity"]);
@@ -369,7 +375,11 @@ export function strutBoundaryInputFromJson(json: string): StrutBoundaryInput {
   ] as const) {
     if (typeof input[key] !== "number") throw new Error(`"${key}" must be a number`);
   }
-  return { ...(input as StrutBoundaryInput), braces: input.braces ?? NO_STRUT_BRACES };
+  return {
+    ...(input as StrutBoundaryInput),
+    braces: input.braces ?? NO_STRUT_BRACES,
+    roundBridge: input.roundBridge ?? true,
+  };
 }
 
 // Public entry point. Same as computeStrutBoundaryUnguarded, but if that throws, logs
@@ -393,6 +403,9 @@ export function computeStrutBoundary(
   chamferLength: number,
   // Braces lying on the A / B end of this strut (see braces.ts); empty lists mean none.
   braces: StrutBraces = NO_STRUT_BRACES,
+  // True keeps the existing sphere-centered curved bridge; false connects the tangent sections
+  // with straight sides.
+  roundBridge = true,
 ): StrutBoundaryResult {
   try {
     return computeStrutBoundaryUnguarded(
@@ -410,6 +423,7 @@ export function computeStrutBoundary(
       millingDiameter,
       chamferLength,
       braces,
+      roundBridge,
     );
   } catch (err) {
     try {
@@ -429,6 +443,7 @@ export function computeStrutBoundary(
           millingDiameter,
           chamferLength,
           braces,
+          roundBridge,
         },
         { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) },
       );
@@ -761,6 +776,95 @@ function arc(
   return conn.close();
 }
 
+function straightBridge(
+  a: Point2D,
+  b: Point2D,
+  center: Point2D,
+  aMeasurements: StrutEndMeasurements,
+  bMeasurements: StrutEndMeasurements,
+): Drawing {
+  const { innA, innB, extA, extB } = arcEndpoints(
+    a,
+    b,
+    center,
+    aMeasurements,
+    bMeasurements,
+  );
+
+  return draw()
+    .movePointerTo(innA)
+    .lineTo(innB)
+    .lineTo(extB)
+    .lineTo(extA)
+    .close();
+}
+
+function lerp2(a: Point2D, b: Point2D, t: number): Point2D {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+
+function straightBridgeCenterline(ends: ArcEndpoints): { a: Point2D; b: Point2D; vector: Point2D; axis: Point2D; lengthSq: number } {
+  const aCenter = scale2(add2(ends.innA, ends.extA), 0.5);
+  const bCenter = scale2(add2(ends.innB, ends.extB), 0.5);
+  const bridge = sub2(bCenter, aCenter);
+  return { a: aCenter, b: bCenter, vector: bridge, axis: normalize2(bridge), lengthSq: dot2(bridge, bridge) };
+}
+
+function isInsideStraightBand(p: Point2D, ends: ArcEndpoints): boolean {
+  const quad = [ends.innA, ends.innB, ends.extB, ends.extA] as const;
+  let positive = false;
+  let negative = false;
+  for (let i = 0; i < quad.length; i++) {
+    const from = quad[i];
+    const to = quad[(i + 1) % quad.length];
+    const turn = cross2(sub2(to, from), sub2(p, from));
+    if (turn > 1e-6) positive = true;
+    else if (turn < -1e-6) negative = true;
+    if (positive && negative) return false;
+  }
+  return true;
+}
+
+const STRAIGHT_BAND_EDGE_SAMPLES = 24;
+
+function rectFitsInStraightBand(c: Point2D, u: Point2D, p: number, q: number, ends: ArcEndpoints): boolean {
+  const corners = rectCorners(c, u, p, q);
+  for (let i = 0; i < 4; i++) {
+    const from = corners[i];
+    const to = corners[(i + 1) % 4];
+    for (let k = 0; k < STRAIGHT_BAND_EDGE_SAMPLES; k++) {
+      const t = k / STRAIGHT_BAND_EDGE_SAMPLES;
+      if (!isInsideStraightBand(lerp2(from, to, t), ends)) return false;
+    }
+  }
+  return true;
+}
+
+function braceRectInStraightBand(
+  c: Point2D,
+  u: Point2D,
+  ends: ArcEndpoints,
+  width: number,
+  maxAcrossWidth: number,
+): BraceRect | null {
+  const p = width / 2;
+  if (!isInsideStraightBand(c, ends) || !rectFitsInStraightBand(c, u, p, 0, ends)) return null;
+
+  const qCap = Math.max(maxAcrossWidth, 0) / 2;
+  if (rectFitsInStraightBand(c, u, p, qCap, ends)) {
+    return { corners: rectCorners(c, u, p, qCap), halfAlong: p, halfAcross: qCap };
+  }
+
+  let lo = 0;
+  let hi = qCap;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (rectFitsInStraightBand(c, u, p, mid, ends)) lo = mid;
+    else hi = mid;
+  }
+  return { corners: rectCorners(c, u, p, lo), halfAlong: p, halfAcross: lo };
+}
+
 export function computeStrutBoundary2D(
   a: Point2D,
   b: Point2D,
@@ -780,6 +884,7 @@ export function computeStrutBoundary2D(
   // Braces on the A / B end. Not yet used to shape the outline - for now each one just shows up
   // as a `braceCenter` helper point (see below), `shift` of the way along the A-B chord.
   braces: StrutBraces = NO_STRUT_BRACES,
+  roundBridge = true,
 ): StrutBoundaryResult {
   // calculate intersection point
 
@@ -828,7 +933,10 @@ export function computeStrutBoundary2D(
   );
   strutB = strutB.translate(b[0], b[1]);
 
-  const arcBody = arc(a, b, center, endA, endB);
+  const arcEnds = arcEndpoints(a, b, center, endA, endB);
+  const arcBody = roundBridge
+    ? arc(a, b, center, endA, endB)
+    : straightBridge(a, b, center, endA, endB);
 
   helpers = [
     // { drawing: strutB, color: "magenta", name: "shoulder b" },
@@ -842,7 +950,7 @@ export function computeStrutBoundary2D(
   const chord = sub2(b, a);
   const chordLength = length2(chord);
   const chordDir = normalize2(chord);
-  const arcEnds = arcEndpoints(a, b, center, endA, endB);
+  const straightCenterline = straightBridgeCenterline(arcEnds);
   const braceEnds: [string, Point2D, Point2D, StrutBraces["a"]][] = [
     ["A", a, chordDir, braces.a],
     ["B", b, scale2(chordDir, -1), braces.b],
@@ -878,37 +986,73 @@ export function computeStrutBoundary2D(
       // any more - only the final braceCenter below is. Re-add a helpers.push() for any of them
       // when you need to debug it.
 
-      // braceInn / braceExt: where the ray from the center through braceCenterNoRounding
-      // crosses the strut body's inn / ext arc (see arcPointAtAngle). Missing when that point
-      // lies angularly outside the arc, e.g. within a shoulder.
-      const rayAngle = Math.atan2(
-        braceCenterNoRounding[1] - center[1],
-        braceCenterNoRounding[0] - center[0],
-      );
-      const braceInn = arcPointAtAngle(
-        arcEnds.innA,
-        arcEnds.innB,
-        center,
-        rayAngle,
-      );
-      const braceExt = arcPointAtAngle(
-        arcEnds.extA,
-        arcEnds.extB,
-        center,
-        rayAngle,
-      );
+      let braceCenter: Point2D | null = null;
+      let endAxis: Point2D | null = null;
+      let rect: BraceRect | null = null;
+
+      if (roundBridge) {
+        // braceInn / braceExt: where the ray from the center through braceCenterNoRounding
+        // crosses the strut body's inn / ext arc (see arcPointAtAngle). Missing when that point
+        // lies angularly outside the arc, e.g. within a shoulder.
+        const rayAngle = Math.atan2(
+          braceCenterNoRounding[1] - center[1],
+          braceCenterNoRounding[0] - center[0],
+        );
+        const braceInn = arcPointAtAngle(
+          arcEnds.innA,
+          arcEnds.innB,
+          center,
+          rayAngle,
+        );
+        const braceExt = arcPointAtAngle(
+          arcEnds.extA,
+          arcEnds.extB,
+          center,
+          rayAngle,
+        );
+        if (braceInn && braceExt) {
+          braceCenter = scale2(add2(braceInn, braceExt), 0.5);
+          endAxis =
+            end === "A"
+              ? tangentDirection2D(a, b, center)
+              : tangentDirection2D(b, a, center);
+          rect = braceRectInArcBand(
+            braceCenter,
+            endAxis,
+            center,
+            arcEnds,
+            brace.params.width,
+            brace.params.maxPlateWidth,
+          );
+        }
+      } else if (straightCenterline.lengthSq > 1e-9) {
+        const t =
+          dot2(sub2(braceCenterNoRounding, straightCenterline.a), straightCenterline.vector) /
+          straightCenterline.lengthSq;
+        if (t >= -1e-9 && t <= 1 + 1e-9) {
+          const clampedT = Math.min(Math.max(t, 0), 1);
+          const braceInn = lerp2(arcEnds.innA, arcEnds.innB, clampedT);
+          const braceExt = lerp2(arcEnds.extA, arcEnds.extB, clampedT);
+          braceCenter = scale2(add2(braceInn, braceExt), 0.5);
+          endAxis = end === "A" ? straightCenterline.axis : scale2(straightCenterline.axis, -1);
+          rect = braceRectInStraightBand(
+            braceCenter,
+            endAxis,
+            arcEnds,
+            brace.params.width,
+            brace.params.maxPlateWidth,
+          );
+        }
+      }
+
       // braceCenter: halfway between braceInn and braceExt, i.e. the middle of the strut's width
       // at the brace.
-      if (braceInn && braceExt) {
-        const braceCenter = scale2(add2(braceInn, braceExt), 0.5);
+      if (braceCenter && endAxis) {
         braceMarks.push({
           braceId: brace.braceId,
           end: end as "A" | "B",
           point: braceCenter,
-          axis:
-            end === "A"
-              ? tangentDirection2D(a, b, center)
-              : tangentDirection2D(b, a, center),
+          axis: endAxis,
         });
         // helpers.push({
         //   drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
@@ -920,18 +1064,6 @@ export function computeStrutBoundary2D(
         // axis (the tangent at that end - strutA / strutB above are drawn with their length along
         // it), and as wide as fits between the inn / ext arcs across it, up to `maxPlateWidth`.
         // The plate is drawn from it (see drawBracePlate).
-        const endAxis =
-          end === "A"
-            ? tangentDirection2D(a, b, center)
-            : tangentDirection2D(b, a, center);
-        const rect = braceRectInArcBand(
-          braceCenter,
-          endAxis,
-          center,
-          arcEnds,
-          brace.params.width,
-          brace.params.maxPlateWidth,
-        );
         const plate = rect
           ? drawBracePlate(braceCenter, endAxis, rect, brace.params)
           : null;
@@ -1400,4 +1532,3 @@ export function computeStrutSketch(
     centerline: { start: centerline[0].pt, path: centerlinePath },
   }
 }
-

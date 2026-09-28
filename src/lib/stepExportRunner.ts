@@ -144,6 +144,7 @@ export async function runStepExport(
     grooveDepth: params.grooveDepth,
     millingDiameter: params.millingDiameter,
     chamferLength: params.chamferLength,
+    roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     scale: params.scale,
   }
@@ -252,6 +253,7 @@ export async function runStepAssemblyExport(
     grooveDepth: params.grooveDepth,
     millingDiameter: params.millingDiameter,
     chamferLength: params.chamferLength,
+    roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     scale: params.scale,
   }

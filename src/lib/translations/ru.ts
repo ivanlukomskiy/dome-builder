@@ -64,6 +64,7 @@ export const ru: Dictionary = {
   "Offset modifier: added to every edge end's own minimum offset before it's trimmed back from the vertex (still capped by the corner length budget). Positive pulls every strut end further in; negative pushes it back out, toward the vertex.": "Поправка смещения: добавляется к минимальному смещению каждого конца ребра перед отступом от вершины (по-прежнему ограничено длиной уголка). Положительное значение отодвигает все концы балок от вершины; отрицательное — приближает к вершине.",
   "Width (mm)": "Ширина (мм)",
   "Width: extrudes each arc symmetrically toward/away from the sphere's center.": "Ширина: выдавливает каждую дугу симметрично к центру сферы и от него.",
+  "Round bridge": "Скруглять перемычку",
   "Thickness (mm)": "Толщина (мм)",
   "Thickness: extrudes that ribbon symmetrically along its own surface normal, turning it into a solid beam.": "Толщина: выдавливает эту ленту симметрично вдоль нормали к её поверхности, превращая её в сплошную балку.",
   "Grooves": "Пазы",

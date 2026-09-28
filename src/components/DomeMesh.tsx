@@ -152,6 +152,7 @@ interface DomeMeshProps {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
@@ -194,6 +195,7 @@ export function DomeMesh({
   grooveDepth,
   millingDiameter,
   chamferLength,
+  roundStrutBridge,
   toleranceLongitudinal,
   toleranceTransverse,
   centerHoleDiameter,
@@ -305,6 +307,7 @@ export function DomeMesh({
         grooveDepth,
         millingDiameter,
         chamferLength,
+        roundStrutBridge,
       }),
     )
 
@@ -335,6 +338,7 @@ export function DomeMesh({
       grooveDepth,
       millingDiameter,
       chamferLength,
+      roundStrutBridge,
       flangeParams,
     }
 
@@ -629,6 +633,7 @@ export function DomeMesh({
     grooveDepth,
     millingDiameter,
     chamferLength,
+    roundStrutBridge,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,

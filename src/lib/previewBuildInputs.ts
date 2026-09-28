@@ -59,6 +59,7 @@ export interface PreviewBuildInputParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
 }
 
 export function computePreviewBuildInputs(params: PreviewBuildInputParams): PreviewBuildInputs {

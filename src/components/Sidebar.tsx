@@ -137,6 +137,8 @@ interface SidebarProps {
   onMillingDiameterChange: (value: number) => void
   chamferLength: number
   onChamferLengthChange: (value: number) => void
+  roundStrutBridge: boolean
+  onRoundStrutBridgeChange: (value: boolean) => void
   toleranceLongitudinal: number
   onToleranceLongitudinalChange: (value: number) => void
   toleranceTransverse: number
@@ -363,6 +365,8 @@ export function Sidebar({
   onMillingDiameterChange,
   chamferLength,
   onChamferLengthChange,
+  roundStrutBridge,
+  onRoundStrutBridgeChange,
   toleranceLongitudinal,
   onToleranceLongitudinalChange,
   toleranceTransverse,
@@ -665,6 +669,14 @@ export function Sidebar({
               "Width: extrudes each arc symmetrically toward/away from the sphere's center.",
             )}
           </p>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={roundStrutBridge}
+              onChange={(e) => onRoundStrutBridgeChange(e.target.checked)}
+            />
+            {t('Round bridge')}
+          </label>
           <div className="transform-field">
             <label>{t('Thickness (mm)')}</label>
             <NumberField value={thickness} step={5} min={0} onCommit={onThicknessChange} />

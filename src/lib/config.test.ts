@@ -46,6 +46,7 @@ describe('config migration', () => {
 
     expect(state.sideHoleDiameterOuter).toBe(7)
     expect(state.sideHoleDiameterInner).toBe(7)
+    expect(state.roundStrutBridge).toBe(true)
     expect(state.vertexFlangeParams.get(42)).toEqual({
       sideHoleDiameterOuter: 9,
       sideHoleDiameterInner: 9,

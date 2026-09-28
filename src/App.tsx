@@ -84,6 +84,7 @@ export interface PreviewShapeParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
@@ -131,6 +132,7 @@ const DEFAULT_MID_GROOVE_LENGTH_PERCENT = 15
 const DEFAULT_GROOVE_DEPTH = 30
 const DEFAULT_MILLING_DIAMETER = 5
 const DEFAULT_CHAMFER_LENGTH = 6
+const DEFAULT_ROUND_STRUT_BRIDGE = true
 
 const EMPTY_INDEX_SET: ReadonlySet<number> = new Set()
 const EMPTY_VERTEX_TRANSFORMS: ReadonlyMap<number, VertexTransform> = new Map()
@@ -264,6 +266,7 @@ function App() {
     initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
   )
   const [chamferLength, setChamferLength] = useState(initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH)
+  const [roundStrutBridge, setRoundStrutBridge] = useState(initial?.roundStrutBridge ?? DEFAULT_ROUND_STRUT_BRIDGE)
 
   // The flange connector plate at each hub vertex - see the "Flange" Sidebar section and
   // flangeGeometry.ts's FlangeShapeParams (which these mirror field-for-field, aside from its
@@ -308,6 +311,7 @@ function App() {
     grooveDepth,
     millingDiameter,
     chamferLength,
+    roundStrutBridge,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -329,6 +333,7 @@ function App() {
     grooveDepth,
     millingDiameter,
     chamferLength,
+    roundStrutBridge,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -748,6 +753,7 @@ function App() {
     setGrooveDepth(DEFAULT_GROOVE_DEPTH)
     setMillingDiameter(DEFAULT_MILLING_DIAMETER)
     setChamferLength(DEFAULT_CHAMFER_LENGTH)
+    setRoundStrutBridge(DEFAULT_ROUND_STRUT_BRIDGE)
     setToleranceLongitudinal(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal)
     setToleranceTransverse(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse)
     setCenterHoleDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter)
@@ -768,6 +774,7 @@ function App() {
       grooveDepth: DEFAULT_GROOVE_DEPTH,
       millingDiameter: DEFAULT_MILLING_DIAMETER,
       chamferLength: DEFAULT_CHAMFER_LENGTH,
+      roundStrutBridge: DEFAULT_ROUND_STRUT_BRIDGE,
       toleranceLongitudinal: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
       toleranceTransverse: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
       centerHoleDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
@@ -799,6 +806,7 @@ function App() {
     setGrooveDepth(state.grooveDepth)
     setMillingDiameter(state.millingDiameter)
     setChamferLength(state.chamferLength)
+    setRoundStrutBridge(state.roundStrutBridge)
     setToleranceLongitudinal(state.toleranceLongitudinal)
     setToleranceTransverse(state.toleranceTransverse)
     setCenterHoleDiameter(state.centerHoleDiameter)
@@ -819,6 +827,7 @@ function App() {
       grooveDepth: state.grooveDepth,
       millingDiameter: state.millingDiameter,
       chamferLength: state.chamferLength,
+      roundStrutBridge: state.roundStrutBridge,
       toleranceLongitudinal: state.toleranceLongitudinal,
       toleranceTransverse: state.toleranceTransverse,
       centerHoleDiameter: state.centerHoleDiameter,
@@ -857,6 +866,7 @@ function App() {
       grooveDepth,
       millingDiameter,
       chamferLength,
+      roundStrutBridge,
       toleranceLongitudinal,
       toleranceTransverse,
       centerHoleDiameter,
@@ -889,6 +899,7 @@ function App() {
     grooveDepth,
     millingDiameter,
     chamferLength,
+    roundStrutBridge,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -966,6 +977,7 @@ function App() {
       grooveDepth: appliedPreviewParams.grooveDepth,
       millingDiameter: appliedPreviewParams.millingDiameter,
       chamferLength: appliedPreviewParams.chamferLength,
+      roundStrutBridge: appliedPreviewParams.roundStrutBridge,
       flangeParams: {
         toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
         toleranceTransverse: appliedPreviewParams.toleranceTransverse,
@@ -1120,6 +1132,8 @@ function App() {
         onMillingDiameterChange={setMillingDiameter}
         chamferLength={chamferLength}
         onChamferLengthChange={setChamferLength}
+        roundStrutBridge={roundStrutBridge}
+        onRoundStrutBridgeChange={setRoundStrutBridge}
         toleranceLongitudinal={toleranceLongitudinal}
         onToleranceLongitudinalChange={setToleranceLongitudinal}
         toleranceTransverse={toleranceTransverse}
@@ -1174,6 +1188,7 @@ function App() {
         grooveDepth={appliedPreviewParams.grooveDepth}
         millingDiameter={appliedPreviewParams.millingDiameter}
         chamferLength={appliedPreviewParams.chamferLength}
+        roundStrutBridge={appliedPreviewParams.roundStrutBridge}
         toleranceLongitudinal={appliedPreviewParams.toleranceLongitudinal}
         toleranceTransverse={appliedPreviewParams.toleranceTransverse}
         centerHoleDiameter={appliedPreviewParams.centerHoleDiameter}

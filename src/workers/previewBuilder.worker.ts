@@ -45,6 +45,7 @@ export interface PreviewBuildRequest {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
   // Flanges to build, one per side of each group of identical hubs (see flangeInstances.ts) - the
   // main thread places the resulting mesh at every vertex of the group.
   flangeJobs: FlangeBuildJob[]
@@ -171,6 +172,7 @@ async function buildPreview(
         req.millingDiameter,
         req.chamferLength,
         job.braces,
+        req.roundStrutBridge,
       ),
     )
     const strutBoundaryMs = lastMs()

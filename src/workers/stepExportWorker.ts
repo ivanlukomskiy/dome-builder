@@ -30,6 +30,7 @@ export interface StepExportRequest {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
   vertices: VertexEdgesInfo[]
   flangeParams: FlangeShapeParams
   // Uniform scale factor (1 = no change) applied to every exported solid - see
@@ -98,6 +99,7 @@ async function buildStepExports(
       req.millingDiameter,
       req.chamferLength,
       job.braces,
+      req.roundStrutBridge,
     )
     self.postMessage({
       type: 'progress',

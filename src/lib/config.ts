@@ -38,6 +38,9 @@ export interface DomeConfig {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  // Whether the bridge between the two tangent end sections of each strut is rounded to follow
+  // the sphere. Missing in older configs means true.
+  roundStrutBridge?: boolean
   // The flat connector plate pair built at every hub vertex (see flangeGeometry.ts) - shares the
   // strut fields above (cornerLength, halfWidth from extrudeDistance, offsetModifier, groove/
   // chamfer/milling params) for its own tenon layout, plus these of its own.
@@ -95,6 +98,7 @@ export interface DomeState {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
   centerHoleDiameter: number
@@ -137,6 +141,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
     grooveDepth: state.grooveDepth,
     millingDiameter: state.millingDiameter,
     chamferLength: state.chamferLength,
+    roundStrutBridge: state.roundStrutBridge,
     toleranceLongitudinal: state.toleranceLongitudinal,
     toleranceTransverse: state.toleranceTransverse,
     centerHoleDiameter: state.centerHoleDiameter,
@@ -206,6 +211,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     grooveDepth: config.grooveDepth,
     millingDiameter: config.millingDiameter,
     chamferLength: config.chamferLength,
+    roundStrutBridge: config.roundStrutBridge ?? true,
     toleranceLongitudinal: config.toleranceLongitudinal,
     toleranceTransverse: config.toleranceTransverse,
     centerHoleDiameter: config.centerHoleDiameter,

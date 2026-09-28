@@ -171,6 +171,7 @@ export async function runDxfExport(
     grooveDepth: params.grooveDepth,
     millingDiameter: params.millingDiameter,
     chamferLength: params.chamferLength,
+    roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     names,
   }
