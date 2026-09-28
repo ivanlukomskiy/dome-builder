@@ -4,6 +4,7 @@ import { computePreviewBuildInputs, type PreviewBuildInputParams, type StrutGeom
 import type { VertexEdgesInfo } from './edgesInfo'
 import { pairBracePoints, type BraceBody, type BracePoints } from './braceSolid'
 import { runExportBatches } from './exportBatchPool'
+import { exportProfilingEnabled, publishExportProfile, type ExportBatchProfile, type ExportWorkerProfile } from './exportProfile'
 import type {
   StepExportPiece,
   StepExportRequest,
@@ -45,8 +46,10 @@ function runBatch(
   shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'>,
   requestId: number,
   onProgress: (done: number) => void,
-): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[] }> {
+): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
+    const createdAt = performance.now()
+    let readyAt = createdAt
     const worker = new Worker(new URL('../workers/stepExportWorker.ts', import.meta.url), {
       type: 'module',
     })
@@ -60,10 +63,19 @@ function runBatch(
       const msg = event.data
       if (msg.requestId !== requestId) return
 
-      if (msg.type === 'progress') {
+      if (msg.type === 'ready') {
+        readyAt = performance.now()
+      } else if (msg.type === 'progress') {
         onProgress(msg.done)
       } else if (msg.type === 'result') {
-        settle(() => resolve({ pieces: msg.pieces, bracePoints: msg.bracePoints }))
+        const finishedAt = performance.now()
+        settle(() => resolve({
+          pieces: msg.pieces,
+          bracePoints: msg.bracePoints,
+          profile: msg.profile,
+          createToReadyMs: readyAt - createdAt,
+          readyToResultMs: finishedAt - readyAt,
+        }))
       } else if (msg.type === 'error') {
         settle(() => reject(new Error(msg.message)))
       }
@@ -83,8 +95,10 @@ function runAssembly(
   shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies' | 'mode'>,
   requestId: number,
   onProgress: (progress: StepExportProgress) => void,
-): Promise<Blob | null> {
+): Promise<{ blob: Blob | null; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
+    const createdAt = performance.now()
+    let readyAt = createdAt
     const worker = new Worker(new URL('../workers/stepExportWorker.ts', import.meta.url), {
       type: 'module',
     })
@@ -98,10 +112,18 @@ function runAssembly(
       const msg = event.data
       if (msg.requestId !== requestId) return
 
-      if (msg.type === 'progress') {
+      if (msg.type === 'ready') {
+        readyAt = performance.now()
+      } else if (msg.type === 'progress') {
         onProgress({ phase: msg.phase, done: msg.done, total: msg.total })
       } else if (msg.type === 'result') {
-        settle(() => resolve(msg.assemblyBlob ?? null))
+        const finishedAt = performance.now()
+        settle(() => resolve({
+          blob: msg.assemblyBlob ?? null,
+          profile: msg.profile,
+          createToReadyMs: readyAt - createdAt,
+          readyToResultMs: finishedAt - readyAt,
+        }))
       } else if (msg.type === 'error') {
         settle(() => reject(new Error(msg.message)))
       }
@@ -131,6 +153,9 @@ export async function runStepExport(
   onProgress: (progress: StepExportProgress | null) => void,
   isCancelled: () => boolean,
 ): Promise<Blob | null> {
+  const startedAt = performance.now()
+  const profiling = exportProfilingEnabled()
+  const batchProfiles: ExportBatchProfile[] = []
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
 
   const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'> = {
@@ -143,6 +168,7 @@ export async function runStepExport(
     roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     scale: params.scale,
+    profile: profiling,
   }
 
   const allPieces: StepExportPiece[] = []
@@ -160,10 +186,15 @@ export async function runStepExport(
     isCancelled,
   )
   if (!strutResults) return null
-  for (const result of strutResults) {
+  for (const [i, result] of strutResults.entries()) {
     if (!result) continue
     allPieces.push(...result.pieces)
     allBracePoints.push(...result.bracePoints)
+    if (profiling && result.profile) batchProfiles.push({
+      phase: 'struts', items: strutBatches[i].length,
+      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+      worker: result.profile,
+    })
   }
 
   const vertexBatches = chunk(vertices, BATCH_SIZE)
@@ -176,8 +207,14 @@ export async function runStepExport(
     isCancelled,
   )
   if (!vertexResults) return null
-  for (const result of vertexResults) {
-    if (result) allPieces.push(...result.pieces)
+  for (const [i, result] of vertexResults.entries()) {
+    if (!result) continue
+    allPieces.push(...result.pieces)
+    if (profiling && result.profile) batchProfiles.push({
+      phase: 'flanges', items: vertexBatches[i].length,
+      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+      worker: result.profile,
+    })
   }
 
   const braceBodies = pairBracePoints(allBracePoints)
@@ -191,17 +228,25 @@ export async function runStepExport(
     isCancelled,
   )
   if (!braceResults) return null
-  for (const result of braceResults) {
-    if (result) allPieces.push(...result.pieces)
+  for (const [i, result] of braceResults.entries()) {
+    if (!result) continue
+    allPieces.push(...result.pieces)
+    if (profiling && result.profile) batchProfiles.push({
+      phase: 'braces', items: braceBatches[i].length,
+      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+      worker: result.profile,
+    })
   }
 
   if (isCancelled()) return null
 
   onProgress({ phase: 'zipping', done: 0, total: allPieces.length })
+  const zipStart = performance.now()
   const zip = new JSZip()
   for (const piece of allPieces) zip.file(piece.name, piece.blob)
   const zipBlob = await zip.generateAsync({ type: 'blob' })
 
+  if (profiling && !isCancelled()) publishExportProfile('stepArchive', startedAt, batchProfiles, { zip: performance.now() - zipStart })
   return isCancelled() ? null : zipBlob
 }
 
@@ -213,6 +258,8 @@ export async function runStepAssemblyExport(
   onProgress: (progress: StepExportProgress | null) => void,
   isCancelled: () => boolean,
 ): Promise<Blob | null> {
+  const startedAt = performance.now()
+  const profiling = exportProfilingEnabled()
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
 
   const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies' | 'mode'> = {
@@ -225,10 +272,16 @@ export async function runStepAssemblyExport(
     roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     scale: params.scale,
+    profile: profiling,
   }
 
   if (isCancelled()) return null
 
-  const blob = await runAssembly(strutEntries, vertices, shared, 1, onProgress)
-  return isCancelled() ? null : blob
+  const result = await runAssembly(strutEntries, vertices, shared, 1, onProgress)
+  if (profiling && !isCancelled() && result.profile) publishExportProfile('stepAssembly', startedAt, [{
+    phase: 'assembly', items: strutEntries.length + vertices.length,
+    createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+    worker: result.profile,
+  }])
+  return isCancelled() ? null : result.blob
 }

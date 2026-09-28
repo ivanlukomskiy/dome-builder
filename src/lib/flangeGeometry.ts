@@ -903,9 +903,10 @@ export function computeFlangeBoundary2D(
   const edgeMarks: FlangeEdgeMark[] = [];
   const sideHoleDiameter = sideHoleDiameterFor(params, side);
 
-  const negativeShapes: Drawing[] = [];
-  const addNegative = (drawing: Drawing) => {
-    negativeShapes.push(drawing);
+  const boundaryCuts: Drawing[] = [];
+  const holeCuts: Drawing[] = [];
+  const addNegative = (drawing: Drawing, kind: "boundary" | "hole" = "boundary") => {
+    (kind === "hole" ? holeCuts : boundaryCuts).push(drawing);
   };
 
   if (vertex.edges.length === 0) return { main: null, edgeMarks: [], helpers };
@@ -921,9 +922,9 @@ export function computeFlangeBoundary2D(
     if (sideHoleDiameter > 0) {
       const { holeA, holeB } = computeSideHoles(edge, params, sideHoleDiameter);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
-      addNegative(holeA);
+      addNegative(holeA, "hole");
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, -)` });
-      addNegative(holeB);
+      addNegative(holeB, "hole");
     }
 
     // The tenon's own cutout: the plate is cleared across the strut's tenon span, so it has room to seat.
@@ -973,9 +974,9 @@ export function computeFlangeBoundary2D(
     if (sideHoleDiameter > 0) {
       const { holeA, holeB } = computeFootSideHoles(foot, params, sideHoleDiameter);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: "foot side hole (+)" });
-      addNegative(holeA);
+      addNegative(holeA, "hole");
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: "foot side hole (-)" });
-      addNegative(holeB);
+      addNegative(holeB, "hole");
     }
 
     const { holeX0, holeX1, holeHalfY } = computeFootLayout(foot, params);
@@ -1000,7 +1001,7 @@ export function computeFlangeBoundary2D(
   if (params.centerHoleDiameter > 0) {
     const centerHoleDrawing = drawCircle(params.centerHoleDiameter / 2);
     helpers.push({ drawing: centerHoleDrawing, color: HOLE_COLOR, name: "center hole" });
-    addNegative(centerHoleDrawing);
+    addNegative(centerHoleDrawing, "hole");
   }
   // Drawn last so it stays on top of everything else instead of getting z-fought away.
   helpers.push({ drawing: drawCircle(5), color: "#f5e050", name: `vertex ${vertex.vertexId}` });
@@ -1020,7 +1021,9 @@ export function computeFlangeBoundary2D(
     ];
     main = main.fuse(drawPolygon(body.map((p) => rotate2D(p, foot.projectedAngleDeg))));
   }
-  negativeShapes.forEach((s) => {
+  // Notches and their mill reliefs can change the outside boundary. Apply those before the bolt
+  // holes, so later cuts do not repeatedly reclassify an increasingly complex shape with holes.
+  [...boundaryCuts, ...holeCuts].forEach((s) => {
     main = main.cut(s);
   });
 

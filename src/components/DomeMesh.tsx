@@ -600,7 +600,7 @@ export function DomeMesh({
           poolSize,
           flangeGroups: flangeGroups.length,
           flangeGroupsBuilt: flangesToBuild.length,
-          flangeGroupsCached: flangeGroups.length - flangesToBuild.length,
+          flangeGroupsCached: flangeGroups.length * FLANGE_SIDES.length - flangesToBuild.length,
         })
       } catch (err) {
         console.error('Failed to build preview', err)

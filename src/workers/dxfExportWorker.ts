@@ -8,6 +8,7 @@ import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D } from '../lib/braces'
 import type { BracePoints } from '../lib/braceSolid'
 import { drawingToPolylines } from '../lib/dxfExport'
+import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/exportProfile'
 import type { DxfHelperText, DxfPart } from '../lib/dxf'
 import { bracePlateNameKey, flangeNameKey, type PartNameMaps } from '../lib/partNames'
 
@@ -21,6 +22,7 @@ declare const self: DedicatedWorkerGlobalScope
 
 export interface DxfExportRequest {
   requestId: number
+  profile?: boolean
   strutJobs: StrutGeometryEntry[]
   halfWidth: number
   endGrooveLengthPercent: number
@@ -37,8 +39,9 @@ export interface DxfExportRequest {
 export type DxfExportPhase = 'struts' | 'flanges'
 
 export type DxfExportWorkerMessage =
+  | { type: 'ready'; requestId: number }
   | { type: 'progress'; requestId: number; phase: DxfExportPhase; done: number; total: number }
-  | { type: 'result'; requestId: number; parts: DxfPart[]; bracePoints: BracePoints[] }
+  | { type: 'result'; requestId: number; parts: DxfPart[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile }
   | { type: 'error'; requestId: number; message: string }
 
 // Height (mm at scale 1) of the green connection labels.
@@ -163,9 +166,15 @@ function footTabOffset(strutWidth: number, flangeThickness: number): number {
   return bodyHeight / 2 + flangeThickness / 2
 }
 
-async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[] }> {
+async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile }> {
+  const profiler = req.profile ? createExportStageProfiler() : null
+  const timed = <T>(stage: string, fn: () => T): T => profiler ? profiler.time(stage, fn) : fn()
+  const initStart = performance.now()
   const { ensureReplicadReady } = await import('../lib/replicadCad')
   await ensureReplicadReady()
+  const initMs = performance.now() - initStart
+  const buildStart = performance.now()
+  self.postMessage({ type: 'ready', requestId: req.requestId } satisfies DxfExportWorkerMessage)
 
   const center = new THREE.Vector3(0, 0, 0)
   const parts: DxfPart[] = []
@@ -174,7 +183,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
   req.strutJobs.forEach((job, i) => {
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
-    const boundary = computeStrutBoundary(
+    const boundary = timed('strutBoundary2D', () => computeStrutBoundary(
       posA,
       posB,
       center,
@@ -190,7 +199,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       req.chamferLength,
       job.braces,
       req.roundStrutBridge,
-    )
+    ))
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
@@ -242,7 +251,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           name: partName,
           kind: 'strut',
-          loops: drawingToPolylines(boundary.main),
+          loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
           labelAnchor: label.anchor,
           labelAngleDeg: label.angleDeg,
           helpers,
@@ -268,7 +277,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)] ?? `brace-plate-${brace.braceId}-strut-${job.index}-${end}`,
           kind: 'brace-plate',
-          loops: drawingToPolylines(plate),
+          loops: timed('outlineToPolylines', () => drawingToPolylines(plate)),
           labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
         })
       } catch (err) {
@@ -288,11 +297,11 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     } satisfies DxfExportWorkerMessage)
 
     for (const side of ['outer', 'inner'] as const satisfies readonly FlangeSide[]) {
-      const boundary = computeFlangeBoundary2D(
+      const boundary = timed('flangeBoundary2D', () => computeFlangeBoundary2D(
         { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
         flangeParams,
         side,
-      )
+      ))
       if (!boundary.main) continue
       try {
         // Which strut goes into each rectangular hole, in green along the hole.
@@ -321,7 +330,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           name: req.names.flanges[flangeNameKey(vertex.vertexId, side)] ?? `flange-${vertex.vertexId}-${side}`,
           kind: 'flange',
-          loops: drawingToPolylines(boundary.main),
+          loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
           labelAnchor: { x: 0, y: req.flangeParams.centerHoleDiameter / 2 + 8 },
           helpers,
         })
@@ -333,13 +342,13 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     const foot = vertex.foot
     if (foot) {
       try {
-        const boundary = computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth)
+        const boundary = timed('footBoundary2D', () => computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth))
         if (boundary.main) {
           const tabOffset = footTabOffset(req.halfWidth * 2, req.grooveDepth)
           parts.push({
             name: req.names.feet[vertex.vertexId] ?? `foot-${vertex.vertexId}`,
             kind: 'foot',
-            loops: drawingToPolylines(boundary.main),
+            loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
             helpers: [
               {
                 text: req.names.flanges[flangeNameKey(vertex.vertexId, 'outer')] ?? `FE${vertex.vertexId}`,
@@ -364,14 +373,14 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     }
   })
 
-  return { parts, bracePoints }
+  return { parts, bracePoints, profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
 }
 
 self.onmessage = (event: MessageEvent<DxfExportRequest>) => {
   const req = event.data
   buildDxfParts(req).then(
-    ({ parts, bracePoints }) => {
-      self.postMessage({ type: 'result', requestId: req.requestId, parts, bracePoints } satisfies DxfExportWorkerMessage)
+    ({ parts, bracePoints, profile }) => {
+      self.postMessage({ type: 'result', requestId: req.requestId, parts, bracePoints, profile } satisfies DxfExportWorkerMessage)
     },
     (err: unknown) => {
       self.postMessage({

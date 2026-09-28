@@ -8,6 +8,7 @@ import { computeBraceEndpoints } from './braces'
 import type { Lang } from './i18n'
 import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './partNames'
 import { runExportBatches } from './exportBatchPool'
+import { exportProfilingEnabled, publishExportProfile, type ExportBatchProfile, type ExportWorkerProfile } from './exportProfile'
 import type { DxfExportPhase, DxfExportRequest, DxfExportWorkerMessage } from '../workers/dxfExportWorker'
 
 // Same per-worker item cap as the STEP export and the live Preview build, for the same reason.
@@ -131,8 +132,10 @@ function runBatch(
   shared: Shared,
   requestId: number,
   onProgress: (done: number) => void,
-): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[] }> {
+): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
+    const createdAt = performance.now()
+    let readyAt = createdAt
     const worker = new Worker(new URL('../workers/dxfExportWorker.ts', import.meta.url), { type: 'module' })
     const settle = (fn: () => void) => {
       worker.terminate()
@@ -141,8 +144,18 @@ function runBatch(
     worker.onmessage = (event: MessageEvent<DxfExportWorkerMessage>) => {
       const msg = event.data
       if (msg.requestId !== requestId) return
-      if (msg.type === 'progress') onProgress(msg.done)
-      else if (msg.type === 'result') settle(() => resolve({ parts: msg.parts, bracePoints: msg.bracePoints }))
+      if (msg.type === 'ready') readyAt = performance.now()
+      else if (msg.type === 'progress') onProgress(msg.done)
+      else if (msg.type === 'result') {
+        const finishedAt = performance.now()
+        settle(() => resolve({
+          parts: msg.parts,
+          bracePoints: msg.bracePoints,
+          profile: msg.profile,
+          createToReadyMs: readyAt - createdAt,
+          readyToResultMs: finishedAt - readyAt,
+        }))
+      }
       else if (msg.type === 'error') settle(() => reject(new Error(msg.message)))
     }
     worker.onerror = (event) => settle(() => reject(new Error(event.message)))
@@ -159,6 +172,9 @@ export async function runDxfExport(
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
 ): Promise<Blob | null> {
+  const startedAt = performance.now()
+  const profiling = exportProfilingEnabled()
+  const batchProfiles: ExportBatchProfile[] = []
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
   const names = buildDxfPartNames(params, strutEntries, vertices, halfWidth, lang)
 
@@ -172,6 +188,7 @@ export async function runDxfExport(
     roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     names,
+    profile: profiling,
   }
 
   const parts: DxfPart[] = []
@@ -187,10 +204,15 @@ export async function runDxfExport(
     isCancelled,
   )
   if (!strutResults) return null
-  for (const result of strutResults) {
+  for (const [i, result] of strutResults.entries()) {
     if (!result) continue
     parts.push(...result.parts)
     bracePoints.push(...result.bracePoints)
+    if (profiling && result.profile) batchProfiles.push({
+      phase: 'struts', items: strutBatches[i].length,
+      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+      worker: result.profile,
+    })
   }
 
   const vertexBatches = chunk(vertices, BATCH_SIZE)
@@ -203,8 +225,14 @@ export async function runDxfExport(
     isCancelled,
   )
   if (!vertexResults) return null
-  for (const result of vertexResults) {
-    if (result) parts.push(...result.parts)
+  for (const [i, result] of vertexResults.entries()) {
+    if (!result) continue
+    parts.push(...result.parts)
+    if (profiling && result.profile) batchProfiles.push({
+      phase: 'flanges', items: vertexBatches[i].length,
+      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+      worker: result.profile,
+    })
   }
 
   if (isCancelled()) return null
@@ -249,6 +277,13 @@ export async function runDxfExport(
     })
   }
 
+  const layoutStart = performance.now()
   const placed = layoutDxfParts(parts, { scale: params.scale })
-  return new Blob([writeDxf(placed)], { type: 'application/dxf' })
+  const writeStart = performance.now()
+  const blob = new Blob([writeDxf(placed)], { type: 'application/dxf' })
+  if (profiling) publishExportProfile('dxf', startedAt, batchProfiles, {
+    layoutDxfParts: writeStart - layoutStart,
+    writeDxf: performance.now() - writeStart,
+  })
+  return blob
 }

@@ -8,6 +8,7 @@ import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../l
 import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, type BraceBody, type BracePoints } from '../lib/braceSolid'
 import { draw, type Drawing } from 'replicad'
 import type { StepAssemblyShape, StrutPlane } from '../lib/replicadCad'
+import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/exportProfile'
 
 // The STEP-export counterpart to previewBuilder.worker.ts: same per-edge/per-vertex 2D drawing
 // and solid-building steps, but each solid is exported as a STEP file Blob (buildStrutStepFromDrawing)
@@ -19,6 +20,7 @@ declare const self: DedicatedWorkerGlobalScope
 
 export interface StepExportRequest {
   requestId: number
+  profile?: boolean
   mode?: 'archive' | 'assembly'
   strutJobs: StrutGeometryEntry[]
   // Brace bodies to export (see braceSolid.ts's pairBracePoints) - a batch of these is all a
@@ -47,8 +49,9 @@ export type StepExportPhase = 'struts' | 'flanges' | 'braces'
 export type StepExportWorkerPhase = StepExportPhase | 'writing'
 
 export type StepExportWorkerMessage =
+  | { type: 'ready'; requestId: number }
   | { type: 'progress'; requestId: number; phase: StepExportWorkerPhase; done: number; total: number }
-  | { type: 'result'; requestId: number; pieces: StepExportPiece[]; bracePoints: BracePoints[]; assemblyBlob?: Blob }
+  | { type: 'result'; requestId: number; pieces: StepExportPiece[]; bracePoints: BracePoints[]; assemblyBlob?: Blob; profile?: ExportWorkerProfile }
   | { type: 'error'; requestId: number; message: string }
 
 function toVector3(t: [number, number, number]): THREE.Vector3 {
@@ -57,9 +60,15 @@ function toVector3(t: [number, number, number]): THREE.Vector3 {
 
 async function buildStepExports(
   req: StepExportRequest,
-): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; assemblyBlob?: Blob }> {
+): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; assemblyBlob?: Blob; profile?: ExportWorkerProfile }> {
+  const profiler = req.profile ? createExportStageProfiler() : null
+  const timed = <T>(stage: string, fn: () => T): T => profiler ? profiler.time(stage, fn) : fn()
+  const initStart = performance.now()
   const { ensureReplicadReady, buildStepAssembly, buildStrutSolidFromDrawing } = await import('../lib/replicadCad')
   await ensureReplicadReady()
+  const initMs = performance.now() - initStart
+  const buildStart = performance.now()
+  self.postMessage({ type: 'ready', requestId: req.requestId } satisfies StepExportWorkerMessage)
 
   const center = new THREE.Vector3(0, 0, 0)
   const pieces: StepExportPiece[] = []
@@ -69,14 +78,14 @@ async function buildStepExports(
   const mode = req.mode ?? 'archive'
 
   const addStepShape = (name: string, drawing: Drawing, plane: StrutPlane, thickness: number) => {
-    const solid = buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale)
+    const solid = timed('solidFromDrawing', () => buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale))
     if (!solid) return
     if (mode === 'assembly') {
       assemblyShapes.push({ name, shape: solid })
       return
     }
 
-    const blob = solid.blobSTEP()
+    const blob = timed('partStepWrite', () => solid.blobSTEP())
     solid.delete()
     if (blob) pieces.push({ name, blob })
   }
@@ -84,7 +93,7 @@ async function buildStepExports(
   req.strutJobs.forEach((job, i) => {
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
-    const boundary = computeStrutBoundary(
+    const boundary = timed('strutBoundary2D', () => computeStrutBoundary(
       posA,
       posB,
       center,
@@ -100,7 +109,7 @@ async function buildStepExports(
       req.chamferLength,
       job.braces,
       req.roundStrutBridge,
-    )
+    ))
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
@@ -166,11 +175,11 @@ async function buildStepExports(
         { sign: -1, side: 'inner' },
       ]
       for (const { sign, side } of sides) {
-        const boundary = computeFlangeBoundary2D(
+        const boundary = timed('flangeBoundary2D', () => computeFlangeBoundary2D(
           { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
           flangeParams,
           side,
-        )
+        ))
         if (!boundary.main) continue
         const plane = {
           origin: vertexPos.clone().addScaledVector(normal, sign * flangeSpan),
@@ -207,7 +216,7 @@ async function buildStepExports(
     }
   })
 
-  if (mode !== 'assembly') return { pieces, bracePoints }
+  if (mode !== 'assembly') return { pieces, bracePoints, profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
 
   try {
     self.postMessage({
@@ -217,8 +226,8 @@ async function buildStepExports(
       done: 0,
       total: assemblyShapes.length,
     } satisfies StepExportWorkerMessage)
-    const assemblyBlob = buildStepAssembly(assemblyShapes)
-    return { pieces, bracePoints, assemblyBlob }
+    const assemblyBlob = timed('assemblyStepWrite', () => buildStepAssembly(assemblyShapes))
+    return { pieces, bracePoints, assemblyBlob, profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
   } finally {
     for (const { shape } of assemblyShapes) shape.delete()
   }
@@ -227,8 +236,8 @@ async function buildStepExports(
 self.onmessage = (event: MessageEvent<StepExportRequest>) => {
   const req = event.data
   buildStepExports(req).then(
-    ({ pieces, bracePoints, assemblyBlob }) => {
-      self.postMessage({ type: 'result', requestId: req.requestId, pieces, bracePoints, assemblyBlob } satisfies StepExportWorkerMessage)
+    ({ pieces, bracePoints, assemblyBlob, profile }) => {
+      self.postMessage({ type: 'result', requestId: req.requestId, pieces, bracePoints, assemblyBlob, profile } satisfies StepExportWorkerMessage)
     },
     (err: unknown) => {
       self.postMessage({
