@@ -135,6 +135,7 @@ export const ru: Dictionary = {
   "Azimuth (Δ°)": "Азимут (Δ°)",
   "Elevation (Δ°)": "Угол места (Δ°)",
   "Reset Transform": "Сбросить преобразование",
+  "Level points": "Выровнять точки",
   "Language": "Язык",
   "Individual": "Отдельные",
   "Layer": "Слой",

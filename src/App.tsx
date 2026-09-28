@@ -660,6 +660,29 @@ function App() {
     })
   }
 
+  const handleLevelPoints = () => {
+    if (selectedVertexIndices.size < 2) return
+    const selected = Array.from(selectedVertexIndices).filter((idx) => sceneData.vertices.has(idx) && transformedVertices.has(idx))
+    if (selected.length < 2) return
+    const averageY = selected.reduce((sum, idx) => sum + transformedVertices.get(idx)!.y, 0) / selected.length
+
+    setVertexTransforms((prev) => {
+      const next = new Map(prev)
+      for (const idx of selected) {
+        const base = sceneData.vertices.get(idx)
+        if (!base) continue
+        const current = next.get(idx) ?? DEFAULT_VERTEX_TRANSFORM
+        const radius = base.r + current.r
+        if (!(radius > 0)) continue
+        const targetElevation = Math.asin(Math.min(1, Math.max(-1, averageY / radius)))
+        const updated = { ...current, elevation: targetElevation - base.elevation }
+        if (isDefaultVertexTransform(updated)) next.delete(idx)
+        else next.set(idx, updated)
+      }
+      return next
+    })
+  }
+
   const handleResetTransform = () => {
     if (selectedVertexIndices.size === 0) return
     setVertexTransforms((prev) => {
@@ -1047,6 +1070,7 @@ function App() {
         selectedVertexIndices={selectedVertexIndices}
         vertexTransforms={vertexTransforms}
         onTransformChange={handleTransformChange}
+        onLevelPoints={handleLevelPoints}
         onResetTransform={handleResetTransform}
         canAddPoints={canPairVertices}
         onAddPoints={handleAddPoints}
