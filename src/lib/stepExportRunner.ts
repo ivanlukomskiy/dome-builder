@@ -3,8 +3,8 @@ import type { FlangeShapeParams } from './flangeGeometry'
 import { computePreviewBuildInputs, type PreviewBuildInputParams, type StrutGeometryEntry } from './previewBuildInputs'
 import type { VertexEdgesInfo } from './edgesInfo'
 import { pairBracePoints, type BraceBody, type BracePoints } from './braceSolid'
+import { runExportBatches } from './exportBatchPool'
 import type {
-  StepExportPhase,
   StepExportPiece,
   StepExportRequest,
   StepExportWorkerMessage,
@@ -44,10 +44,7 @@ function runBatch(
   braceBodies: BraceBody[],
   shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'>,
   requestId: number,
-  phase: StepExportPhase,
-  doneBefore: number,
-  total: number,
-  onProgress: (progress: StepExportProgress) => void,
+  onProgress: (done: number) => void,
 ): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[] }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/stepExportWorker.ts', import.meta.url), {
@@ -64,7 +61,7 @@ function runBatch(
       if (msg.requestId !== requestId) return
 
       if (msg.type === 'progress') {
-        onProgress({ phase, done: doneBefore + msg.done, total })
+        onProgress(msg.done)
       } else if (msg.type === 'result') {
         settle(() => resolve({ pieces: msg.pieces, bracePoints: msg.bracePoints }))
       } else if (msg.type === 'error') {
@@ -128,8 +125,7 @@ function runAssembly(
 // Builds a STEP file for every visible strut and flange plate (see stepExportWorker.ts) and zips
 // them into a single archive, reporting progress as it goes. `isCancelled` is polled between
 // batches so a caller can abandon an in-flight export (e.g. the user navigated away) without
-// waiting for it to finish - the batch already in flight still runs to completion in its own
-// worker, but its result is discarded and no further batches start.
+// starting more work. Already-running batches finish in their own workers and are discarded.
 export async function runStepExport(
   params: RunStepExportParams,
   onProgress: (progress: StepExportProgress | null) => void,
@@ -149,81 +145,54 @@ export async function runStepExport(
     scale: params.scale,
   }
 
-  let nextRequestId = 0
   const allPieces: StepExportPiece[] = []
   // Every strut's brace plate end points, across batches - a brace's two struts can land in
   // different batches, so the bodies are only built once all of them are in.
   const allBracePoints: BracePoints[] = []
 
-  onProgress({ phase: 'struts', done: 0, total: strutEntries.length })
   const strutBatches = chunk(strutEntries, BATCH_SIZE)
-  for (let i = 0; i < strutBatches.length; i++) {
-    if (isCancelled()) return null
-    const batch = strutBatches[i]
-    try {
-      const { pieces, bracePoints } = await runBatch(
-        batch,
-        [],
-        [],
-        shared,
-        ++nextRequestId,
-        'struts',
-        i * BATCH_SIZE,
-        strutEntries.length,
-        onProgress,
-      )
-      allPieces.push(...pieces)
-      allBracePoints.push(...bracePoints)
-    } catch (err) {
-      console.error(`Failed to export struts ${batch.map((job) => job.index).join(', ')}`, err)
-    }
+  const strutResults = await runExportBatches(
+    strutBatches,
+    strutEntries.length,
+    (batch, i, report) => runBatch(batch, [], [], shared, i + 1, report),
+    (done, total) => onProgress({ phase: 'struts', done, total }),
+    (batch, err) => console.error(`Failed to export struts ${batch.map((job) => job.index).join(', ')}`, err),
+    isCancelled,
+  )
+  if (!strutResults) return null
+  for (const result of strutResults) {
+    if (!result) continue
+    allPieces.push(...result.pieces)
+    allBracePoints.push(...result.bracePoints)
   }
 
-  onProgress({ phase: 'flanges', done: 0, total: vertices.length })
   const vertexBatches = chunk(vertices, BATCH_SIZE)
-  for (let i = 0; i < vertexBatches.length; i++) {
-    if (isCancelled()) return null
-    const batch = vertexBatches[i]
-    try {
-      const { pieces } = await runBatch(
-        [],
-        batch,
-        [],
-        shared,
-        ++nextRequestId,
-        'flanges',
-        i * BATCH_SIZE,
-        vertices.length,
-        onProgress,
-      )
-      allPieces.push(...pieces)
-    } catch (err) {
-      console.error(`Failed to export flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
-    }
+  const vertexResults = await runExportBatches(
+    vertexBatches,
+    vertices.length,
+    (batch, i, report) => runBatch([], batch, [], shared, strutBatches.length + i + 1, report),
+    (done, total) => onProgress({ phase: 'flanges', done, total }),
+    (batch, err) => console.error(`Failed to export flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}`, err),
+    isCancelled,
+  )
+  if (!vertexResults) return null
+  for (const result of vertexResults) {
+    if (result) allPieces.push(...result.pieces)
   }
 
   const braceBodies = pairBracePoints(allBracePoints)
-  onProgress({ phase: 'braces', done: 0, total: braceBodies.length })
   const braceBatches = chunk(braceBodies, BATCH_SIZE)
-  for (let i = 0; i < braceBatches.length; i++) {
-    if (isCancelled()) return null
-    const batch = braceBatches[i]
-    try {
-      const { pieces } = await runBatch(
-        [],
-        [],
-        batch,
-        shared,
-        ++nextRequestId,
-        'braces',
-        i * BATCH_SIZE,
-        braceBodies.length,
-        onProgress,
-      )
-      allPieces.push(...pieces)
-    } catch (err) {
-      console.error(`Failed to export braces ${batch.map((b) => b.braceId).join(', ')}`, err)
-    }
+  const braceResults = await runExportBatches(
+    braceBatches,
+    braceBodies.length,
+    (batch, i, report) => runBatch([], [], batch, shared, strutBatches.length + vertexBatches.length + i + 1, report),
+    (done, total) => onProgress({ phase: 'braces', done, total }),
+    (batch, err) => console.error(`Failed to export braces ${batch.map((b) => b.braceId).join(', ')}`, err),
+    isCancelled,
+  )
+  if (!braceResults) return null
+  for (const result of braceResults) {
+    if (result) allPieces.push(...result.pieces)
   }
 
   if (isCancelled()) return null

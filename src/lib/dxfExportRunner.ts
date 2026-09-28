@@ -7,6 +7,7 @@ import type { Vec3 } from './braceSolid'
 import { computeBraceEndpoints } from './braces'
 import type { Lang } from './i18n'
 import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './partNames'
+import { runExportBatches } from './exportBatchPool'
 import type { DxfExportPhase, DxfExportRequest, DxfExportWorkerMessage } from '../workers/dxfExportWorker'
 
 // Same per-worker item cap as the STEP export and the live Preview build, for the same reason.
@@ -129,10 +130,7 @@ function runBatch(
   vertices: VertexEdgesInfo[],
   shared: Shared,
   requestId: number,
-  phase: DxfExportPhase,
-  doneBefore: number,
-  total: number,
-  onProgress: (progress: DxfExportProgress) => void,
+  onProgress: (done: number) => void,
 ): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[] }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/dxfExportWorker.ts', import.meta.url), { type: 'module' })
@@ -143,7 +141,7 @@ function runBatch(
     worker.onmessage = (event: MessageEvent<DxfExportWorkerMessage>) => {
       const msg = event.data
       if (msg.requestId !== requestId) return
-      if (msg.type === 'progress') onProgress({ phase, done: doneBefore + msg.done, total })
+      if (msg.type === 'progress') onProgress(msg.done)
       else if (msg.type === 'result') settle(() => resolve({ parts: msg.parts, bracePoints: msg.bracePoints }))
       else if (msg.type === 'error') settle(() => reject(new Error(msg.message)))
     }
@@ -176,35 +174,37 @@ export async function runDxfExport(
     names,
   }
 
-  let nextRequestId = 0
   const parts: DxfPart[] = []
   const bracePoints: BracePoints[] = []
 
-  onProgress({ phase: 'struts', done: 0, total: strutEntries.length })
   const strutBatches = chunk(strutEntries, BATCH_SIZE)
-  for (let i = 0; i < strutBatches.length; i++) {
-    if (isCancelled()) return null
-    const batch = strutBatches[i]
-    try {
-      const result = await runBatch(batch, [], shared, ++nextRequestId, 'struts', i * BATCH_SIZE, strutEntries.length, onProgress)
-      parts.push(...result.parts)
-      bracePoints.push(...result.bracePoints)
-    } catch (err) {
-      console.error(`Failed to build DXF outlines for struts ${batch.map((job) => job.index).join(', ')}`, err)
-    }
+  const strutResults = await runExportBatches(
+    strutBatches,
+    strutEntries.length,
+    (batch, i, report) => runBatch(batch, [], shared, i + 1, report),
+    (done, total) => onProgress({ phase: 'struts', done, total }),
+    (batch, err) => console.error(`Failed to build DXF outlines for struts ${batch.map((job) => job.index).join(', ')}`, err),
+    isCancelled,
+  )
+  if (!strutResults) return null
+  for (const result of strutResults) {
+    if (!result) continue
+    parts.push(...result.parts)
+    bracePoints.push(...result.bracePoints)
   }
 
-  onProgress({ phase: 'flanges', done: 0, total: vertices.length })
   const vertexBatches = chunk(vertices, BATCH_SIZE)
-  for (let i = 0; i < vertexBatches.length; i++) {
-    if (isCancelled()) return null
-    const batch = vertexBatches[i]
-    try {
-      const result = await runBatch([], batch, shared, ++nextRequestId, 'flanges', i * BATCH_SIZE, vertices.length, onProgress)
-      parts.push(...result.parts)
-    } catch (err) {
-      console.error(`Failed to build DXF outlines for flanges of vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
-    }
+  const vertexResults = await runExportBatches(
+    vertexBatches,
+    vertices.length,
+    (batch, i, report) => runBatch([], batch, shared, strutBatches.length + i + 1, report),
+    (done, total) => onProgress({ phase: 'flanges', done, total }),
+    (batch, err) => console.error(`Failed to build DXF outlines for flanges of vertices ${batch.map((v) => v.vertexId).join(', ')}`, err),
+    isCancelled,
+  )
+  if (!vertexResults) return null
+  for (const result of vertexResults) {
+    if (result) parts.push(...result.parts)
   }
 
   if (isCancelled()) return null
