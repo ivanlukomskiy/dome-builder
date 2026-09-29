@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
+  alignVerticesVertically,
   applyVertexTransform,
   applyVertexTransforms,
   cartesianToPolar,
@@ -90,5 +91,47 @@ describe("scaleSceneDiameter", () => {
     expect(scaleSceneDiameter(scene, 0)).toBe(scene);
     expect(scaleSceneDiameter(scene, -5)).toBe(scene);
     expect(scaleSceneDiameter(scene, 4000)).toBe(scene);
+  });
+});
+
+
+describe("alignVerticesVertically", () => {
+  it("uses the transformed lowest point and preserves heights, radii, and unselected points", () => {
+    const vertices = new Map([
+      [0, { r: 10, azimuth: 0.2, elevation: 0.5 }],
+      [1, { r: 10, azimuth: 1, elevation: 0 }],
+      [2, { r: 12, azimuth: 3.5, elevation: 0.2 }],
+      [3, { r: 10, azimuth: 2, elevation: 0.1 }],
+    ]);
+    const transforms = new Map([
+      [0, { r: 2, azimuth: 0.3, elevation: -1 }],
+      [1, { r: 1, azimuth: 0.2, elevation: 0.1 }],
+      [3, { r: 3, azimuth: 0.1, elevation: 0.2 }],
+    ]);
+    const before = applyVertexTransforms(vertices, transforms);
+    const aligned = alignVerticesVertically(vertices, transforms, new Set([1, 2, 0]));
+    const after = applyVertexTransforms(vertices, aligned);
+    expect(aligned.get(0)).toEqual(transforms.get(0));
+    expect(aligned.get(3)).toEqual(transforms.get(3));
+    for (const id of [0, 1, 2]) {
+      expect(after.get(id)!.y).toBeCloseTo(before.get(id)!.y, 10);
+      expect(after.get(id)!.length()).toBeCloseTo(before.get(id)!.length(), 10);
+      expect(after.get(id)!.z * before.get(0)!.x - after.get(id)!.x * before.get(0)!.z).toBeCloseTo(0, 10);
+    }
+    // A point near the opposite side of the plane stays on that side.
+    expect(Math.abs(aligned.get(2)!.azimuth)).toBeLessThan(Math.PI / 2);
+    expect(alignVerticesVertically(vertices, aligned, new Set([1, 2, 0]))).toEqual(aligned);
+    expect(transforms.has(2)).toBe(false);
+  });
+
+  it("requires two valid points and handles a basis on the vertical axis", () => {
+    const vertices = new Map([
+      [0, { r: 10, azimuth: 0.7, elevation: -Math.PI / 2 }],
+      [1, { r: 10, azimuth: 1.2, elevation: 0 }],
+    ]);
+    expect(alignVerticesVertically(vertices, new Map(), new Set([0, 99])).size).toBe(0);
+    const aligned = alignVerticesVertically(vertices, new Map(), new Set([0, 1]));
+    expect(aligned.get(1)!.azimuth).toBeCloseTo(-0.5);
+    expect(aligned.has(0)).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import {
   addFaces,
   addMidpointsBetween,
   applyVertexTransforms,
+  alignVerticesVertically,
   computePolyhedron,
   connectVertexPairs,
   DEFAULT_DIAMETER_MM,
@@ -665,7 +666,7 @@ function App() {
     })
   }
 
-  const handleLevelPoints = () => {
+  const handleAlignHorizontally = () => {
     if (selectedVertexIndices.size < 2) return
     const selected = Array.from(selectedVertexIndices).filter((idx) => sceneData.vertices.has(idx) && transformedVertices.has(idx))
     if (selected.length < 2) return
@@ -686,6 +687,11 @@ function App() {
       }
       return next
     })
+  }
+
+  const handleAlignVertically = () => {
+    if (selectedVertexIndices.size < 2) return
+    setVertexTransforms((prev) => alignVerticesVertically(sceneData.vertices, prev, selectedVertexIndices))
   }
 
   const handleResetTransform = () => {
@@ -1082,7 +1088,8 @@ function App() {
         selectedVertexIndices={selectedVertexIndices}
         vertexTransforms={vertexTransforms}
         onTransformChange={handleTransformChange}
-        onLevelPoints={handleLevelPoints}
+        onAlignHorizontally={handleAlignHorizontally}
+        onAlignVertically={handleAlignVertically}
         onResetTransform={handleResetTransform}
         canAddPoints={canPairVertices}
         onAddPoints={handleAddPoints}

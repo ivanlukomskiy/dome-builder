@@ -84,7 +84,8 @@ interface SidebarProps {
   selectedVertexIndices: ReadonlySet<number>
   vertexTransforms: ReadonlyMap<number, VertexTransform>
   onTransformChange: (field: keyof VertexTransform, value: number) => void
-  onLevelPoints: () => void
+  onAlignHorizontally: () => void
+  onAlignVertically: () => void
   onResetTransform: () => void
   canAddPoints: boolean
   onAddPoints: () => void
@@ -315,7 +316,8 @@ export function Sidebar({
   selectedVertexIndices,
   vertexTransforms,
   onTransformChange,
-  onLevelPoints,
+  onAlignHorizontally,
+  onAlignVertically,
   onResetTransform,
   canAddPoints,
   onAddPoints,
@@ -1264,8 +1266,11 @@ export function Sidebar({
               : t('Polar offsets from the default position, about the dome center. Radius moves the vertex toward/away from the center; azimuth rotates it around the vertical axis; elevation tilts it up/down along its meridian.')}
           </p>
           <div className="button-row">
-            <button disabled={selectedCount < 2} onClick={onLevelPoints}>
-              {t('Level points')}
+            <button disabled={selectedCount < 2} onClick={onAlignHorizontally}>
+              {t('Align horizontally')}
+            </button>
+            <button disabled={selectedCount < 2} onClick={onAlignVertically}>
+              {t('Align vertically')}
             </button>
             <button disabled={!hasTransforms} onClick={onResetTransform}>
               {t('Reset Transform')}

@@ -556,6 +556,34 @@ export function applyVertexTransforms(
   return result
 }
 
+// Rotate into the lowest selected vertex's meridian plane by the shortest angle.
+// For a basis on OY (whose plane is ambiguous), use its stored azimuth.
+export function alignVerticesVertically(
+  vertices: ReadonlyMap<number, PolarCoord>,
+  transforms: ReadonlyMap<number, VertexTransform>,
+  selectedIds: ReadonlySet<number>,
+): Map<number, VertexTransform> {
+  const next = new Map(transforms)
+  const selected = Array.from(selectedIds).filter((id) => vertices.has(id))
+  if (selected.length < 2) return next
+  const position = (id: number) => applyVertexTransform(vertices.get(id)!, transforms.get(id) ?? DEFAULT_VERTEX_TRANSFORM)
+  const basisId = selected.reduce((lowest, id) => position(id).y < position(lowest).y ? id : lowest)
+  const basisAzimuth = vertices.get(basisId)!.azimuth + (transforms.get(basisId)?.azimuth ?? 0)
+  for (const id of selected) {
+    if (id === basisId) continue
+    const base = vertices.get(id)!
+    const current = transforms.get(id) ?? DEFAULT_VERTEX_TRANSFORM
+    const difference = basisAzimuth - (base.azimuth + current.azimuth)
+    // Both azimuths separated by PI lie in the same plane.
+    const rotation = difference - Math.round(difference / Math.PI) * Math.PI
+    if (Math.abs(rotation) < 1e-12) continue
+    const updated = { ...current, azimuth: current.azimuth + rotation }
+    if (isDefaultVertexTransform(updated)) next.delete(id)
+    else next.set(id, updated)
+  }
+  return next
+}
+
 // An edge's own "position", for grouping purposes (layer/symmetric selection work the same way
 // for edges as for vertices, just keyed off this midpoint instead of the vertex itself). Takes
 // a generic positionOf since an edge (canonical or added) can reference added vertices too.
