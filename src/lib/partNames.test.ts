@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { bracePlateNameKey, createPartNameMaps, flangeNameKey } from './partNames'
 
 describe('createPartNameMaps', () => {
-  it('groups elevation-named parts highest first and numbers each group clockwise around Y', () => {
+  it('numbers parts continuously from top to bottom and clockwise within each elevation', () => {
     const names = createPartNameMaps(
       {
         struts: [
@@ -20,19 +20,18 @@ describe('createPartNameMaps', () => {
         bracePlates: [],
         braces: [],
       },
-      'en',
     )
 
-    expect(names.struts[11]).toBe('S-A1')
-    expect(names.struts[10]).toBe('S-A2')
-    expect(names.struts[12]).toBe('S-B1')
-    expect(names.flanges[flangeNameKey(1, 'inner')]).toBe('FI-A1')
-    expect(names.flanges[flangeNameKey(2, 'inner')]).toBe('FI-A2')
-    expect(names.flanges[flangeNameKey(1, 'outer')]).toBe('FE-A1')
-    expect(names.flangePairs[1]).toBe('FI-A1/FE-A1')
+    expect(names.struts[11]).toBe('1')
+    expect(names.struts[10]).toBe('2')
+    expect(names.struts[12]).toBe('3')
+    expect(names.flanges[flangeNameKey(1, 'inner')]).toBe('1')
+    expect(names.flanges[flangeNameKey(2, 'inner')]).toBe('2')
+    expect(names.flanges[flangeNameKey(1, 'outer')]).toBe('3')
+    expect(names.flanges[flangeNameKey(2, 'outer')]).toBe('4')
   })
 
-  it('numbers foots, brace plates, and braces clockwise without elevation letters', () => {
+  it('uses independent numeric sequences for feet, brace plates, and braces', () => {
     const names = createPartNameMaps(
       {
         struts: [],
@@ -50,31 +49,29 @@ describe('createPartNameMaps', () => {
           { id: 6, center: [1, 10, 0] },
         ],
       },
-      'ru',
     )
 
-    expect(names.feet[2]).toBe('О-1')
-    expect(names.feet[1]).toBe('О-2')
-    expect(names.bracePlates[bracePlateNameKey(8, 21, 'B')]).toBe('ПР-1')
-    expect(names.bracePlates[bracePlateNameKey(7, 20, 'A')]).toBe('ПР-2')
-    expect(names.braces[6]).toBe('Р-1')
-    expect(names.braces[5]).toBe('Р-2')
+    expect(names.feet[2]).toBe('1')
+    expect(names.feet[1]).toBe('2')
+    expect(names.bracePlates[bracePlateNameKey(8, 21, 'B')]).toBe('1')
+    expect(names.bracePlates[bracePlateNameKey(7, 20, 'A')]).toBe('2')
+    expect(names.braces[6]).toBe('2')
+    expect(names.braces[5]).toBe('1')
   })
 
-  it('does not use Ё in Russian elevation letters', () => {
-    const names = createPartNameMaps(
-      {
-        struts: Array.from({ length: 8 }, (_, i) => ({ id: i, center: [1, 100 - i, 0] as [number, number, number] })),
-        flanges: [],
-        feet: [],
-        bracePlates: [],
-        braces: [],
-      },
-      'ru',
-    )
-
-    expect(names.struts[5]).toBe('П-Е1')
-    expect(names.struts[6]).toBe('П-Ж1')
-    expect(Object.values(names.struts).some((name) => name.includes('Ё'))).toBe(false)
+  it('preserves clockwise ordering for near-equal elevations and breaks angle ties deterministically', () => {
+    const input = {
+      struts: [
+        { id: 20, center: [0, 100 + 1e-8, -1] as [number, number, number] },
+        { id: 10, center: [1, 100, 0] as [number, number, number] },
+        { id: 2, center: [1, 100, 0] as [number, number, number] },
+        { id: 1, center: [1, 50, 0] as [number, number, number] },
+      ],
+      flanges: [], feet: [], bracePlates: [], braces: [],
+    }
+    const names = createPartNameMaps(input)
+    expect(names.struts).toEqual({ 2: '1', 10: '2', 20: '3', 1: '4' })
+    expect(createPartNameMaps({ ...input, struts: [...input.struts].reverse() })).toEqual(names)
+    expect(names.feet).toEqual({})
   })
 })

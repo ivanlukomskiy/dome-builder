@@ -23,7 +23,7 @@ export const ru: Dictionary = {
   "Click a brace to select it. Add braces from two edges in the Edges tab.": "Нажмите на раскос, чтобы выбрать его. Раскосы добавляются по двум рёбрам на вкладке «Рёбра».",
   "Default position (0, 0, 0)": "Исходное положение (0, 0, 0)",
   "Polar offsets from the default position, about the dome center. Radius moves the vertex toward/away from the center; azimuth rotates it around the vertical axis; elevation tilts it up/down along its meridian.": "Полярные смещения от исходного положения относительно центра купола. Радиус приближает вершину к центру или удаляет от него; азимут поворачивает её вокруг вертикальной оси; угол места поднимает или опускает её вдоль меридиана.",
-  "The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its localized part ID in red. Green labels show matching localized part IDs where parts connect.": "В DXF плоские контуры всех этих деталей размещаются на одном листе (в одном масштабе), каждая подписана локализованным ID красным цветом. Зелёные подписи показывают соответствующие локализованные ID в местах соединения деталей.",
+  "The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.": "В DXF плоские контуры всех этих деталей размещаются на одном листе (в одном масштабе), каждая подписана числовым ID красным цветом. Зелёные подписи показывают соответствующие числовые ID в местах соединения деталей.",
   "Building {phase} — {done} / {total}": "Сборка {phase} — {done} / {total}",
   "DXF: building {phase} — {done} / {total}": "DXF: сборка {phase} — {done} / {total}",
   "struts": "балок",

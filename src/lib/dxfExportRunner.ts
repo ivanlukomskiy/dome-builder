@@ -5,7 +5,6 @@ import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, projectToFrame2D, t
 import { layoutDxfParts, writeDxf, type DxfHelperText, type DxfPart } from './dxf'
 import type { Vec3 } from './braceSolid'
 import { computeBraceEndpoints } from './braces'
-import type { Lang } from './i18n'
 import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './partNames'
 import { runExportBatches } from './exportBatchPool'
 import { exportProfilingEnabled, publishExportProfile, type ExportBatchProfile, type ExportWorkerProfile } from './exportProfile'
@@ -74,7 +73,6 @@ function buildDxfPartNames(
   strutEntries: StrutGeometryEntry[],
   vertices: VertexEdgesInfo[],
   halfWidth: number,
-  lang: Lang,
 ): PartNameMaps {
   const flangeSpan = halfWidth - params.grooveDepth / 2
   const flanges = vertices.flatMap((vertex) => {
@@ -122,7 +120,6 @@ function buildDxfPartNames(
       bracePlates,
       braces,
     },
-    lang,
   )
 }
 
@@ -168,7 +165,6 @@ function runBatch(
 // `params.scale`. `isCancelled` is polled between batches. Returns null if cancelled.
 export async function runDxfExport(
   params: RunStepExportParams,
-  lang: Lang,
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
 ): Promise<Blob | null> {
@@ -176,7 +172,7 @@ export async function runDxfExport(
   const profiling = exportProfilingEnabled()
   const batchProfiles: ExportBatchProfile[] = []
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
-  const names = buildDxfPartNames(params, strutEntries, vertices, halfWidth, lang)
+  const names = buildDxfPartNames(params, strutEntries, vertices, halfWidth)
 
   const shared: Shared = {
     halfWidth,
@@ -250,8 +246,8 @@ export async function runDxfExport(
       return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
     }
     const ends: [string, [number, number]][] = [
-      [names.struts[body.edgeIdA] ?? `S${body.edgeIdA}`, mid(body.a)],
-      [names.struts[body.edgeIdB] ?? `S${body.edgeIdB}`, mid(body.b)],
+      [names.struts[body.edgeIdA], mid(body.a)],
+      [names.struts[body.edgeIdB], mid(body.b)],
     ]
     const dir: [number, number] = [ends[1][1][0] - ends[0][1][0], ends[1][1][1] - ends[0][1][1]]
     const len = Math.hypot(dir[0], dir[1]) || 1
@@ -269,7 +265,7 @@ export async function runDxfExport(
       }
     })
     parts.push({
-      name: names.braces[body.braceId] ?? `brace-${body.braceId}`,
+      name: names.braces[body.braceId],
       kind: 'brace',
       loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
       labelAngleDeg: (Math.atan2(unit[1], unit[0]) * 180) / Math.PI,

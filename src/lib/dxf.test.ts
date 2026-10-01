@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { layoutDxfParts, readableAngle, writeDxf, type DxfPart } from './dxf'
+import { createPartNameMaps, flangeNameKey } from './partNames'
 import type { DxfPolyline } from './dxfExport'
 
 const rect = (w: number, h: number, x = 0, y = 0): DxfPolyline => ({
@@ -161,5 +162,36 @@ describe('helper labels', () => {
     expect(readableAngle(-90)).toBe(90)
     expect(readableAngle(270)).toBe(90)
     expect(readableAngle(135)).toBeCloseTo(-45)
+  })
+})
+
+
+describe('numeric part labels', () => {
+  it('writes numeric part IDs and matching connection IDs even when kinds share a number', () => {
+    const names = createPartNameMaps({
+      struts: [{ id: 42, center: [1, 20, 0] }],
+      flanges: [
+        { vertexId: 7, side: 'outer', center: [1, 30, 0] },
+        { vertexId: 7, side: 'inner', center: [1, 10, 0] },
+      ],
+      feet: [], bracePlates: [], braces: [],
+    })
+    const parts: DxfPart[] = [
+      { ...part(names.struts[42], 'strut', 100, 30), helpers: [
+        { text: names.flanges[flangeNameKey(7, 'outer')], x: 10, y: 10, angleDeg: 0, height: 5 },
+        { text: names.flanges[flangeNameKey(7, 'inner')], x: 80, y: 10, angleDeg: 0, height: 5 },
+      ] },
+      ...(['outer', 'inner'] as const).map((side) => ({
+        ...part(names.flanges[flangeNameKey(7, side)], 'flange', 30, 30),
+        helpers: [{ text: names.struts[42], x: 10, y: 10, angleDeg: 0, height: 5 }],
+      })),
+    ]
+    const dxf = writeDxf(layoutDxfParts(parts, { scale: 1 }))
+    const labels = dxf.split('\n0\nTEXT\n').slice(1).map((entity) => ({
+      layer: entity.match(/^8\n([^\n]+)/)![1],
+      text: entity.match(/\n1\n([^\n]+)/)![1],
+    }))
+    expect(labels.filter((label) => label.layer === 'LABELS').map((label) => label.text).sort()).toEqual(['1', '1', '2'])
+    expect(labels.filter((label) => label.layer === 'HELPERS').map((label) => label.text).sort()).toEqual(['1', '1', '1', '2'])
   })
 })

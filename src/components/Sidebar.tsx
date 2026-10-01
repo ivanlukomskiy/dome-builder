@@ -915,7 +915,7 @@ export function Sidebar({
               ? dxfExportProgress.phase === 'writing'
                 ? t('Writing DXF…')
                 : t('DXF: building {phase} — {done} / {total}', { phase: t(dxfExportProgress.phase), done: dxfExportProgress.done, total: dxfExportProgress.total })
-              : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its localized part ID in red. Green labels show matching localized part IDs where parts connect.')}
+              : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')}
           </p>
         </section>
       )}

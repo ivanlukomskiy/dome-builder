@@ -220,14 +220,14 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           const inner = add2(mark.point, scale2(side, -tabOffset))
           const angleDeg = axisAngleDeg(mark.axis)
           helpers.push({
-            text: req.names.flanges[flangeNameKey(vertexId, 'outer')] ?? `FE${vertexId}`,
+            text: req.names.flanges[flangeNameKey(vertexId, 'outer')],
             x: outer[0],
             y: outer[1],
             angleDeg,
             height: HELPER_HEIGHT,
           })
           helpers.push({
-            text: req.names.flanges[flangeNameKey(vertexId, 'inner')] ?? `FI${vertexId}`,
+            text: req.names.flanges[flangeNameKey(vertexId, 'inner')],
             x: inner[0],
             y: inner[1],
             angleDeg,
@@ -236,14 +236,14 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         }
         for (const mark of boundary.braceMarks) {
           helpers.push({
-            text: req.names.braces[mark.braceId] ?? `B${mark.braceId}`,
+            text: req.names.braces[mark.braceId],
             x: mark.point[0],
             y: mark.point[1],
             angleDeg: axisAngleDeg(mark.axis),
             height: HELPER_HEIGHT,
           })
         }
-        const partName = req.names.struts[job.index] ?? `strut-${job.index}`
+        const partName = req.names.struts[job.index]
         const avoidAreas = [boundary.bracePlateEndsA, boundary.bracePlateEndsB].flatMap((ends) =>
           ends ? [labelAvoidArea(ends, partName)] : [],
         )
@@ -275,7 +275,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       if (!plate) continue
       try {
         parts.push({
-          name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)] ?? `brace-plate-${brace.braceId}-strut-${job.index}-${end}`,
+          name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)],
           kind: 'brace-plate',
           loops: timed('outlineToPolylines', () => drawingToPolylines(plate)),
           labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
@@ -309,7 +309,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           const [dx, dy] = polar2(mark.angleDeg, HELPER_HEIGHT * 0.9)
           const [x, y] = add2(mark.farSideCenter, [dx, dy])
           return {
-            text: req.names.struts[mark.edgeId] ?? `S${mark.edgeId}`,
+            text: req.names.struts[mark.edgeId],
             x,
             y,
             angleDeg: mark.angleDeg + 90,
@@ -320,7 +320,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           const [x, y] = polar2(vertex.foot.projectedAngleDeg, vertex.foot.holeOffset + vertex.foot.thickness / 2)
           const [labelX, labelY] = labelBeside([x, y], vertex.foot.projectedAngleDeg, vertex.foot.grooveLength / 2 + HELPER_HEIGHT * 0.9)
           helpers.push({
-            text: req.names.feet[vertex.vertexId] ?? `F${vertex.vertexId}`,
+            text: req.names.feet[vertex.vertexId],
             x: labelX,
             y: labelY,
             angleDeg: vertex.foot.projectedAngleDeg,
@@ -328,7 +328,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           })
         }
         parts.push({
-          name: req.names.flanges[flangeNameKey(vertex.vertexId, side)] ?? `flange-${vertex.vertexId}-${side}`,
+          name: req.names.flanges[flangeNameKey(vertex.vertexId, side)],
           kind: 'flange',
           loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
           labelAnchor: { x: 0, y: req.flangeParams.centerHoleDiameter / 2 + 8 },
@@ -346,19 +346,19 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         if (boundary.main) {
           const tabOffset = footTabOffset(req.halfWidth * 2, req.grooveDepth)
           parts.push({
-            name: req.names.feet[vertex.vertexId] ?? `foot-${vertex.vertexId}`,
+            name: req.names.feet[vertex.vertexId],
             kind: 'foot',
             loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
             helpers: [
               {
-                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'outer')] ?? `FE${vertex.vertexId}`,
+                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'outer')],
                 x: 0,
                 y: tabOffset,
                 angleDeg: 0,
                 height: HELPER_HEIGHT,
               },
               {
-                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'inner')] ?? `FI${vertex.vertexId}`,
+                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'inner')],
                 x: 0,
                 y: -tabOffset,
                 angleDeg: 0,
