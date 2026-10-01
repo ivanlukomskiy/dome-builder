@@ -58,6 +58,10 @@ interface SidebarProps {
   dxfExportProgress: DxfExportProgress | null
   stepExportProgress: StepExportProgress | null
   stepAssemblyExportProgress: StepExportProgress | null
+  partIdLabelSize: number
+  onPartIdLabelSizeChange: (size: number) => void
+  connectedPartIdLabelSize: number
+  onConnectedPartIdLabelSizeChange: (size: number) => void
   stepExportScale: number
   onStepExportScaleChange: (scale: number) => void
   mode: ViewMode
@@ -290,6 +294,10 @@ export function Sidebar({
   dxfExportProgress,
   stepExportProgress,
   stepAssemblyExportProgress,
+  partIdLabelSize,
+  onPartIdLabelSizeChange,
+  connectedPartIdLabelSize,
+  onConnectedPartIdLabelSizeChange,
   stepExportScale,
   onStepExportScaleChange,
   mode,
@@ -886,6 +894,14 @@ export function Sidebar({
               min={0.01}
               onCommit={onStepExportScaleChange}
             />
+          </div>
+          <div className="transform-field">
+            <label>{t('Part ID label size (mm)')}</label>
+            <NumberField value={partIdLabelSize} step={0.5} min={0.1} onCommit={onPartIdLabelSizeChange} />
+          </div>
+          <div className="transform-field">
+            <label>{t('Connected part ID labels size (mm)')}</label>
+            <NumberField value={connectedPartIdLabelSize} step={0.5} min={0.1} onCommit={onConnectedPartIdLabelSizeChange} />
           </div>
           <div className="button-row">
             <button onClick={onDownloadSteps} disabled={stepExportBusy}>

@@ -1,3 +1,4 @@
+import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
 import type { DxfPolyline, DxfVertex } from './dxfExport'
 
 // The DXF sheet for the parts export: the layout of every part's outlines (with circular arcs
@@ -69,10 +70,10 @@ export interface DxfLayoutOptions {
   scale: number
   // Sheet row width, before scaling is applied to it - rows wrap when a part would pass it.
   // Defaults to a roughly square sheet.
+  partIdLabelSize?: number
   maxRowWidth?: number
 }
 
-const LABEL_HEIGHT = 8 // mm at scale 1
 const GAP = 20 // mm at scale 1
 // Rough width of one label character relative to the text height - only used to keep neighboring
 // labels from running into each other.
@@ -138,7 +139,7 @@ function transformLoops(loops: DxfPolyline[], dx: number, dy: number, scale: num
 // geometry are dropped.
 export function layoutDxfParts(parts: DxfPart[], options: DxfLayoutOptions): PlacedDxfPart[] {
   const { scale } = options
-  const labelHeight = LABEL_HEIGHT * scale
+  const labelHeight = (options.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize) * scale
   const gap = GAP * scale
 
   interface Item {

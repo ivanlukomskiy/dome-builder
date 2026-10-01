@@ -6,6 +6,8 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  "Part ID label size (mm)": "Размер подписи ID детали (мм)",
+  "Connected part ID labels size (mm)": "Размер подписей ID соединяемых деталей (мм)",
   "{n} axis": ["{n} ось", "{n} оси", "{n} осей"],
   "{fold}-fold": "порядок {fold}",
   "Mixed": "Разные",

@@ -31,6 +31,14 @@ export interface PartNameMaps {
 
 const ELEVATION_EPSILON = 1e-6
 
+function formatPartId(id: number): string {
+  const text = String(id)
+  if (!/^[01689]+$/.test(text)) return text
+  const rotated = [...text].reverse().map((digit) => digit === '6' ? '9' : digit === '9' ? '6' : digit).join('')
+  // Also mark self-rotating combinations containing 6/9 (such as 69 and 96).
+  return /[69]/.test(text) || rotated !== text ? `${text}.` : text
+}
+
 export function flangeNameKey(vertexId: number, side: FlangeNameSide): string {
   return `${vertexId}:${side}`
 }
@@ -73,7 +81,7 @@ function assignNumericNames<Id extends string | number>(
   const flush = () => {
     if (inGroup.length === 0) return
     inGroup.sort(compareClockwise).forEach((item) => {
-      result[item.id] = String(nextId++)
+      result[item.id] = formatPartId(nextId++)
     })
   }
 

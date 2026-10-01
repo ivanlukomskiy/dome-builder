@@ -68,3 +68,17 @@ describe('config migration', () => {
     expect('sideHoleDiameter' in config).toBe(false)
   })
 })
+
+
+describe('DXF label settings', () => {
+  it('defaults old configs to the original text sizes and preserves custom sizes', () => {
+    const state = deserializeConfig(legacyConfig)
+    expect(state.partIdLabelSize).toBe(8)
+    expect(state.connectedPartIdLabelSize).toBe(5)
+    const restored = deserializeConfig(serializeConfig({
+      ...state, partIdLabelSize: 12, connectedPartIdLabelSize: 7,
+    }))
+    expect(restored.partIdLabelSize).toBe(12)
+    expect(restored.connectedPartIdLabelSize).toBe(7)
+  })
+})

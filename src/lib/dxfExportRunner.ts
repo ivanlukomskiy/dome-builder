@@ -1,3 +1,4 @@
+import { DEFAULT_DXF_LABEL_SETTINGS, type DxfLabelSettings } from './dxfLabelSettings'
 import { computePreviewBuildInputs, type StrutGeometryEntry } from './previewBuildInputs'
 import type { VertexEdgesInfo } from './edgesInfo'
 import type { RunStepExportParams } from './stepExportRunner'
@@ -12,9 +13,6 @@ import type { DxfExportPhase, DxfExportRequest, DxfExportWorkerMessage } from '.
 
 // Same per-worker item cap as the STEP export and the live Preview build, for the same reason.
 const BATCH_SIZE = 12
-
-// Height (mm at scale 1) of the green strut labels on braces.
-const BRACE_HELPER_HEIGHT = 5
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = []
@@ -167,6 +165,7 @@ export async function runDxfExport(
   params: RunStepExportParams,
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
+  labelSettings: DxfLabelSettings = DEFAULT_DXF_LABEL_SETTINGS,
 ): Promise<Blob | null> {
   const startedAt = performance.now()
   const profiling = exportProfilingEnabled()
@@ -175,6 +174,7 @@ export async function runDxfExport(
   const names = buildDxfPartNames(params, strutEntries, vertices, halfWidth)
 
   const shared: Shared = {
+    ...labelSettings,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
     midGrooveLengthPercent: params.midGrooveLengthPercent,
@@ -240,7 +240,7 @@ export async function runDxfExport(
     if (!frame) continue
     // Green: the strut each end of the brace goes into, written along the brace just inside
     // the end (the middle of that strut's two plate end points).
-    const height = BRACE_HELPER_HEIGHT
+    const height = labelSettings.connectedPartIdLabelSize
     const mid = (pts: [Vec3, Vec3]): [number, number] => {
       const [p, q] = pts.map((pt) => projectToFrame2D(frame, pt))
       return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
@@ -274,7 +274,7 @@ export async function runDxfExport(
   }
 
   const layoutStart = performance.now()
-  const placed = layoutDxfParts(parts, { scale: params.scale })
+  const placed = layoutDxfParts(parts, { scale: params.scale, partIdLabelSize: labelSettings.partIdLabelSize })
   const writeStart = performance.now()
   const blob = new Blob([writeDxf(placed)], { type: 'application/dxf' })
   if (profiling) publishExportProfile('dxf', startedAt, batchProfiles, {

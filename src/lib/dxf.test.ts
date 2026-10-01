@@ -195,3 +195,18 @@ describe('numeric part labels', () => {
     expect(labels.filter((label) => label.layer === 'HELPERS').map((label) => label.text).sort()).toEqual(['1', '1', '1', '2'])
   })
 })
+
+
+describe('configurable label heights', () => {
+  it('scales custom part and connection heights into the DXF text entities', () => {
+    const placed = layoutDxfParts([{
+      ...part('1', 'strut', 100, 40),
+      helpers: [{ text: '2', x: 10, y: 10, angleDeg: 0, height: 7 }],
+    }], { scale: 2, partIdLabelSize: 12 })
+    expect(placed[0].label.height).toBe(24)
+    expect(placed[0].helpers[0].height).toBe(14)
+    const entities = writeDxf(placed).split('\n0\nTEXT\n').slice(1)
+    expect(entities.find((entity) => entity.startsWith('8\nLABELS'))).toContain('\n40\n24.0000\n')
+    expect(entities.find((entity) => entity.startsWith('8\nHELPERS'))).toContain('\n40\n14.0000\n')
+  })
+})

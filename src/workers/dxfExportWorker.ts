@@ -21,6 +21,8 @@ import { bracePlateNameKey, flangeNameKey, type PartNameMaps } from '../lib/part
 declare const self: DedicatedWorkerGlobalScope
 
 export interface DxfExportRequest {
+  partIdLabelSize: number
+  connectedPartIdLabelSize: number
   requestId: number
   profile?: boolean
   strutJobs: StrutGeometryEntry[]
@@ -44,9 +46,6 @@ export type DxfExportWorkerMessage =
   | { type: 'result'; requestId: number; parts: DxfPart[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile }
   | { type: 'error'; requestId: number; message: string }
 
-// Height (mm at scale 1) of the green connection labels.
-const HELPER_HEIGHT = 5
-const RED_LABEL_HEIGHT = 8
 const TEXT_WIDTH_FACTOR = 0.8
 
 interface LabelAvoidArea {
@@ -122,13 +121,13 @@ function distance2(a: [number, number], b: [number, number]): number {
   return dx * dx + dy * dy
 }
 
-function labelAvoidArea(ends: [{ x: number; y: number } | [number, number], { x: number; y: number } | [number, number]], label: string): LabelAvoidArea {
+function labelAvoidArea(ends: [{ x: number; y: number } | [number, number], { x: number; y: number } | [number, number]], label: string, labelHeight: number): LabelAvoidArea {
   const a = pointTuple(ends[0])
   const b = pointTuple(ends[1])
   const center: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
   const plateHalfLength = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2
-  const labelHalfLength = (label.length * RED_LABEL_HEIGHT * TEXT_WIDTH_FACTOR) / 2
-  return { center, radius: plateHalfLength + labelHalfLength + RED_LABEL_HEIGHT * 0.5 }
+  const labelHalfLength = (label.length * labelHeight * TEXT_WIDTH_FACTOR) / 2
+  return { center, radius: plateHalfLength + labelHalfLength + labelHeight * 0.5 }
 }
 
 function strutLabel(
@@ -214,7 +213,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         const helpers: DxfHelperText[] = []
         for (const mark of boundary.endMarks) {
           const vertexId = mark.end === 'A' ? job.vertexA : job.vertexB
-          const tabOffset = Math.max(req.halfWidth - req.grooveDepth / 2, HELPER_HEIGHT)
+          const tabOffset = Math.max(req.halfWidth - req.grooveDepth / 2, req.connectedPartIdLabelSize)
           const side = scale2(rightOf(mark.axis), mark.end === 'A' ? 1 : -1)
           const outer = add2(mark.point, scale2(side, tabOffset))
           const inner = add2(mark.point, scale2(side, -tabOffset))
@@ -224,14 +223,14 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
             x: outer[0],
             y: outer[1],
             angleDeg,
-            height: HELPER_HEIGHT,
+            height: req.connectedPartIdLabelSize,
           })
           helpers.push({
             text: req.names.flanges[flangeNameKey(vertexId, 'inner')],
             x: inner[0],
             y: inner[1],
             angleDeg,
-            height: HELPER_HEIGHT,
+            height: req.connectedPartIdLabelSize,
           })
         }
         for (const mark of boundary.braceMarks) {
@@ -240,12 +239,12 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
             x: mark.point[0],
             y: mark.point[1],
             angleDeg: axisAngleDeg(mark.axis),
-            height: HELPER_HEIGHT,
+            height: req.connectedPartIdLabelSize,
           })
         }
         const partName = req.names.struts[job.index]
         const avoidAreas = [boundary.bracePlateEndsA, boundary.bracePlateEndsB].flatMap((ends) =>
-          ends ? [labelAvoidArea(ends, partName)] : [],
+          ends ? [labelAvoidArea(ends, partName, req.partIdLabelSize)] : [],
         )
         const label = strutLabel(posA, posB, center, avoidAreas, req.roundStrutBridge)
         parts.push({
@@ -306,32 +305,32 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       try {
         // Which strut goes into each rectangular hole, in green along the hole.
         const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => {
-          const [dx, dy] = polar2(mark.angleDeg, HELPER_HEIGHT * 0.9)
+          const [dx, dy] = polar2(mark.angleDeg, req.connectedPartIdLabelSize * 0.9)
           const [x, y] = add2(mark.farSideCenter, [dx, dy])
           return {
             text: req.names.struts[mark.edgeId],
             x,
             y,
             angleDeg: mark.angleDeg + 90,
-            height: Math.min(HELPER_HEIGHT, mark.holeWidth * 0.7),
+            height: Math.min(req.connectedPartIdLabelSize, mark.holeWidth * 0.7),
           }
         })
         if (vertex.foot) {
           const [x, y] = polar2(vertex.foot.projectedAngleDeg, vertex.foot.holeOffset + vertex.foot.thickness / 2)
-          const [labelX, labelY] = labelBeside([x, y], vertex.foot.projectedAngleDeg, vertex.foot.grooveLength / 2 + HELPER_HEIGHT * 0.9)
+          const [labelX, labelY] = labelBeside([x, y], vertex.foot.projectedAngleDeg, vertex.foot.grooveLength / 2 + req.connectedPartIdLabelSize * 0.9)
           helpers.push({
             text: req.names.feet[vertex.vertexId],
             x: labelX,
             y: labelY,
             angleDeg: vertex.foot.projectedAngleDeg,
-            height: Math.min(HELPER_HEIGHT, vertex.foot.grooveLength * 0.7),
+            height: Math.min(req.connectedPartIdLabelSize, vertex.foot.grooveLength * 0.7),
           })
         }
         parts.push({
           name: req.names.flanges[flangeNameKey(vertex.vertexId, side)],
           kind: 'flange',
           loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
-          labelAnchor: { x: 0, y: req.flangeParams.centerHoleDiameter / 2 + 8 },
+          labelAnchor: { x: 0, y: req.flangeParams.centerHoleDiameter / 2 + req.partIdLabelSize },
           helpers,
         })
       } catch (err) {
@@ -355,14 +354,14 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
                 x: 0,
                 y: tabOffset,
                 angleDeg: 0,
-                height: HELPER_HEIGHT,
+                height: req.connectedPartIdLabelSize,
               },
               {
                 text: req.names.flanges[flangeNameKey(vertex.vertexId, 'inner')],
                 x: 0,
                 y: -tabOffset,
                 angleDeg: 0,
-                height: HELPER_HEIGHT,
+                height: req.connectedPartIdLabelSize,
               },
             ],
           })

@@ -1,3 +1,4 @@
+import { DEFAULT_DXF_LABEL_SETTINGS } from './lib/dxfLabelSettings'
 import { useEffect, useMemo, useState } from 'react'
 import type { AxisType, Edge, Face, SceneData, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
 import {
@@ -798,7 +799,12 @@ function App() {
     setMode(preNewMode)
   }
 
+  const [partIdLabelSize, setPartIdLabelSize] = useState(initial?.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize)
+  const [connectedPartIdLabelSize, setConnectedPartIdLabelSize] = useState(initial?.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize)
+
   const applyConfig = (state: DomeState) => {
+    setPartIdLabelSize(state.partIdLabelSize)
+    setConnectedPartIdLabelSize(state.connectedPartIdLabelSize)
     sceneHistory.reset(state.sceneData)
     setSelectionMode(state.selectionMode)
     setExtrudeDistance(state.extrudeDistance)
@@ -859,6 +865,8 @@ function App() {
 
   const buildConfig = (): DomeConfig =>
     serializeConfig({
+      partIdLabelSize,
+      connectedPartIdLabelSize,
       sceneData,
       selectionMode,
       extrudeDistance,
@@ -892,6 +900,8 @@ function App() {
   useEffect(() => {
     saveConfigToLocalStorage(buildConfig())
   }, [
+    partIdLabelSize,
+    connectedPartIdLabelSize,
     sceneData,
     selectionMode,
     extrudeDistance,
@@ -1037,7 +1047,7 @@ function App() {
     if (dxfExportProgress) return
     setDxfExportProgress({ phase: 'struts', done: 0, total: 0 })
     try {
-      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => false)
+      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => false, { partIdLabelSize, connectedPartIdLabelSize })
       if (blob) downloadBlob(blob, 'dome-parts.dxf')
     } catch (err) {
       console.error('Failed to export DXF', err)
@@ -1060,6 +1070,10 @@ function App() {
         dxfExportProgress={dxfExportProgress}
         stepExportProgress={stepExportProgress}
         stepAssemblyExportProgress={stepAssemblyExportProgress}
+        partIdLabelSize={partIdLabelSize}
+        onPartIdLabelSizeChange={setPartIdLabelSize}
+        connectedPartIdLabelSize={connectedPartIdLabelSize}
+        onConnectedPartIdLabelSizeChange={setConnectedPartIdLabelSize}
         stepExportScale={stepExportScale}
         onStepExportScaleChange={setStepExportScale}
         mode={mode}
