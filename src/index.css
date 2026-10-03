@@ -98,6 +98,10 @@ body,
   margin-bottom: 8px;
 }
 
+.selection-mode-control {
+  margin-bottom: 16px;
+}
+
 .segmented-control button {
   flex: 1;
   padding: 6px 8px;
@@ -323,7 +327,7 @@ body,
   overflow-wrap: anywhere;
 }
 
-.sidebar-section {
+.sidebar > .sidebar-section:not(:last-child) {
   border-bottom: 1px solid var(--border);
 }
 .sidebar-section > summary {
@@ -336,7 +340,6 @@ body,
 .sidebar-section > summary::marker { color: var(--text-dim); }
 .sidebar-section > summary:hover { color: var(--accent); }
 .sidebar-section-content { padding: 0 4px 12px 12px; }
-.sidebar-section .sidebar-section { border-bottom: 0; }
 .sidebar-section .sidebar-section > summary { padding: 8px; font-size: 12px; }
 .sidebar .control-group { margin-bottom: 12px; }
 .sidebar .control-group:last-child { margin-bottom: 0; }

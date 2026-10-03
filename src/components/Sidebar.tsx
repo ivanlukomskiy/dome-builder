@@ -316,7 +316,7 @@ function SidebarSection({ id, title, children, defaultOpen = true }: { id: strin
   </details>
 }
 
-function Help({ text, buttonIndex }: { text: string; buttonIndex?: number }) {
+function Help({ text }: { text: string }) {
   const id = useId()
   const [visible, setVisible] = useState(false)
   const marker = useRef<HTMLSpanElement>(null)
@@ -337,9 +337,7 @@ function Help({ text, buttonIndex }: { text: string; buttonIndex?: number }) {
       ? [field as HTMLElement]
       : fields.length > 1
         ? fields
-        : previous?.matches('.button-row') && buttonIndex !== undefined
-          ? [previous.querySelectorAll<HTMLElement>('button')[buttonIndex]].filter((item): item is HTMLElement => !!item)
-          : previous instanceof HTMLElement ? [previous] : []
+        : previous instanceof HTMLElement ? [previous] : []
 
     const cleanups = targets.map((target) => {
       const show = () => { anchor.current = target; setVisible(true) }
@@ -361,7 +359,7 @@ function Help({ text, buttonIndex }: { text: string; buttonIndex?: number }) {
       }
     })
     return () => cleanups.forEach((cleanup) => cleanup())
-  }, [buttonIndex, id])
+  }, [id])
 
   useLayoutEffect(() => {
     if (!visible || !anchor.current || !tooltip.current) return
@@ -656,7 +654,8 @@ export function Sidebar({
       {mode === 'edit' && <SidebarSection id="edit" title={t('Edit')}>
         {mode === 'edit' && (
           <section className="control-group">
-            <div className="segmented-control">
+            <h2>{t('Part type')}</h2>
+            <div className="segmented-control" role="group" aria-label={t('Part type')}>
               {EDIT_TARGET_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
@@ -672,8 +671,8 @@ export function Sidebar({
 
         {mode === 'edit' && editTarget === 'vertices' && (
           <section className="control-group">
-            <h2>{t('Edit vertices')}</h2>
-            <div className="segmented-control">
+            <h2>{t('Selection mode')}</h2>
+            <div className="segmented-control selection-mode-control" role="group" aria-label={t('Selection mode')}>
               {SELECTION_MODE_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
@@ -684,15 +683,8 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            <p className="hint">
-              {selectedCount > 0
-                ? tn(selectedCount, '{n} vertex selected', '{n} vertices selected')
-                : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
-            </p>
+            {selectedCount > 0 && <p className="hint">{tn(selectedCount, '{n} vertex selected', '{n} vertices selected')}</p>}
             <div className="button-row">
-              <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
-                {t('Delete')}
-              </button>
               <button disabled={!canUndo} onClick={onUndo}>
                 {t('Undo')}
               </button>
@@ -704,23 +696,30 @@ export function Sidebar({
               <button disabled={!canAddPoints} onClick={onAddPoints}>
                 {t('Add Points')}
               </button>
+            </div>
+            {selectedCount > 0 && !canAddPoints && (
+              <Help text={t('Select an even number of points to pair them up.')} />
+            )}
+            <div className="button-row">
               <button disabled={!canAddPoints} onClick={onConnectVertices}>
                 {t('Connect Vertices')}
               </button>
             </div>
-            {selectedCount > 0 && !canAddPoints && (
-              <Help text={t('Select an even number of points to pair them up.')} buttonIndex={0} />
-            )}
             <Help text={t(
               "Connect Vertices pairs them by nearest neighbor and joins each pair with a direct edge, skipping any pair that's already connected.",
-            )} buttonIndex={1} />
+            )} />
+            <div className="button-row">
+              <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
+                {t('Delete')}
+              </button>
+            </div>
           </section>
         )}
 
         {mode === 'edit' && editTarget === 'edges' && (
           <section className="control-group">
-            <h2>{t('Edit edges')}</h2>
-            <div className="segmented-control">
+            <h2>{t('Selection mode')}</h2>
+            <div className="segmented-control selection-mode-control" role="group" aria-label={t('Selection mode')}>
               {SELECTION_MODE_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
@@ -731,11 +730,7 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            <p className="hint">
-              {selectedEdgeCount > 0
-                ? tn(selectedEdgeCount, '{n} edge selected', '{n} edges selected')
-                : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
-            </p>
+            {selectedEdgeCount > 0 && <p className="hint">{tn(selectedEdgeCount, '{n} edge selected', '{n} edges selected')}</p>}
             <div className="button-row">
               <button disabled={selectedEdgeCount === 0} onClick={onDeleteSelectedEdges}>
                 {t('Delete')}
@@ -785,8 +780,8 @@ export function Sidebar({
 
         {mode === 'edit' && editTarget === 'faces' && (
           <section className="control-group">
-            <h2>{t('Edit faces')}</h2>
-            <div className="segmented-control">
+            <h2>{t('Selection mode')}</h2>
+            <div className="segmented-control selection-mode-control" role="group" aria-label={t('Selection mode')}>
               {SELECTION_MODE_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
@@ -797,11 +792,7 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            <p className="hint">
-              {selectedFaceCount > 0
-                ? tn(selectedFaceCount, '{n} face selected', '{n} faces selected')
-                : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
-            </p>
+            {selectedFaceCount > 0 && <p className="hint">{tn(selectedFaceCount, '{n} face selected', '{n} faces selected')}</p>}
             <div className="button-row">
               <button disabled={selectedFaceCount === 0} onClick={onDeleteSelectedFaces}>
                 {t('Delete')}
