@@ -959,15 +959,8 @@ export function computeStrutBoundary2D(
           point: braceCenter,
           axis: endAxis,
         });
-        // helpers.push({
-        //   drawing: drawPointMarker(braceCenter, MARKER_RADIUS),
-        //   color: "magenta",
-        //   name: `braceCenter ${end} (brace ${brace.braceId})`,
-        // });
-
         // The brace plate's rectangle around braceCenter: `width` long along this strut end's
-        // axis (the tangent at that end - strutA / strutB above are drawn with their length along
-        // it), and as wide as fits between the inn / ext arcs across it, up to `maxPlateWidth`.
+        // axis, and as wide as fits between the inn / ext arcs across it, up to `maxPlateWidth`.
         // The plate is drawn from it (see drawBracePlate).
         const plate = rect
           ? drawBracePlate(braceCenter, endAxis, rect, brace.params)
@@ -989,20 +982,13 @@ export function computeStrutBoundary2D(
           }
         }
         // Where the line through braceCenter along the strut end's axis crosses the plate's two
-        // sides perpendicular to that axis (its ends) - shown as helper points.
+        // sides perpendicular to that axis (its ends).
         const plateEnds = rect
           ? placeInPlateFrame(braceCenter, endAxis, [
               [rect.halfAlong, 0],
               [-rect.halfAlong, 0],
             ])
           : null;
-        // plateEnds?.forEach((point, i) => {
-        //   helpers.push({
-        //     drawing: drawPointMarker(point, MARKER_RADIUS),
-        //     color: "lime",
-        //     name: `bracePlateEnd ${end} point ${i + 1} (brace ${brace.braceId})`,
-        //   });
-        // });
         if (plate && braceIndex === 0) {
           if (end === "A") bracePlateA = plate.clone();
           else bracePlateB = plate.clone();

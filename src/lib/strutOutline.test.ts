@@ -66,9 +66,10 @@ describe('single strut outline', () => {
   })
 
   it.each([false, true])('cuts brace corner holes with roundBridge=%s', round => {
+    const attachment = { distanceFromVertex: 400, otherEdgeId: 3, otherEdgeDirection: [0, 0, 1] as [number, number, number] }
     const braces: StrutBraces = {
-      a: [{ braceId: 1, params: { ...DEFAULT_BRACE_PARAMS, shift: 0.4 } }],
-      b: [{ braceId: 2, params: { ...DEFAULT_BRACE_PARAMS, shift: 0.4 } }],
+      a: [{ ...attachment, braceId: 1, params: { ...DEFAULT_BRACE_PARAMS, shift: 0.4 } }],
+      b: [{ ...attachment, braceId: 2, params: { ...DEFAULT_BRACE_PARAMS, shift: 0.4 } }],
     }
     const withHoles = build(round, cases[0], braces)
     expect(withHoles.bracePlateA).not.toBeNull()
