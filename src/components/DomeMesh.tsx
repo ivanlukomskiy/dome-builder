@@ -8,9 +8,8 @@ import { computeBraceEndpoints } from '../lib/braces'
 import { buildBraceSolids, type BracePoints } from '../lib/braceSolid'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
 import {
-  partOpacity,
   PREVIEW_PART_KINDS,
-  type PartTransparency,
+  type PartVisibility,
   type PreviewPartKind,
 } from '../lib/previewParts'
 import { createPreviewProfileRecorder, isPreviewProfilingEnabled } from '../lib/previewProfile'
@@ -163,7 +162,7 @@ interface DomeMeshProps {
   minSide: number
   flangeMillingDiameter: number
   // View-only: how see-through each kind of part is drawn in Preview (percent, see previewParts.ts).
-  partTransparency: PartTransparency
+  partVisibility: PartVisibility
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -205,7 +204,7 @@ export function DomeMesh({
   overshoot,
   minSide,
   flangeMillingDiameter,
-  partTransparency,
+  partVisibility,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -259,7 +258,7 @@ export function DomeMesh({
   // before handing it off. Running each build in a fresh worker (and terminating it once done)
   // also reclaims that worker's whole opencascade heap on its own, rather than relying on every
   // intermediate shape being individually .delete()'d.
-  // One merged geometry per kind of part, so each can be given its own transparency without
+  // One merged geometry per kind of part, so each can be shown or hidden without
   // rebuilding anything.
   const [previewGeometries, setPreviewGeometries] = useState<
     Partial<Record<PreviewPartKind, THREE.BufferGeometry>>
@@ -714,17 +713,12 @@ export function DomeMesh({
         PREVIEW_PART_KINDS.map(({ kind }) => {
           const geometry = previewGeometries[kind]
           if (!geometry) return null
-          const opacity = partOpacity(partTransparency[kind])
-          const seeThrough = opacity < 1
           return (
-            <mesh key={kind} geometry={geometry} renderOrder={seeThrough ? 1 : 0}>
+            <mesh key={kind} geometry={geometry} visible={partVisibility[kind]}>
               <meshStandardMaterial
                 vertexColors
                 side={THREE.DoubleSide}
                 roughness={0.5}
-                transparent={seeThrough}
-                opacity={opacity}
-                depthWrite={!seeThrough}
               />
             </mesh>
           )

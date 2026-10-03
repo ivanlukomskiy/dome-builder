@@ -1,13 +1,11 @@
-import { useRef, useState } from 'react'
-import type { ChangeEvent } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type { ChangeEvent, ReactNode } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import { LANGUAGES, useI18n } from '../lib/i18n'
 import {
-  MAX_PART_TRANSPARENCY,
-  MIN_PART_TRANSPARENCY,
-  PART_TRANSPARENCY_STEP,
   PREVIEW_PART_KINDS,
-  type PartTransparency,
+  type PartVisibility,
   type PreviewPartKind,
 } from '../lib/previewParts'
 import type { StepExportProgress } from '../lib/stepExportRunner'
@@ -52,7 +50,6 @@ const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
 interface SidebarProps {
   onExportConfig: () => void
   onImportConfig: (file: File) => void
-  onGetEdgesInfo: () => void
   onDownloadSteps: () => void
   onDownloadStepAssembly: () => void
   onDownloadDxf: () => void
@@ -67,8 +64,6 @@ interface SidebarProps {
   onPartIdLabelSizeChange: (size: number) => void
   connectedPartIdLabelSize: number
   onConnectedPartIdLabelSizeChange: (size: number) => void
-  stepExportScale: number
-  onStepExportScaleChange: (scale: number) => void
   mode: ViewMode
   onOpenNew: () => void
   onCreateNew: () => void
@@ -167,14 +162,14 @@ interface SidebarProps {
   onMinSideChange: (value: number) => void
   flangeMillingDiameter: number
   onFlangeMillingDiameterChange: (value: number) => void
-  // The plate properties every brace shares, edited in Preview (applied with the Apply button).
+  // The plate properties every brace shares, applied with Redraw in Preview.
   bracePlateDraft: BracePlateParams
   onBracePlateParamChange: (key: keyof BracePlateParams, value: number) => void
   previewParamsDirty: boolean
   onApplyPreview: () => void
-  // View-only transparency (percent) of each kind of part in Preview.
-  partTransparency: PartTransparency
-  onPartTransparencyChange: (kind: PreviewPartKind, percent: number) => void
+  // View-only visibility of each kind of part in Preview.
+  partVisibility: PartVisibility
+  onPartVisibilityChange: (kind: PreviewPartKind, visible: boolean) => void
   canUndo: boolean
   canRedo: boolean
   onDeleteSelected: () => void
@@ -289,10 +284,42 @@ export function NumberField({ value, onCommit, step, min, placeholder, clamp }: 
   )
 }
 
+function SidebarSection({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return <details className="sidebar-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{title}</summary>
+    <div className="sidebar-section-content">{children}</div>
+  </details>
+}
+
+function Help({ text }: { text: string }) {
+  const id = useId()
+  const [visible, setVisible] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const tooltip = useRef<HTMLSpanElement>(null)
+
+  useLayoutEffect(() => {
+    if (!visible || !trigger.current || !tooltip.current) return
+    const anchor = trigger.current.getBoundingClientRect()
+    const box = tooltip.current.getBoundingClientRect()
+    tooltip.current.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`
+    tooltip.current.style.top = `${Math.max(8, anchor.bottom + box.height + 8 <= window.innerHeight
+      ? anchor.bottom + 4
+      : anchor.top - box.height - 4)}px`
+  }, [visible, text])
+
+  return <span className="field-help" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
+    <button ref={trigger} type="button" className="help-trigger" aria-label={text}
+      aria-describedby={visible ? id : undefined}
+      onFocus={() => setVisible(true)} onBlur={() => setVisible(false)}
+      onKeyDown={(event) => { if (event.key === 'Escape') setVisible(false) }}>?</button>
+    {visible && createPortal(<span ref={tooltip} id={id} className="help-tooltip" role="tooltip">{text}</span>, document.body)}
+  </span>
+}
+
 export function Sidebar({
   onExportConfig,
   onImportConfig,
-  onGetEdgesInfo,
   onDownloadSteps,
   onDownloadStepAssembly,
   onDownloadDxf,
@@ -307,8 +334,6 @@ export function Sidebar({
   onPartIdLabelSizeChange,
   connectedPartIdLabelSize,
   onConnectedPartIdLabelSizeChange,
-  stepExportScale,
-  onStepExportScaleChange,
   mode,
   onOpenNew,
   onCreateNew,
@@ -408,8 +433,8 @@ export function Sidebar({
   onBracePlateParamChange,
   previewParamsDirty,
   onApplyPreview,
-  partTransparency,
-  onPartTransparencyChange,
+  partVisibility,
+  onPartVisibilityChange,
   canUndo,
   canRedo,
   onDeleteSelected,
@@ -473,102 +498,31 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="segmented-control lang-switch" role="group" aria-label={t('Language')}>
-        {LANGUAGES.map((opt) => (
-          <button
-            key={opt.value}
-            className={lang === opt.value ? 'active' : ''}
-            onClick={() => setLang(opt.value)}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      <h1>{t('Dome Builder')}</h1>
-
-      {mode !== 'new' && (
-        <section className="control-group">
-          <div className="button-row">
-            <button onClick={onExportConfig}>{t('Save as')}</button>
-            <button onClick={() => importInputRef.current?.click()}>{t('Load file')}</button>
-          </div>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept="application/json"
-            style={{ display: 'none' }}
-            onChange={handleImportFileChange}
-          />
-        </section>
-      )}
-
-      {mode === 'new' ? (
-        <section className="control-group">
-          <div className="button-row">
-            <button onClick={onCreateNew}>{t('Create')}</button>
-            <button onClick={onCancelNew}>{t('Cancel')}</button>
-          </div>
-        </section>
-      ) : (
-        <>
-          <section className="control-group">
-            <div className="button-row">
-              <button onClick={onOpenNew}>{t('New dome')}</button>
-            </div>
-          </section>
-          <section className="control-group">
-            <div className="segmented-control">
-              {EDIT_OR_PREVIEW_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  className={mode === opt.value ? 'active' : ''}
-                  onClick={() => onSwitchMode(opt.value)}
-                >
-                  {t(opt.label)}
-                </button>
-              ))}
-            </div>
-          </section>
-        </>
-      )}
-
-      {mode === 'preview' && (
-        <section className="control-group">
-          <h2>{t('Part transparency')}</h2>
-          {PREVIEW_PART_KINDS.map(({ kind, label }) => (
-            <div className="transform-field part-transparency" key={kind}>
-              <label>{t(label)}</label>
-              <div className="layer-slider-row">
-                <input
-                  type="range"
-                  min={MIN_PART_TRANSPARENCY}
-                  max={MAX_PART_TRANSPARENCY}
-                  step={PART_TRANSPARENCY_STEP}
-                  value={partTransparency[kind]}
-                  onChange={(e) => onPartTransparencyChange(kind, Number(e.target.value))}
-                />
-                <span className="layer-count">{partTransparency[kind]}%</span>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
-
-      <section className="control-group">
-        <h2>{t('Diameter')}</h2>
-        <div className="transform-field">
-          <label>{t('Diameter (mm)')}</label>
-          <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
+      <SidebarSection title={t('Editor')}>
+        <div className="button-row editor-actions">
+          <button onClick={onOpenNew} disabled={mode === 'new'}>{t('New dome')}</button>
+          <button onClick={onExportConfig}>{t('Save as')}</button>
+          <button onClick={() => importInputRef.current?.click()}>{t('Load file')}</button>
         </div>
-        {mode !== 'new' && (
-          <p className="hint">
-            {t('Resizes the whole dome around its center, keeping its shape.')}
-          </p>
-        )}
-      </section>
+        <input ref={importInputRef} type="file" accept="application/json" hidden onChange={handleImportFileChange} />
+        <div className="segmented-control lang-switch" role="group" aria-label={t('Language')}>
+          {LANGUAGES.map((opt) => (
+            <button
+              key={opt.value}
+              className={lang === opt.value ? 'active' : ''}
+              onClick={() => setLang(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
-      {mode === 'new' && (
+
+        {mode !== 'new' && <div className="segmented-control" role="group" aria-label={t('Mode')}>
+          {EDIT_OR_PREVIEW_OPTIONS.map((opt) => <button key={opt.value} className={mode === opt.value ? 'active' : ''} onClick={() => onSwitchMode(opt.value)}>{t(opt.label)}</button>)}
+        </div>}
+      </SidebarSection>
+      {mode === 'new' && <SidebarSection title={t('New dome')}>
         <section className="control-group">
           <h2>{t('Shape')}</h2>
           {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
@@ -583,9 +537,7 @@ export function Sidebar({
             </label>
           ))}
         </section>
-      )}
 
-      {mode === 'new' && (
         <section className="control-group">
           <h2>{t('Main axis')}</h2>
           {axisOptions.map((opt) => (
@@ -605,9 +557,7 @@ export function Sidebar({
             </label>
           ))}
         </section>
-      )}
 
-      {mode === 'new' && (
         <section className="control-group">
           <h2>{t('Subdivisions')}</h2>
           <div className="layer-slider-row">
@@ -623,9 +573,7 @@ export function Sidebar({
             </span>
           </div>
         </section>
-      )}
 
-      {mode === 'new' && (
         <section className="control-group">
           <h2>{t('Layers')}</h2>
           <div className="layer-slider-row">
@@ -641,269 +589,556 @@ export function Sidebar({
             </span>
           </div>
         </section>
-      )}
+        <div className="button-row"><button onClick={onCreateNew}>{t('Create')}</button><button onClick={onCancelNew}>{t('Cancel')}</button></div>
+      </SidebarSection>}
+      {mode === 'edit' && <SidebarSection title={t('Edit')}>
+        {mode === 'edit' && (
+          <section className="control-group">
+            <div className="segmented-control">
+              {EDIT_TARGET_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={editTarget === opt.value ? 'active' : ''}
+                  onClick={() => onEditTargetChange(opt.value)}
+                >
+                  {t(opt.label)}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
-      {(mode === 'preview' || mode === 'edit') && (
-        <section className="control-group">
-          <div className="button-row">
-            <button onClick={onApplyPreview} disabled={!previewParamsDirty}>
-              {t('Apply')}
-            </button>
-          </div>
-          <p className="hint">
-            {previewParamsDirty
-              ? t('Unapplied changes below - click Apply to regenerate the preview.')
-              : t('Rebuilding every strut solid is slow, so changes to the fields below only take effect once you click Apply.')}
-          </p>
-        </section>
-      )}
+        {mode === 'edit' && editTarget === 'vertices' && (
+          <section className="control-group">
+            <h2>{t('Edit vertices')}</h2>
+            <div className="segmented-control">
+              {SELECTION_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={selectionMode === opt.value ? 'active' : ''}
+                  onClick={() => onSelectionModeChange(opt.value)}
+                >
+                  {t(opt.label)}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              {selectedCount > 0
+                ? tn(selectedCount, '{n} vertex selected', '{n} vertices selected')
+                : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
+            </p>
+            <div className="button-row">
+              <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
+                {t('Delete')}
+              </button>
+              <button disabled={!canUndo} onClick={onUndo}>
+                {t('Undo')}
+              </button>
+              <button disabled={!canRedo} onClick={onRedo}>
+                {t('Redo')}
+              </button>
+            </div>
+            <div className="button-row">
+              <button disabled={!canAddPoints} onClick={onAddPoints}>
+                {t('Add Points')}
+              </button>
+              <button disabled={!canAddPoints} onClick={onConnectVertices}>
+                {t('Connect Vertices')}
+              </button>
+            </div>
+            {selectedCount > 0 && !canAddPoints && (
+              <Help text={t('Select an even number of points to pair them up.')} />
+            )}
+            <Help text={t(
+              "Connect Vertices pairs them by nearest neighbor and joins each pair with a direct edge, skipping any pair that's already connected.",
+            )} />
+          </section>
+        )}
 
-      {(mode === 'preview' || mode === 'edit') && (
-        <section className="control-group">
-          <h2>{t('Edge Curvature')}</h2>
-          <div className="transform-field">
-            <label>{t('Corner length (D, mm)')}</label>
-            <NumberField value={cornerLength} step={5} min={0} onCommit={onCornerLengthChange} />
-          </div>
-          <p className="hint">
-            {t(
-              "Corner length (D): straight lead-in at each end, tangent to the sphere and angled toward the other end - trimmed back from the vertex by that hub's own minimum offset (shown when a single vertex is selected in Edit mode), up to this budget. Meeting lead-ins form a sharp point; otherwise the gap between them is bridged by an arc centered on the sphere center.",
-            )}
-          </p>
-          <div className="transform-field">
-            <label>{t('Offset modifier (mm)')}</label>
-            <NumberField value={offsetModifier} step={5} onCommit={onOffsetModifierChange} />
-          </div>
-          <p className="hint">
-            {t(
-              "Offset modifier: added to every edge end's own minimum offset before it's trimmed back from the vertex (still capped by the corner length budget). Positive pulls every strut end further in; negative pushes it back out, toward the vertex.",
-            )}
-          </p>
-          <div className="transform-field">
-            <label>{t('Width (mm)')}</label>
-            <NumberField value={extrudeDistance} step={5} min={0} onCommit={onExtrudeDistanceChange} />
-          </div>
-          <p className="hint">
-            {t(
-              "Width: extrudes each arc symmetrically toward/away from the sphere's center.",
-            )}
-          </p>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={roundStrutBridge}
-              onChange={(e) => onRoundStrutBridgeChange(e.target.checked)}
-            />
-            {t('Round bridge')}
-          </label>
-          <div className="transform-field">
-            <label>{t('Thickness (mm)')}</label>
-            <NumberField value={thickness} step={5} min={0} onCommit={onThicknessChange} />
-          </div>
-          <p className="hint">
-            {t(
-              'Thickness: extrudes that ribbon symmetrically along its own surface normal, turning it into a solid beam.',
-            )}
-          </p>
-        </section>
-      )}
+        {mode === 'edit' && editTarget === 'edges' && (
+          <section className="control-group">
+            <h2>{t('Edit edges')}</h2>
+            <div className="segmented-control">
+              {SELECTION_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={selectionMode === opt.value ? 'active' : ''}
+                  onClick={() => onSelectionModeChange(opt.value)}
+                >
+                  {t(opt.label)}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              {selectedEdgeCount > 0
+                ? tn(selectedEdgeCount, '{n} edge selected', '{n} edges selected')
+                : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
+            </p>
+            <div className="button-row">
+              <button disabled={selectedEdgeCount === 0} onClick={onDeleteSelectedEdges}>
+                {t('Delete')}
+              </button>
+            </div>
+            <Help text={t(
+              'Also removes any face that had it as a side, and any vertex it leaves with no other edge.',
+            )} />
+            <div className="button-row">
+              <button disabled={!canCreateFace} onClick={onCreateFace}>
+                {t('Create Face')}
+              </button>
+            </div>
+            <Help text={t('Turns every triangle hiding among the selected edges into a face.')} />
+            <div className="button-row">
+              <button disabled={!canAddBrace} onClick={onAddBrace}>
+                {t('Add Brace')}
+              </button>
+            </div>
+            <Help text={t(
+              'Select exactly two edges that meet at the same vertex (use Point selection mode) to link them with a brace.',
+            )} />
+          </section>
+        )}
 
-      {(mode === 'preview' || mode === 'edit') && (
-        <section className="control-group">
-          <h2>{t('Grooves')}</h2>
-          <div className="transform-field">
-            <label>{t('End groove length (%)')}</label>
-            <NumberField
-              value={endGrooveLengthPercent}
-              step={5}
-              min={0}
-              onCommit={onEndGrooveLengthPercentChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Mid groove length (%)')}</label>
-            <NumberField
-              value={midGrooveLengthPercent}
-              step={5}
-              min={0}
-              onCommit={onMidGrooveLengthPercentChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Groove depth (mm)')}</label>
-            <NumberField value={grooveDepth} step={1} min={0} onCommit={onGrooveDepthChange} />
-          </div>
-          <div className="transform-field">
-            <label>{t('Milling diameter (mm)')}</label>
-            <NumberField value={millingDiameter} step={1} min={0} onCommit={onMillingDiameterChange} />
-          </div>
-          <div className="transform-field">
-            <label>{t('Chamfer length (mm)')}</label>
-            <NumberField value={chamferLength} step={1} min={0} onCommit={onChamferLengthChange} />
-          </div>
-          <p className="hint">
-            {t(
-              "Each strut end forms a shouldered tenon: the end and mid groove percentages split the workable length (past the offset) into the shoulder, tenon, and far shoulder, cut back by groove depth. Chamfer length bevels the tenon's top corners; milling diameter sets a relief circle tucked into each of its concave base corners, clearing room for a square mating part to seat flush against a round cutting bit.",
-            )}
-          </p>
-        </section>
-      )}
-
-      {(mode === 'preview' || mode === 'edit') && (
-        <section className="control-group">
-          <h2>{t('Flange')}</h2>
-          <div className="transform-field">
-            <label>{t('Tolerance longitudinal (mm)')}</label>
-            <NumberField
-              value={toleranceLongitudinal}
-              step={1}
-              min={0}
-              onCommit={onToleranceLongitudinalChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Tolerance transverse (mm)')}</label>
-            <NumberField
-              value={toleranceTransverse}
-              step={1}
-              min={0}
-              onCommit={onToleranceTransverseChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Center hole diameter (mm)')}</label>
-            <NumberField
-              value={centerHoleDiameter}
-              step={1}
-              min={0}
-              onCommit={onCenterHoleDiameterChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Side hole diameter outer (mm)')}</label>
-            <NumberField
-              value={sideHoleDiameterOuter}
-              step={1}
-              min={0}
-              onCommit={onSideHoleDiameterOuterChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Side hole diameter inner (mm)')}</label>
-            <NumberField
-              value={sideHoleDiameterInner}
-              step={1}
-              min={0}
-              onCommit={onSideHoleDiameterInnerChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Side hole diameter offset (mm)')}</label>
-            <NumberField
-              value={sideHoleDiameterOffset}
-              step={1}
-              min={0}
-              onCommit={onSideHoleDiameterOffsetChange}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Overshoot (mm)')}</label>
-            <NumberField value={overshoot} step={1} min={0} onCommit={onOvershootChange} />
-          </div>
-          <div className="transform-field">
-            <label>{t('Min side (mm)')}</label>
-            <NumberField value={minSide} step={1} min={0} onCommit={onMinSideChange} />
-          </div>
-          <div className="transform-field">
-            <label>{t('Flange milling diameter (mm)')}</label>
-            <NumberField
-              value={flangeMillingDiameter}
-              step={1}
-              min={0}
-              onCommit={onFlangeMillingDiameterChange}
-            />
-          </div>
-          <p className="hint">
-            {t(
-              "The flat connector plate pair at each hub vertex, filling the wedges between struts that have no face of their own - a plate on each face of the strut ends, seated in the groove notch cut into them (see Groove depth above). Tolerances loosen the fit lengthwise/across each strut arm; overshoot and min side set how far the plate reaches past a strut's own corner and how narrow it's allowed to pinch; the side/center holes and their offsets are the plate's own bolt pattern.",
-            )}
-          </p>
-        </section>
-      )}
-
-      {(mode === 'preview' || mode === 'edit') && (
-        <section className="control-group">
-          <h2>{t('Foot')}</h2>
-          {FOOT_PARAM_FIELDS.map(({ key, label }) => (
-            <div className="transform-field" key={key}>
-              <label>{t(label)}</label>
+        {mode === 'edit' && editTarget === 'edges' && selectedEdgeCount > 0 && (
+          <section className="control-group">
+            <h2>{t('Edge Thickness')}</h2>
+            <div className="transform-field">
+              <label>{t('Thickness override (mm)')} <Help text={t('0 uses the global default thickness set in Preview.')} /></label>
               <NumberField
-                value={footParams[key]}
-                step={1}
+                value={edgeThicknessValue}
+                step={5}
                 min={0}
+                placeholder={edgeThicknessValue === null ? t('Mixed') : undefined}
                 clamp={(n) => Math.max(n, 0)}
-                onCommit={(v) => onFootParamChange(key, v)}
+                onCommit={onEdgeThicknessChange}
               />
             </div>
-          ))}
-          <p className="hint">
-            {t(
-              'The same for every vertex marked as a foot (Edit → Vertices → Foot Geometry), applied to the preview with Apply.',
-            )}
-          </p>
-        </section>
-      )}
+            <div className="button-row">
+              <button disabled={!hasEdgeOverrides} onClick={onResetEdgeThickness}>
+                {t('Reset Thickness')}
+              </button>
+            </div>
+          </section>
+        )}
 
-      {(mode === 'preview' || mode === 'edit') && (
-        <section className="control-group">
-          <h2>{t('Braces')}</h2>
-          {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
-            <div className="transform-field" key={key}>
-              <label>{t(label)}</label>
+        {mode === 'edit' && editTarget === 'faces' && (
+          <section className="control-group">
+            <h2>{t('Edit faces')}</h2>
+            <div className="segmented-control">
+              {SELECTION_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={selectionMode === opt.value ? 'active' : ''}
+                  onClick={() => onSelectionModeChange(opt.value)}
+                >
+                  {t(opt.label)}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              {selectedFaceCount > 0
+                ? tn(selectedFaceCount, '{n} face selected', '{n} faces selected')
+                : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
+            </p>
+            <div className="button-row">
+              <button disabled={selectedFaceCount === 0} onClick={onDeleteSelectedFaces}>
+                {t('Delete')}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {mode === 'edit' && editTarget === 'braces' && (
+          <section className="control-group">
+            <h2>{t('Edit braces')}</h2>
+            <p className="hint">
+              {selectedBraceCount > 0
+                ? tn(selectedBraceCount, '{n} brace selected', '{n} braces selected')
+                : t('Click a brace to select it. Add braces from two edges in the Edges tab.')}
+            </p>
+            <div className="button-row">
+              <button disabled={selectedBraceCount === 0} onClick={onDeleteSelectedBraces}>
+                {t('Delete')}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {mode === 'edit' && editTarget === 'braces' && selectedBraceCount > 0 && (
+          <section className="control-group">
+            <h2>{t('Brace Properties')}</h2>
+            {BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
+              <div className="transform-field" key={key}>
+                <label>{t(label)}</label>
+                <NumberField
+                  value={braceParamValues[key]}
+                  step={step}
+                  min={0}
+                  placeholder={braceParamValues[key] === null ? t('Mixed') : undefined}
+                  clamp={(n) => sanitizeBraceParam(key, n)}
+                  onCommit={(value) => onBraceParamChange(key, value)}
+                />
+              </div>
+            ))}
+            <Help text={t(
+              'Shift is where the brace meets each edge, measured from their shared vertex. The plate settings after the first two aren’t used yet.',
+            )} />
+          </section>
+        )}
+
+        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+          <section className="control-group">
+            <h2>{t('Corner Length')}</h2>
+            <div className="transform-field">
+              <label>{t('Corner length override (mm)')} <Help text={t(
+                'Applies to every strut end and flange at the selected vertices. 0 uses the global corner length set in Edge Curvature.',
+              )} /></label>
               <NumberField
-                value={bracePlateDraft[key]}
-                step={step}
+                value={vertexCornerLengthValue}
+                step={5}
                 min={0}
-                clamp={(n) => sanitizeBraceParam(key, n)}
-                onCommit={(value) => onBracePlateParamChange(key, value)}
+                placeholder={vertexCornerLengthValue === null ? t('Mixed') : undefined}
+                clamp={(n) => Math.max(n, 0)}
+                onCommit={onVertexCornerLengthChange}
               />
             </div>
-          ))}
-          <p className="hint">
-            {t(
-              'The same for every brace, and applied to all of them with Apply (new braces start with these too). Where a brace sits (shift) is set per brace in Edit → Braces. The plate is extruded out from the strut’s side face, toward the brace’s other edge.',
-            )}
-          </p>
-        </section>
-      )}
+            <div className="button-row">
+              <button disabled={!hasVertexCornerLengthOverrides} onClick={onResetVertexCornerLength}>
+                {t('Reset Corner Length')}
+              </button>
+            </div>
+          </section>
+        )}
 
-      {mode === 'preview' && (
-        <section className="control-group">
-          <div className="button-row">
-            <button onClick={onApplyPreview} disabled={!previewParamsDirty}>
-              {t('Apply')}
-            </button>
-            <button onClick={onGetEdgesInfo}>{t('Get Edges Info')}</button>
-          </div>
-          <p className="hint">
-            {t(
-              'Downloads a JSON file with, for every visible vertex: each edge going into it, its precalculated strut-end measurements (offset, tenon, chamfer, milling), which neighboring edges have a face between them and which don’t, and the tangent plane those edges were projected onto to work that out.',
-            )}
-          </p>
-        </section>
-      )}
+        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+          <section className="control-group">
+            <h2>{t('Foot Geometry')}</h2>
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={allSelectedAreFeet}
+                ref={(el) => {
+                  if (el) el.indeterminate = someSelectedAreFeet
+                }}
+                onChange={(e) => onFootVertexToggle(e.target.checked)}
+              />
+              {t('Foot geometry')}
+            </label>
+            <Help text={t(
+              'Marks the selected vertices as feet: their flange is built with the dimensions from the Foot section. Foot vertices are shown in purple.',
+            )} />
+          </section>
+        )}
 
-      {mode === 'preview' && (
-        <section className="control-group">
-          <div className="transform-field">
-            <label>{t('Scale')}</label>
-            <NumberField
-              value={stepExportScale}
-              step={0.1}
-              min={0.01}
-              onCommit={onStepExportScaleChange}
-            />
-          </div>
+        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+          <section className="control-group">
+            <h2>{t('Flange Overrides')}</h2>
+            {FLANGE_PARAM_FIELDS.map(({ key, label }) => {
+              const shared = sharedFlangeOverride(selectedVertexIndices, vertexFlangeParams, key)
+              return (
+                <div className="transform-field" key={key}>
+                  <label>{t(label)}</label>
+                  <span className="field-with-reset">
+                    <NumberField
+                      value={shared.value}
+                      step={1}
+                      min={0}
+                      placeholder={shared.mixed ? t('Mixed') : t('{value} (default)', { value: flangeDefaults[key] })}
+                      clamp={(n) => Math.max(n, 0)}
+                      onCommit={(v) => onVertexFlangeParamChange(key, v)}
+                    />
+                    <button
+                      className="reset-field"
+                      title={t('Use the global value')}
+                      disabled={!shared.any}
+                      onClick={() => onResetVertexFlangeParam(key)}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
+            <Help text={t(
+              "Overrides the Flange section's values for the flange at the selected vertices only. A blank field uses the global value (shown in grey); × goes back to it. Overridden vertices are shown in cyan.",
+            )} />
+            <div className="button-row">
+              <button disabled={!hasVertexFlangeOverrides} onClick={onResetVertexFlangeParams}>
+                {t('Reset Flange Overrides')}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+          <section className="control-group">
+            <h2>{t('Transform')}</h2>
+            <div className="transform-field">
+              <label>{t('Radius (Δr, mm)')}</label>
+              <NumberField
+                value={rValue}
+                step={10}
+                placeholder={rValue === null ? t('Mixed') : undefined}
+                onCommit={(v) => onTransformChange('r', v)}
+              />
+            </div>
+            <div className="transform-field">
+              <label>{t('Azimuth (Δ°)')}</label>
+              <NumberField
+                value={azimuthValue === null ? null : Math.round(((azimuthValue * 180) / Math.PI) * 100) / 100}
+                step={1}
+                placeholder={azimuthValue === null ? t('Mixed') : undefined}
+                onCommit={(deg) => onTransformChange('azimuth', (deg * Math.PI) / 180)}
+              />
+            </div>
+            <div className="transform-field">
+              <label>{t('Elevation (Δ°)')}</label>
+              <NumberField
+                value={elevationValue === null ? null : Math.round(((elevationValue * 180) / Math.PI) * 100) / 100}
+                step={1}
+                placeholder={elevationValue === null ? t('Mixed') : undefined}
+                onCommit={(deg) => onTransformChange('elevation', (deg * Math.PI) / 180)}
+              />
+            </div>
+            <Help text={t('Polar offsets from the default position, about the dome center. Radius moves the vertex toward/away from the center; azimuth rotates it around the vertical axis; elevation tilts it up/down along its meridian.')} />
+            <div className="button-row">
+              <button disabled={selectedCount < 2} onClick={onAlignHorizontally}>
+                {t('Align horizontally')}
+              </button>
+              <button disabled={selectedCount < 2} onClick={onAlignVertically}>
+                {t('Align vertically')}
+              </button>
+              <button disabled={!hasTransforms} onClick={onResetTransform}>
+                {t('Reset Transform')}
+              </button>
+            </div>
+          </section>
+        )}
+
+      </SidebarSection>}
+      {mode === 'preview' && <SidebarSection title={t('Preview')}>
+        <div className="button-row">
+          <button onClick={onApplyPreview} disabled={!previewParamsDirty}>{t('Redraw')}</button>
+        </div>
+        {previewParamsDirty && <p className="hint" role="status">{t('Unapplied geometry changes')}</p>}
+        <Help text={t('Geometry changes take effect when you click Redraw.')} />
+        <SidebarSection title={t('Parts visibility')} defaultOpen={false}>
+          {PREVIEW_PART_KINDS.map(({ kind, label }) => <label className="checkbox-field" key={kind}>
+            <input type="checkbox" checked={partVisibility[kind]} onChange={(e) => onPartVisibilityChange(kind, e.target.checked)} />{t(label)}
+          </label>)}
+        </SidebarSection>
+      </SidebarSection>}
+      {mode !== 'new' && <SidebarSection title={t('Dome geometry')}>
+        <SidebarSection title={t('General')} defaultOpen={false}>
+          <section className="control-group">
+
+            <div className="transform-field">
+              <label>{t('Sphere diameter (mm)')}</label>
+              <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
+            </div>
+            <Help text={t('Resizes the whole dome around its center, keeping its shape.')} />
+          </section>
+        </SidebarSection>
+        <>
+          <SidebarSection title={t('Struts')} defaultOpen={false}>
+            {(mode === 'preview' || mode === 'edit') && (
+              <section className="control-group">
+                <div className="transform-field">
+                  <label>{t('Corner length (D, mm)')} <Help text={t(
+                    "Corner length (D): straight lead-in at each end, tangent to the sphere and angled toward the other end - trimmed back from the vertex by that hub's own minimum offset (shown when a single vertex is selected in Edit mode), up to this budget. Meeting lead-ins form a sharp point; otherwise the gap between them is bridged by an arc centered on the sphere center.",
+                  )} /></label>
+                  <NumberField value={cornerLength} step={5} min={0} onCommit={onCornerLengthChange} />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Offset modifier (mm)')} <Help text={t(
+                    "Offset modifier: added to every edge end's own minimum offset before it's trimmed back from the vertex (still capped by the corner length budget). Positive pulls every strut end further in; negative pushes it back out, toward the vertex.",
+                  )} /></label>
+                  <NumberField value={offsetModifier} step={5} onCommit={onOffsetModifierChange} />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Width (mm)')} <Help text={t(
+                    "Width: extrudes each arc symmetrically toward/away from the sphere's center.",
+                  )} /></label>
+                  <NumberField value={extrudeDistance} step={5} min={0} onCommit={onExtrudeDistanceChange} />
+                </div>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={roundStrutBridge}
+                    onChange={(e) => onRoundStrutBridgeChange(e.target.checked)}
+                  />
+                  {t('Round bridge')}
+                </label>
+                <div className="transform-field">
+                  <label>{t('Thickness (mm)')} <Help text={t(
+                    'Thickness: extrudes that ribbon symmetrically along its own surface normal, turning it into a solid beam.',
+                  )} /></label>
+                  <NumberField value={thickness} step={5} min={0} onCommit={onThicknessChange} />
+                </div>
+              </section>
+            )}
+            {(mode === 'preview' || mode === 'edit') && (
+              <section className="control-group">
+                <div className="transform-field">
+                  <label>{t('End groove length (%)')} <Help text={t(
+                    "Each strut end forms a shouldered tenon: the end and mid groove percentages split the workable length (past the offset) into the shoulder, tenon, and far shoulder, cut back by groove depth. Chamfer length bevels the tenon's top corners; milling diameter sets a relief circle tucked into each of its concave base corners, clearing room for a square mating part to seat flush against a round cutting bit.",
+                  )} /></label>
+                  <NumberField
+                    value={endGrooveLengthPercent}
+                    step={5}
+                    min={0}
+                    onCommit={onEndGrooveLengthPercentChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Mid groove length (%)')}</label>
+                  <NumberField
+                    value={midGrooveLengthPercent}
+                    step={5}
+                    min={0}
+                    onCommit={onMidGrooveLengthPercentChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Groove depth (mm)')}</label>
+                  <NumberField value={grooveDepth} step={1} min={0} onCommit={onGrooveDepthChange} />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Milling diameter (mm)')}</label>
+                  <NumberField value={millingDiameter} step={1} min={0} onCommit={onMillingDiameterChange} />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Chamfer length (mm)')}</label>
+                  <NumberField value={chamferLength} step={1} min={0} onCommit={onChamferLengthChange} />
+                </div>
+              </section>
+            )}
+          </SidebarSection>
+          <SidebarSection title={t('Flanges')} defaultOpen={false}>
+            {(mode === 'preview' || mode === 'edit') && (
+              <section className="control-group">
+                <div className="transform-field">
+                  <label>{t('Tolerance longitudinal (mm)')} <Help text={t(
+                    "The flat connector plate pair at each hub vertex, filling the wedges between struts that have no face of their own - a plate on each face of the strut ends, seated in the groove notch cut into them (see Groove depth above). Tolerances loosen the fit lengthwise/across each strut arm; overshoot and min side set how far the plate reaches past a strut's own corner and how narrow it's allowed to pinch; the side/center holes and their offsets are the plate's own bolt pattern.",
+                  )} /></label>
+                  <NumberField
+                    value={toleranceLongitudinal}
+                    step={1}
+                    min={0}
+                    onCommit={onToleranceLongitudinalChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Tolerance transverse (mm)')}</label>
+                  <NumberField
+                    value={toleranceTransverse}
+                    step={1}
+                    min={0}
+                    onCommit={onToleranceTransverseChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Center hole diameter (mm)')}</label>
+                  <NumberField
+                    value={centerHoleDiameter}
+                    step={1}
+                    min={0}
+                    onCommit={onCenterHoleDiameterChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Side hole diameter outer (mm)')}</label>
+                  <NumberField
+                    value={sideHoleDiameterOuter}
+                    step={1}
+                    min={0}
+                    onCommit={onSideHoleDiameterOuterChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Side hole diameter inner (mm)')}</label>
+                  <NumberField
+                    value={sideHoleDiameterInner}
+                    step={1}
+                    min={0}
+                    onCommit={onSideHoleDiameterInnerChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Side hole diameter offset (mm)')}</label>
+                  <NumberField
+                    value={sideHoleDiameterOffset}
+                    step={1}
+                    min={0}
+                    onCommit={onSideHoleDiameterOffsetChange}
+                  />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Overshoot (mm)')}</label>
+                  <NumberField value={overshoot} step={1} min={0} onCommit={onOvershootChange} />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Min side (mm)')}</label>
+                  <NumberField value={minSide} step={1} min={0} onCommit={onMinSideChange} />
+                </div>
+                <div className="transform-field">
+                  <label>{t('Flange milling diameter (mm)')}</label>
+                  <NumberField
+                    value={flangeMillingDiameter}
+                    step={1}
+                    min={0}
+                    onCommit={onFlangeMillingDiameterChange}
+                  />
+                </div>
+              </section>
+            )}
+          </SidebarSection>
+          <SidebarSection title={t('Foot')} defaultOpen={false}>
+            {(mode === 'preview' || mode === 'edit') && (
+              <section className="control-group">
+                {FOOT_PARAM_FIELDS.map(({ key, label }) => (
+                  <div className="transform-field" key={key}>
+                    <label>{t(label)}</label>
+                    <NumberField
+                      value={footParams[key]}
+                      step={1}
+                      min={0}
+                      clamp={(n) => Math.max(n, 0)}
+                      onCommit={(v) => onFootParamChange(key, v)}
+                    />
+                  </div>
+                ))}
+                <Help text={t(
+                  'The same for every vertex marked as a foot (Edit → Vertices → Foot Geometry), applied to the preview with Redraw.',
+                )} />
+              </section>
+            )}
+          </SidebarSection>
+          <SidebarSection title={t('Braces')} defaultOpen={false}>
+            {(mode === 'preview' || mode === 'edit') && (
+              <section className="control-group">
+                {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
+                  <div className="transform-field" key={key}>
+                    <label>{t(label)}</label>
+                    <NumberField
+                      value={bracePlateDraft[key]}
+                      step={step}
+                      min={0}
+                      clamp={(n) => sanitizeBraceParam(key, n)}
+                      onCommit={(value) => onBracePlateParamChange(key, value)}
+                    />
+                  </div>
+                ))}
+                <Help text={t(
+                  'The same for every brace, and applied to all of them with Redraw (new braces start with these too). Where a brace sits (shift) is set per brace in Edit → Braces. The plate is extruded out from the strut’s side face, toward the brace’s other edge.',
+                )} />
+              </section>
+            )}
+          </SidebarSection>
+        </>
+      </SidebarSection>}
+      {mode !== 'new' && <SidebarSection title={t('Export')}>
+        <SidebarSection title={t('DXF')} defaultOpen={false}>
           <div className="transform-field">
             <label>{t('Part ID label size (mm)')}</label>
             <NumberField value={partIdLabelSize} step={0.5} min={0.1} onCommit={onPartIdLabelSizeChange} />
@@ -911,18 +1146,6 @@ export function Sidebar({
           <div className="transform-field">
             <label>{t('Connected part ID labels size (mm)')}</label>
             <NumberField value={connectedPartIdLabelSize} step={0.5} min={0.1} onCommit={onConnectedPartIdLabelSizeChange} />
-          </div>
-          <div className="button-row">
-            <button onClick={onDownloadSteps} disabled={stepExportBusy}>
-              {t('Download STEP Archive')}
-            </button>
-            <button onClick={onDownloadStepAssembly} disabled={stepExportBusy}>
-              {t('Download STEP Assembly')}
-            </button>
-            <button onClick={onDownloadDxf} disabled={dxfExportProgress !== null}>
-              {t('Download DXF')}
-            </button>
-            {dxfExportProgress && <button onClick={onCancelDxfExport}>{t('Cancel DXF export')}</button>}
           </div>
           <label className="checkbox-field">
             <input type="checkbox" checked={dxfSheetSettings.arrangeOnSheet} disabled={dxfExportProgress !== null}
@@ -940,393 +1163,36 @@ export function Sidebar({
               <input id={`dxf-sheet-${key}`} type="number" min={min} step="any" value={Number.isNaN(dxfSheetSettings[key]) ? '' : dxfSheetSettings[key]}
                 onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, [key]: event.target.valueAsNumber })} />
             </div>)}
-            <p className="hint">{t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may rotate by 90°.')}</p>
+            <Help text={t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may rotate by 90°.')} />
           </fieldset>}
           {dxfExportError && <p className="dxf-export-error" role="alert">{t('DXF export failed: {message}', { message: dxfExportError })}</p>}
-          <p className="hint">
-            {stepExportProgress
-              ? stepProgressText(stepExportProgress)
-              : stepAssemblyExportProgress
-                ? stepProgressText(stepAssemblyExportProgress)
-              : t(
-                stepExportScale !== 1
-                  ? 'STEP Archive exports every visible part as its own STEP file zipped together; STEP Assembly exports the same visible parts as one positioned STEP file. Both use the same shapes as this Preview, scaled {scale}x.'
-                  : 'STEP Archive exports every visible part as its own STEP file zipped together; STEP Assembly exports the same visible parts as one positioned STEP file. Both use the same shapes as this Preview.',
-                { scale: stepExportScale },
-              )}
-          </p>
-          <p className="hint">
+
+          <div className="button-row">
+            <button onClick={onDownloadDxf} disabled={dxfExportProgress !== null}>{t('Download DXF')}</button>
+            {dxfExportProgress && <button onClick={onCancelDxfExport}>{t('Cancel DXF export')}</button>}
+          </div>
+          {dxfExportProgress ? <p className="hint" role="status">
             {dxfExportProgress
               ? dxfExportProgress.phase === 'writing'
                 ? t('Writing DXF…')
                 : dxfExportProgress.phase === 'packing'
                   ? t('DXF: arranging parts — {done} / {total}', { done: dxfExportProgress.done, total: dxfExportProgress.total })
-                : t('DXF: building {phase} — {done} / {total}', { phase: t(dxfExportProgress.phase), done: dxfExportProgress.done, total: dxfExportProgress.total })
-              : dxfSheetSettings.arrangeOnSheet
-                ? t('The DXF arranges all parts across as many sheets as needed. Blue borders are on the SHEETS layer. Red and green labels stay with their parts.')
-                : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')}
-          </p>
-        </section>
-      )}
+                  : t('DXF: building {phase} — {done} / {total}', { phase: t(dxfExportProgress.phase), done: dxfExportProgress.done, total: dxfExportProgress.total })
+              : ''}
+          </p> : <Help text={dxfSheetSettings.arrangeOnSheet
+            ? t('The DXF arranges all parts across as many sheets as needed. Blue borders are on the SHEETS layer. Red and green labels stay with their parts.')
+            : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')} />}
 
-      {mode === 'edit' && (
-        <section className="control-group">
-          <h2>{t('Edit')}</h2>
-          <div className="segmented-control">
-            {EDIT_TARGET_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                className={editTarget === opt.value ? 'active' : ''}
-                onClick={() => onEditTargetChange(opt.value)}
-              >
-                {t(opt.label)}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {mode === 'edit' && (
-        <section className="control-group">
-          <div className="button-row">
-            <button onClick={onGetEdgesInfo}>{t('Get Edges Info')}</button>
-          </div>
-          <p className="hint">
-            {t(
-              'Downloads a JSON file with, for every visible vertex: each edge going into it, its precalculated strut-end measurements (offset, tenon, chamfer, milling), which neighboring edges have a face between them and which don’t, and the tangent plane those edges were projected onto to work that out.',
-            )}
-          </p>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'vertices' && (
-        <section className="control-group">
-          <h2>{t('Edit vertices')}</h2>
-          <div className="segmented-control">
-            {SELECTION_MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                className={selectionMode === opt.value ? 'active' : ''}
-                onClick={() => onSelectionModeChange(opt.value)}
-              >
-                {t(opt.label)}
-              </button>
-            ))}
-          </div>
-          <p className="hint">
-            {selectedCount > 0
-              ? tn(selectedCount, '{n} vertex selected', '{n} vertices selected')
-              : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
-          </p>
-          <div className="button-row">
-            <button disabled={selectedCount === 0} onClick={onDeleteSelected}>
-              {t('Delete')}
-            </button>
-            <button disabled={!canUndo} onClick={onUndo}>
-              {t('Undo')}
-            </button>
-            <button disabled={!canRedo} onClick={onRedo}>
-              {t('Redo')}
-            </button>
-          </div>
-          <div className="button-row">
-            <button disabled={!canAddPoints} onClick={onAddPoints}>
-              {t('Add Points')}
-            </button>
-            <button disabled={!canAddPoints} onClick={onConnectVertices}>
-              {t('Connect Vertices')}
-            </button>
-          </div>
-          {selectedCount > 0 && !canAddPoints && (
-            <p className="hint">{t('Select an even number of points to pair them up.')}</p>
-          )}
-          <p className="hint">
-            {t(
-              "Connect Vertices pairs them by nearest neighbor and joins each pair with a direct edge, skipping any pair that's already connected.",
-            )}
-          </p>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'edges' && (
-        <section className="control-group">
-          <h2>{t('Edit edges')}</h2>
-          <div className="segmented-control">
-            {SELECTION_MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                className={selectionMode === opt.value ? 'active' : ''}
-                onClick={() => onSelectionModeChange(opt.value)}
-              >
-                {t(opt.label)}
-              </button>
-            ))}
-          </div>
-          <p className="hint">
-            {selectedEdgeCount > 0
-              ? tn(selectedEdgeCount, '{n} edge selected', '{n} edges selected')
-              : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
-          </p>
-          <div className="button-row">
-            <button disabled={selectedEdgeCount === 0} onClick={onDeleteSelectedEdges}>
-              {t('Delete')}
-            </button>
-          </div>
-          <p className="hint">
-            {t(
-              'Also removes any face that had it as a side, and any vertex it leaves with no other edge.',
-            )}
-          </p>
-          <div className="button-row">
-            <button disabled={!canCreateFace} onClick={onCreateFace}>
-              {t('Create Face')}
-            </button>
-          </div>
-          <p className="hint">
-            {t('Turns every triangle hiding among the selected edges into a face.')}
-          </p>
-          <div className="button-row">
-            <button disabled={!canAddBrace} onClick={onAddBrace}>
-              {t('Add Brace')}
-            </button>
-          </div>
-          <p className="hint">
-            {t(
-              'Select exactly two edges that meet at the same vertex (use Point selection mode) to link them with a brace.',
-            )}
-          </p>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'edges' && selectedEdgeCount > 0 && (
-        <section className="control-group">
-          <h2>{t('Edge Thickness')}</h2>
-          <div className="transform-field">
-            <label>{t('Thickness override (mm)')}</label>
-            <NumberField
-              value={edgeThicknessValue}
-              step={5}
-              min={0}
-              placeholder={edgeThicknessValue === null ? t('Mixed') : undefined}
-              clamp={(n) => Math.max(n, 0)}
-              onCommit={onEdgeThicknessChange}
-            />
-          </div>
-          <p className="hint">{t('0 uses the global default thickness set in Preview.')}</p>
-          <div className="button-row">
-            <button disabled={!hasEdgeOverrides} onClick={onResetEdgeThickness}>
-              {t('Reset Thickness')}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'faces' && (
-        <section className="control-group">
-          <h2>{t('Edit faces')}</h2>
-          <div className="segmented-control">
-            {SELECTION_MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                className={selectionMode === opt.value ? 'active' : ''}
-                onClick={() => onSelectionModeChange(opt.value)}
-              >
-                {t(opt.label)}
-              </button>
-            ))}
-          </div>
-          <p className="hint">
-            {selectedFaceCount > 0
-              ? tn(selectedFaceCount, '{n} face selected', '{n} faces selected')
-              : t(SELECTION_MODE_OPTIONS.find((opt) => opt.value === selectionMode)!.hint)}
-          </p>
-          <div className="button-row">
-            <button disabled={selectedFaceCount === 0} onClick={onDeleteSelectedFaces}>
-              {t('Delete')}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'braces' && (
-        <section className="control-group">
-          <h2>{t('Edit braces')}</h2>
-          <p className="hint">
-            {selectedBraceCount > 0
-              ? tn(selectedBraceCount, '{n} brace selected', '{n} braces selected')
-              : t('Click a brace to select it. Add braces from two edges in the Edges tab.')}
-          </p>
-          <div className="button-row">
-            <button disabled={selectedBraceCount === 0} onClick={onDeleteSelectedBraces}>
-              {t('Delete')}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'braces' && selectedBraceCount > 0 && (
-        <section className="control-group">
-          <h2>{t('Brace Properties')}</h2>
-          {BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
-            <div className="transform-field" key={key}>
-              <label>{t(label)}</label>
-              <NumberField
-                value={braceParamValues[key]}
-                step={step}
-                min={0}
-                placeholder={braceParamValues[key] === null ? t('Mixed') : undefined}
-                clamp={(n) => sanitizeBraceParam(key, n)}
-                onCommit={(value) => onBraceParamChange(key, value)}
-              />
-            </div>
-          ))}
-          <p className="hint">
-            {t(
-              'Shift is where the brace meets each edge, measured from their shared vertex. The plate settings after the first two aren’t used yet.',
-            )}
-          </p>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
-        <section className="control-group">
-          <h2>{t('Corner Length')}</h2>
-          <div className="transform-field">
-            <label>{t('Corner length override (mm)')}</label>
-            <NumberField
-              value={vertexCornerLengthValue}
-              step={5}
-              min={0}
-              placeholder={vertexCornerLengthValue === null ? t('Mixed') : undefined}
-              clamp={(n) => Math.max(n, 0)}
-              onCommit={onVertexCornerLengthChange}
-            />
-          </div>
-          <p className="hint">
-            {t(
-              'Applies to every strut end and flange at the selected vertices. 0 uses the global corner length set in Edge Curvature.',
-            )}
-          </p>
-          <div className="button-row">
-            <button disabled={!hasVertexCornerLengthOverrides} onClick={onResetVertexCornerLength}>
-              {t('Reset Corner Length')}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
-        <section className="control-group">
-          <h2>{t('Foot Geometry')}</h2>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={allSelectedAreFeet}
-              ref={(el) => {
-                if (el) el.indeterminate = someSelectedAreFeet
-              }}
-              onChange={(e) => onFootVertexToggle(e.target.checked)}
-            />
-            {t('Foot geometry')}
-          </label>
-          <p className="hint">
-            {t(
-              'Marks the selected vertices as feet: their flange is built with the dimensions from the Foot section. Foot vertices are shown in purple.',
-            )}
-          </p>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
-        <section className="control-group">
-          <h2>{t('Flange Overrides')}</h2>
-          {FLANGE_PARAM_FIELDS.map(({ key, label }) => {
-            const shared = sharedFlangeOverride(selectedVertexIndices, vertexFlangeParams, key)
-            return (
-              <div className="transform-field" key={key}>
-                <label>{t(label)}</label>
-                <span className="field-with-reset">
-                  <NumberField
-                    value={shared.value}
-                    step={1}
-                    min={0}
-                    placeholder={shared.mixed ? t('Mixed') : t('{value} (default)', { value: flangeDefaults[key] })}
-                    clamp={(n) => Math.max(n, 0)}
-                    onCommit={(v) => onVertexFlangeParamChange(key, v)}
-                  />
-                  <button
-                    className="reset-field"
-                    title={t('Use the global value')}
-                    disabled={!shared.any}
-                    onClick={() => onResetVertexFlangeParam(key)}
-                  >
-                    &times;
-                  </button>
-                </span>
-              </div>
-            )
-          })}
-          <p className="hint">
-            {t(
-              "Overrides the Flange section's values for the flange at the selected vertices only. A blank field uses the global value (shown in grey); × goes back to it. Overridden vertices are shown in cyan.",
-            )}
-          </p>
-          <div className="button-row">
-            <button disabled={!hasVertexFlangeOverrides} onClick={onResetVertexFlangeParams}>
-              {t('Reset Flange Overrides')}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
-        <section className="control-group">
-          <h2>{t('Transform')}</h2>
-          <div className="transform-field">
-            <label>{t('Radius (Δr, mm)')}</label>
-            <NumberField
-              value={rValue}
-              step={10}
-              placeholder={rValue === null ? t('Mixed') : undefined}
-              onCommit={(v) => onTransformChange('r', v)}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Azimuth (Δ°)')}</label>
-            <NumberField
-              value={azimuthValue === null ? null : Math.round(((azimuthValue * 180) / Math.PI) * 100) / 100}
-              step={1}
-              placeholder={azimuthValue === null ? t('Mixed') : undefined}
-              onCommit={(deg) => onTransformChange('azimuth', (deg * Math.PI) / 180)}
-            />
-          </div>
-          <div className="transform-field">
-            <label>{t('Elevation (Δ°)')}</label>
-            <NumberField
-              value={elevationValue === null ? null : Math.round(((elevationValue * 180) / Math.PI) * 100) / 100}
-              step={1}
-              placeholder={elevationValue === null ? t('Mixed') : undefined}
-              onCommit={(deg) => onTransformChange('elevation', (deg * Math.PI) / 180)}
-            />
-          </div>
-          <p className="hint">
-            {rValue === 0 && azimuthValue === 0 && elevationValue === 0
-              ? t('Default position (0, 0, 0)')
-              : t('Polar offsets from the default position, about the dome center. Radius moves the vertex toward/away from the center; azimuth rotates it around the vertical axis; elevation tilts it up/down along its meridian.')}
-          </p>
-          <div className="button-row">
-            <button disabled={selectedCount < 2} onClick={onAlignHorizontally}>
-              {t('Align horizontally')}
-            </button>
-            <button disabled={selectedCount < 2} onClick={onAlignVertically}>
-              {t('Align vertically')}
-            </button>
-            <button disabled={!hasTransforms} onClick={onResetTransform}>
-              {t('Reset Transform')}
-            </button>
-          </div>
-        </section>
-      )}
+        </SidebarSection>
+        <SidebarSection title={t('STEP parts')} defaultOpen={false}>
+          <div className="button-row"><button onClick={onDownloadSteps} disabled={stepExportBusy}>{t('Download STEP Archive')}</button></div>
+          {stepExportProgress && <p className="hint" role="status">{stepProgressText(stepExportProgress)}</p>}
+        </SidebarSection>
+        <SidebarSection title={t('STEP assembly')} defaultOpen={false}>
+          <div className="button-row"><button onClick={onDownloadStepAssembly} disabled={stepExportBusy}>{t('Download STEP Assembly')}</button></div>
+          {stepAssemblyExportProgress && <p className="hint" role="status">{stepProgressText(stepAssemblyExportProgress)}</p>}
+        </SidebarSection>
+      </SidebarSection>}
     </aside>
   )
 }

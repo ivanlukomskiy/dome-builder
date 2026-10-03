@@ -35,11 +35,11 @@ body,
 }
 
 .sidebar {
-  width: 280px;
+  width: 320px;
   flex-shrink: 0;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 20px;
+  padding: 12px;
   overflow-y: auto;
 }
 
@@ -48,11 +48,6 @@ body,
   margin-bottom: 16px;
 }
 
-.sidebar h1 {
-  font-size: 18px;
-  margin: 0 0 20px;
-  color: var(--text);
-}
 
 .control-group {
   margin-bottom: 24px;
@@ -212,18 +207,8 @@ body,
   color: var(--text-dim);
 }
 
-.transform-field.part-transparency label {
-  width: 78px;
-}
 
-.transform-field.part-transparency .layer-slider-row {
-  flex: 1;
-}
 
-.transform-field.part-transparency .layer-count {
-  min-width: 32px;
-  text-align: right;
-}
 
 .transform-field input[type='number'] {
   width: 90px;
@@ -337,3 +322,61 @@ body,
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.sidebar-section {
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-section > summary {
+  padding: 11px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+}
+.sidebar-section > summary::marker { color: var(--text-dim); }
+.sidebar-section > summary:hover { color: var(--accent); }
+.sidebar-section-content { padding: 0 4px 12px 12px; }
+.sidebar-section .sidebar-section { border-bottom: 0; border-left: 1px solid var(--border); }
+.sidebar-section .sidebar-section > summary { padding: 8px; font-size: 12px; }
+.sidebar .control-group { margin-bottom: 12px; }
+.sidebar .control-group:last-child { margin-bottom: 0; }
+.sidebar h2 { font-size: 11px; color: var(--text-dim); font-weight: 500; }
+.editor-actions { margin: 0 0 12px; }
+.editor-actions button { flex: 1; }
+.lang-switch { margin-bottom: 12px; }
+.transform-field { position: relative; }
+.transform-field input[type='number'] { flex-shrink: 0; width: 80px; }
+.field-help { display: inline-block; position: relative; font-weight: normal; }
+.help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: help;
+}
+.help-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: min(300px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 10px;
+  background: #272b35;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px #0008;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 10;
+}
+.transform-field .field-help { position: static; }
+.sidebar :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -8,7 +8,7 @@ import { buildVertexAdjacency, computeModelStats, computeVertexHubMetrics } from
 import { buildFaceNeighborPairs, directedEdgeKey } from '../lib/edgesInfo'
 import type { FlangeShapeParams, FootParams } from '../lib/flangeGeometry'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
-import type { PartTransparency } from '../lib/previewParts'
+import type { PartVisibility } from '../lib/previewParts'
 import { Hud, type HudHubEdgeMetric } from './Hud'
 
 interface ViewportProps {
@@ -45,7 +45,7 @@ interface ViewportProps {
   overshoot: number
   minSide: number
   flangeMillingDiameter: number
-  partTransparency: PartTransparency
+  partVisibility: PartVisibility
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -87,7 +87,7 @@ export function Viewport({
   overshoot,
   minSide,
   flangeMillingDiameter,
-  partTransparency,
+  partVisibility,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -221,7 +221,7 @@ export function Viewport({
           overshoot={overshoot}
           minSide={minSide}
           flangeMillingDiameter={flangeMillingDiameter}
-          partTransparency={partTransparency}
+          partVisibility={partVisibility}
           onVertexClick={onVertexClick}
           onEdgeClick={onEdgeClick}
           onFaceClick={onFaceClick}

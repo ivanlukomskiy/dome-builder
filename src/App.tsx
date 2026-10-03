@@ -49,8 +49,7 @@ import {
   saveConfigToLocalStorage,
   serializeConfig,
 } from './lib/config'
-import { downloadBlob, downloadJson } from './lib/download'
-import { computeEdgesInfo } from './lib/edgesInfo'
+import { downloadBlob } from './lib/download'
 import {
   DEFAULT_FLANGE_SHAPE_PARAMS,
   DEFAULT_FOOT_PARAMS,
@@ -62,9 +61,8 @@ import { runStepAssemblyExport, runStepExport, type RunStepExportParams, type St
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
 import {
-  clampPartTransparency,
-  DEFAULT_PART_TRANSPARENCY,
-  type PartTransparency,
+  DEFAULT_PART_VISIBILITY,
+  type PartVisibility,
   type PreviewPartKind,
 } from './lib/previewParts'
 
@@ -358,9 +356,9 @@ function App() {
   )
   // View-only, so it lives outside the dome's saved state and the Apply flow: changing it just
   // re-draws the already-built preview.
-  const [partTransparency, setPartTransparency] = useState<PartTransparency>(DEFAULT_PART_TRANSPARENCY)
-  const handlePartTransparencyChange = (kind: PreviewPartKind, percent: number) =>
-    setPartTransparency((prev) => ({ ...prev, [kind]: clampPartTransparency(percent) }))
+  const [partVisibility, setPartVisibility] = useState<PartVisibility>(DEFAULT_PART_VISIBILITY)
+  const handlePartVisibilityChange = (kind: PreviewPartKind, visible: boolean) =>
+    setPartVisibility((prev) => ({ ...prev, [kind]: visible }))
   const handleBracePlateParamChange = (key: keyof BracePlateParams, value: number) =>
     setBracePlateDraft((prev) => ({ ...prev, [key]: sanitizeBraceParam(key, value) }))
   const handleApplyPreview = () => {
@@ -951,31 +949,6 @@ function App() {
   // tangent plane those edges were projected onto to work that out.
   const [stepExportProgress, setStepExportProgress] = useState<StepExportProgress | null>(null)
   const [stepAssemblyExportProgress, setStepAssemblyExportProgress] = useState<StepExportProgress | null>(null)
-  // Uniform scale factor (1 = no change) applied to every solid in the STEP exports - lets the
-  // exports double as a scaled-down physical model rather than only the true-size parts.
-  const [stepExportScale, setStepExportScale] = useState(1)
-
-  const handleGetEdgesInfo = () => {
-    const edgesInfo = computeEdgesInfo({
-      data: sceneData,
-      transformedVertices,
-      edgeThicknessOf: (edgeId) => edgeThickness.get(edgeId) ?? appliedPreviewParams.thickness,
-      cornerLength: appliedPreviewParams.cornerLength,
-      vertexCornerLength,
-      vertexFlangeParams,
-      footVertices,
-      footParams: appliedPreviewParams.footParams,
-      halfWidth: appliedPreviewParams.extrudeDistance / 2,
-      offsetModifier: appliedPreviewParams.offsetModifier,
-      endGrooveLengthPercent: appliedPreviewParams.endGrooveLengthPercent,
-      midGrooveLengthPercent: appliedPreviewParams.midGrooveLengthPercent,
-      grooveDepth: appliedPreviewParams.grooveDepth,
-      millingDiameter: appliedPreviewParams.millingDiameter,
-      chamferLength: appliedPreviewParams.chamferLength,
-    })
-    downloadJson(edgesInfo, 'edges-info.json')
-  }
-
   // Everything the STEP archive/assembly and DXF exports build their parts from - the applied
   // Preview params.
   const buildExportParams = (): RunStepExportParams => (
@@ -1008,7 +981,7 @@ function App() {
         minSide: appliedPreviewParams.minSide,
         millingDiameter: appliedPreviewParams.flangeMillingDiameter,
       },
-      scale: stepExportScale,
+      scale: 1,
     }
   )
 
@@ -1073,7 +1046,6 @@ function App() {
       <Sidebar
         onExportConfig={handleExportConfig}
         onImportConfig={handleImportConfig}
-        onGetEdgesInfo={handleGetEdgesInfo}
         onDownloadSteps={handleDownloadSteps}
         onDownloadStepAssembly={handleDownloadStepAssembly}
         onDownloadDxf={handleDownloadDxf}
@@ -1088,8 +1060,6 @@ function App() {
         onPartIdLabelSizeChange={setPartIdLabelSize}
         connectedPartIdLabelSize={connectedPartIdLabelSize}
         onConnectedPartIdLabelSizeChange={setConnectedPartIdLabelSize}
-        stepExportScale={stepExportScale}
-        onStepExportScaleChange={setStepExportScale}
         mode={mode}
         onOpenNew={handleOpenNew}
         onCreateNew={handleCreateNew}
@@ -1189,8 +1159,8 @@ function App() {
         bracePlateDraft={bracePlateDraft}
         onBracePlateParamChange={handleBracePlateParamChange}
         onApplyPreview={handleApplyPreview}
-        partTransparency={partTransparency}
-        onPartTransparencyChange={handlePartTransparencyChange}
+        partVisibility={partVisibility}
+        onPartVisibilityChange={handlePartVisibilityChange}
         canUndo={sceneHistory.canUndo}
         canRedo={sceneHistory.canRedo}
         onDeleteSelected={handleDeleteSelected}
@@ -1231,7 +1201,7 @@ function App() {
         overshoot={appliedPreviewParams.overshoot}
         minSide={appliedPreviewParams.minSide}
         flangeMillingDiameter={appliedPreviewParams.flangeMillingDiameter}
-        partTransparency={partTransparency}
+        partVisibility={partVisibility}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}

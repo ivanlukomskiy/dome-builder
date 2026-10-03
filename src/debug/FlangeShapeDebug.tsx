@@ -70,7 +70,7 @@ interface Params {
   foot: FootDebugParams
 }
 
-// Vertex 6 from a real "Get Edges Info" export (App.tsx's handleGetEdgesInfo) - only two struts
+// Vertex 6 from a captured edge-info fixture - only two struts
 // at this vertex, with the small wedge between them (edge 15 to edge 63, 71.3 degrees) open (no
 // face) and the wide wrap-around wedge back from edge 63 to edge 15 (288.7 degrees) filled by a
 // face - the reflex-wedge-with-a-face case, the flip side of vertex 21's reflex-wedge-with-no-
