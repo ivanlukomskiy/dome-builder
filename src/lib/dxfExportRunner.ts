@@ -3,7 +3,7 @@ import { computePreviewBuildInputs, type StrutGeometryEntry } from './previewBui
 import type { VertexEdgesInfo } from './edgesInfo'
 import type { RunStepExportParams } from './stepExportRunner'
 import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, projectToFrame2D, type BracePoints } from './braceSolid'
-import { layoutDxfParts, writeDxf, type DxfHelperText, type DxfPart } from './dxf'
+import { layoutDxfParts, orientDxfStrut, writeDxf, type DxfHelperText, type DxfPart } from './dxf'
 import type { Vec3 } from './braceSolid'
 import { computeBraceEndpoints } from './braces'
 import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './partNames'
@@ -298,10 +298,11 @@ export async function runDxfExport(
 
   const layoutStart = performance.now()
   const options = { scale: params.scale, partIdLabelSize: labelSettings.partIdLabelSize }
+  const orientedParts = parts.map(orientDxfStrut)
   if (sheetSettings.arrangeOnSheet) onProgress({ phase: 'packing', done: 0, total: parts.length })
   const layout = sheetSettings.arrangeOnSheet
-    ? await runDxfNesting({ parts, options, settings: sheetSettings }, (done, total) => onProgress({ phase: 'packing', done, total }), isCancelled)
-    : { parts: layoutDxfParts(parts, options), sheets: [] }
+    ? await runDxfNesting({ parts: orientedParts, options, settings: sheetSettings }, (done, total) => onProgress({ phase: 'packing', done, total }), isCancelled)
+    : { parts: layoutDxfParts(orientedParts, options), sheets: [] }
   if (!layout || isCancelled()) return null
   onProgress({ phase: 'writing', done: 0, total: 1 })
   const writeStart = performance.now()

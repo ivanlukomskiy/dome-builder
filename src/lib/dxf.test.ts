@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutDxfParts, readableAngle, writeDxf, type DxfPart } from './dxf'
+import { layoutDxfParts, orientDxfStrut, readableAngle, writeDxf, type DxfPart } from './dxf'
 import { createPartNameMaps, flangeNameKey } from './partNames'
 import type { DxfPolyline } from './dxfExport'
 
@@ -76,6 +76,53 @@ describe('layoutDxfParts', () => {
 
   it('drops parts with no geometry', () => {
     expect(layoutDxfParts([{ name: 'x', kind: 'strut', loops: [] }], { scale: 1 })).toEqual([])
+  })
+})
+
+describe('strut orientation before DXF layout', () => {
+  const bowed: DxfPart = {
+    name: '1', kind: 'strut',
+    loops: [{ closed: true, vertices: [
+      { x: 0, y: 0, bulge: 0.25 },
+      { x: 0, y: 10, bulge: 0 },
+      { x: 3, y: 5, bulge: 0 },
+    ] }],
+    strutPath: { endA: [0, 0], endB: [0, 10], middle: [3, 5] },
+    labelAnchor: { x: 3, y: 5 }, labelAngleDeg: 90,
+    helpers: [{ text: '2', x: 0, y: 10, height: 2, angleDeg: 90 }],
+  }
+
+  it('puts both ends level and the center below, rotating annotations with the outline', () => {
+    const result = orientDxfStrut(bowed)
+    const [a, b, middle] = result.loops[0].vertices
+    expect(a.y).toBeCloseTo(b.y)
+    expect(middle.y).toBeLessThan(a.y)
+    expect(result.labelAnchor?.x).toBeCloseTo(middle.x)
+    expect(result.labelAnchor?.y).toBeCloseTo(middle.y)
+    expect(result.labelAngleDeg).toBeCloseTo(0)
+    expect(result.helpers![0].y).toBeCloseTo(b.y)
+    expect(result.helpers![0].angleDeg).toBeCloseTo(0)
+    expect(result.loops[0].vertices[0].bulge).toBe(0.25)
+    expect(result.strutPath).toBeUndefined()
+    const [placed] = layoutDxfParts([result], { scale: 1 })
+    expect(placed.loops[0].vertices[0].y).toBeCloseTo(placed.loops[0].vertices[1].y)
+  })
+
+  it('uses a half-turn when the middle would otherwise be above the ends', () => {
+    const result = orientDxfStrut({
+      ...bowed,
+      strutPath: { endA: [0, 0], endB: [0, 10], middle: [-3, 5] },
+      loops: [{ closed: true, vertices: bowed.loops[0].vertices.map((vertex) => ({ ...vertex, x: -vertex.x })) }],
+    })
+    const [a, b, middle] = result.loops[0].vertices
+    expect(a.y).toBeCloseTo(b.y)
+    expect(middle.y).toBeLessThan(a.y)
+    expect(result.loops[0].vertices[0].bulge).toBe(0.25)
+  })
+
+  it('leaves other part kinds alone', () => {
+    const flange = { ...bowed, kind: 'flange' as const }
+    expect(orientDxfStrut(flange)).toBe(flange)
   })
 })
 

@@ -22,6 +22,9 @@ export interface DxfPart {
   // Green annotations about how the part connects to the others (which vertex/strut/brace goes
   // where), in the part's own 2D coordinates - not part of its outline.
   helpers?: DxfHelperText[]
+  // Strut centerline reference points in the part's original 2D frame. Used to orient the
+  // outline before layout; the sheet packer may subsequently rotate the whole part.
+  strutPath?: { endA: [number, number]; endB: [number, number]; middle: [number, number] }
 }
 
 // A short text centered on (x, y), written along `angleDeg` and `height` mm tall (both before the
@@ -134,6 +137,39 @@ function transformLoops(loops: DxfPolyline[], dx: number, dy: number, scale: num
     closed: loop.closed,
     vertices: loop.vertices.map((v) => ({ x: (v.x + dx) * scale, y: (v.y + dy) * scale, bulge: v.bulge })),
   }))
+}
+
+// Align the two vertex ends of a strut on a horizontal line, with its curved middle below
+// that line. A half-turn, rather than a mirror, preserves arc bulges and contour winding.
+// Work in the part's own coordinates before either row layout or sheet nesting so all outlines,
+// labels and green connection annotations receive exactly the same transform.
+export function orientDxfStrut(part: DxfPart): DxfPart {
+  const path = part.kind === 'strut' ? part.strutPath : undefined
+  if (!path) return part
+  const { endA, endB, middle } = path
+  const dx = endB[0] - endA[0], dy = endB[1] - endA[1]
+  if (Math.hypot(dx, dy) < 1e-9) return part
+  let angle = -Math.atan2(dy, dx)
+  const midY = (middle[0] - endA[0]) * Math.sin(angle) + (middle[1] - endA[1]) * Math.cos(angle)
+  if (midY > 1e-9) angle += Math.PI
+  const cos = Math.cos(angle), sin = Math.sin(angle)
+  const point = (x: number, y: number) => ({
+    x: (x - endA[0]) * cos - (y - endA[1]) * sin,
+    y: (x - endA[0]) * sin + (y - endA[1]) * cos,
+  })
+  const angleDeg = angle * 180 / Math.PI
+  const oriented: DxfPart = {
+    ...part,
+    loops: part.loops.map((loop) => ({
+      ...loop,
+      vertices: loop.vertices.map((vertex) => ({ ...vertex, ...point(vertex.x, vertex.y) })),
+    })),
+    labelAnchor: part.labelAnchor ? point(part.labelAnchor.x, part.labelAnchor.y) : undefined,
+    labelAngleDeg: (part.labelAngleDeg ?? 0) + angleDeg,
+    helpers: part.helpers?.map((helper) => ({ ...helper, ...point(helper.x, helper.y), angleDeg: helper.angleDeg + angleDeg })),
+  }
+  delete oriented.strutPath
+  return oriented
 }
 
 // Arranges the parts on one sheet: scaled, without rotation, in rows (one kind per row group, in

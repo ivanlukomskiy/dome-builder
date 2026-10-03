@@ -249,6 +249,10 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           ends ? [labelAvoidArea(ends, partName, req.partIdLabelSize)] : [],
         )
         const label = strutLabel(posA, posB, center, avoidAreas, req.roundStrutBridge)
+        const strutPlane = computeStrutPlane(posA, posB, center)
+        const endA = projectToPlane2D(posA, strutPlane)
+        const endB = projectToPlane2D(posB, strutPlane)
+        const domeCenter = projectToPlane2D(center, strutPlane)
         parts.push({
           name: partName,
           kind: 'strut',
@@ -256,6 +260,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           labelAnchor: label.anchor,
           labelAngleDeg: label.angleDeg,
           helpers,
+          strutPath: { endA, endB, middle: arcPoint2(endA, endB, domeCenter, 0.5) },
         })
       }
     } catch (err) {
