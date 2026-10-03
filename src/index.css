@@ -324,3 +324,16 @@ body,
   background: #4fd97e;
   transition: width 0.15s ease-out;
 }
+/* DXF sheet dimensions follow the sidebar's existing numeric-field layout. */
+.dxf-sheet-settings {
+  border: 0;
+  padding: 0;
+  margin: 8px 0 0;
+  min-width: 0;
+}
+
+.dxf-export-error {
+  color: #ff9696;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

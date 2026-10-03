@@ -1,5 +1,6 @@
 import { DEFAULT_DXF_LABEL_SETTINGS } from './lib/dxfLabelSettings'
-import { useEffect, useMemo, useState } from 'react'
+import { DEFAULT_DXF_SHEET_SETTINGS } from './lib/dxfSheetSettings'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AxisType, Edge, Face, SceneData, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
 import {
   addFaces,
@@ -800,10 +801,12 @@ function App() {
   }
 
   const [partIdLabelSize, setPartIdLabelSize] = useState(initial?.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize)
+  const [dxfSheetSettings, setDxfSheetSettings] = useState(initial?.dxfSheetSettings ?? DEFAULT_DXF_SHEET_SETTINGS)
   const [connectedPartIdLabelSize, setConnectedPartIdLabelSize] = useState(initial?.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize)
 
   const applyConfig = (state: DomeState) => {
     setPartIdLabelSize(state.partIdLabelSize)
+    setDxfSheetSettings(state.dxfSheetSettings)
     setConnectedPartIdLabelSize(state.connectedPartIdLabelSize)
     sceneHistory.reset(state.sceneData)
     setSelectionMode(state.selectionMode)
@@ -865,6 +868,7 @@ function App() {
 
   const buildConfig = (): DomeConfig =>
     serializeConfig({
+      dxfSheetSettings,
       partIdLabelSize,
       connectedPartIdLabelSize,
       sceneData,
@@ -900,6 +904,7 @@ function App() {
   useEffect(() => {
     saveConfigToLocalStorage(buildConfig())
   }, [
+    dxfSheetSettings,
     partIdLabelSize,
     connectedPartIdLabelSize,
     sceneData,
@@ -1042,15 +1047,20 @@ function App() {
   }
 
   const [dxfExportProgress, setDxfExportProgress] = useState<DxfExportProgress | null>(null)
+  const [dxfExportError, setDxfExportError] = useState<string | null>(null)
+  const dxfCancelled = useRef(false)
 
   const handleDownloadDxf = async () => {
     if (dxfExportProgress) return
+    dxfCancelled.current = false
+    setDxfExportError(null)
     setDxfExportProgress({ phase: 'struts', done: 0, total: 0 })
     try {
-      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => false, { partIdLabelSize, connectedPartIdLabelSize })
+      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => dxfCancelled.current, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings)
       if (blob) downloadBlob(blob, 'dome-parts.dxf')
     } catch (err) {
       console.error('Failed to export DXF', err)
+      setDxfExportError(err instanceof Error ? err.message : String(err))
     } finally {
       setDxfExportProgress(null)
     }
@@ -1068,6 +1078,10 @@ function App() {
         onDownloadStepAssembly={handleDownloadStepAssembly}
         onDownloadDxf={handleDownloadDxf}
         dxfExportProgress={dxfExportProgress}
+        dxfExportError={dxfExportError}
+        dxfSheetSettings={dxfSheetSettings}
+        onDxfSheetSettingsChange={setDxfSheetSettings}
+        onCancelDxfExport={() => { dxfCancelled.current = true }}
         stepExportProgress={stepExportProgress}
         stepAssemblyExportProgress={stepAssemblyExportProgress}
         partIdLabelSize={partIdLabelSize}

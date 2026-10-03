@@ -10,6 +10,8 @@ import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './part
 import { runExportBatches } from './exportBatchPool'
 import { exportProfilingEnabled, publishExportProfile, type ExportBatchProfile, type ExportWorkerProfile } from './exportProfile'
 import type { DxfExportPhase, DxfExportRequest, DxfExportWorkerMessage } from '../workers/dxfExportWorker'
+import { DEFAULT_DXF_SHEET_SETTINGS, validateDxfSheetSettings, type DxfSheetSettings } from './dxfSheetSettings'
+import { runDxfNesting } from './dxfNestingRunner'
 
 // Same per-worker item cap as the STEP export and the live Preview build, for the same reason.
 const BATCH_SIZE = 12
@@ -21,7 +23,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export interface DxfExportProgress {
-  phase: DxfExportPhase | 'writing'
+  phase: DxfExportPhase | 'packing' | 'writing'
   done: number
   total: number
 }
@@ -166,7 +168,9 @@ export async function runDxfExport(
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
   labelSettings: DxfLabelSettings = DEFAULT_DXF_LABEL_SETTINGS,
+  sheetSettings: DxfSheetSettings = DEFAULT_DXF_SHEET_SETTINGS,
 ): Promise<Blob | null> {
+  if (sheetSettings.arrangeOnSheet) validateDxfSheetSettings(sheetSettings)
   const startedAt = performance.now()
   const profiling = exportProfilingEnabled()
   const batchProfiles: ExportBatchProfile[] = []
@@ -185,6 +189,7 @@ export async function runDxfExport(
     flangeParams: params.flangeParams,
     names,
     profile: profiling,
+    strict: sheetSettings.arrangeOnSheet,
   }
 
   const parts: DxfPart[] = []
@@ -196,7 +201,10 @@ export async function runDxfExport(
     strutEntries.length,
     (batch, i, report) => runBatch(batch, [], shared, i + 1, report),
     (done, total) => onProgress({ phase: 'struts', done, total }),
-    (batch, err) => console.error(`Failed to build DXF outlines for struts ${batch.map((job) => job.index).join(', ')}`, err),
+    (batch, err) => {
+      if (sheetSettings.arrangeOnSheet) throw err
+      console.error(`Failed to build DXF outlines for struts ${batch.map((job) => job.index).join(', ')}`, err)
+    },
     isCancelled,
   )
   if (!strutResults) return null
@@ -217,7 +225,10 @@ export async function runDxfExport(
     vertices.length,
     (batch, i, report) => runBatch([], batch, shared, strutBatches.length + i + 1, report),
     (done, total) => onProgress({ phase: 'flanges', done, total }),
-    (batch, err) => console.error(`Failed to build DXF outlines for flanges of vertices ${batch.map((v) => v.vertexId).join(', ')}`, err),
+    (batch, err) => {
+      if (sheetSettings.arrangeOnSheet) throw err
+      console.error(`Failed to build DXF outlines for flanges of vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
+    },
     isCancelled,
   )
   if (!vertexResults) return null
@@ -237,7 +248,10 @@ export async function runDxfExport(
   // A brace's body is the flat quad through its four plate end points - no WASM needed for that.
   for (const body of pairBracePoints(bracePoints)) {
     const frame = braceQuadFrame(body.a, body.b)
-    if (!frame) continue
+    if (!frame) {
+      if (sheetSettings.arrangeOnSheet) throw new Error(`Cannot construct brace ${names.braces[body.braceId]}.`)
+      continue
+    }
     // Green: the strut each end of the brace goes into, written along the brace just inside
     // the end (the middle of that strut's two plate end points).
     const height = labelSettings.connectedPartIdLabelSize
@@ -274,9 +288,15 @@ export async function runDxfExport(
   }
 
   const layoutStart = performance.now()
-  const placed = layoutDxfParts(parts, { scale: params.scale, partIdLabelSize: labelSettings.partIdLabelSize })
+  const options = { scale: params.scale, partIdLabelSize: labelSettings.partIdLabelSize }
+  if (sheetSettings.arrangeOnSheet) onProgress({ phase: 'packing', done: 0, total: parts.length })
+  const layout = sheetSettings.arrangeOnSheet
+    ? await runDxfNesting({ parts, options, settings: sheetSettings }, (done, total) => onProgress({ phase: 'packing', done, total }), isCancelled)
+    : { parts: layoutDxfParts(parts, options), sheets: [] }
+  if (!layout || isCancelled()) return null
+  onProgress({ phase: 'writing', done: parts.length, total: parts.length })
   const writeStart = performance.now()
-  const blob = new Blob([writeDxf(placed)], { type: 'application/dxf' })
+  const blob = new Blob([writeDxf(layout.parts, layout.sheets)], { type: 'application/dxf' })
   if (profiling) publishExportProfile('dxf', startedAt, batchProfiles, {
     layoutDxfParts: writeStart - layoutStart,
     writeDxf: performance.now() - writeStart,

@@ -9,6 +9,7 @@
     "flange-shape-debug": "vite --open /dome-builder/flange-shape-debug",
     "foot-shape-debug": "vite --open /dome-builder/foot-shape-debug",
     "build": "tsc -b && vite build",
+    "build:nesting": "bash native/nesting/build.sh",
     "lint": "oxlint",
     "test": "vitest run",
     "preview": "vite preview",

@@ -4,6 +4,23 @@ import { runExportBatches } from './exportBatchPool'
 afterEach(() => vi.unstubAllGlobals())
 
 describe('runExportBatches', () => {
+  it('stops new batches and waits for in-flight work before propagating a fatal error', async () => {
+    vi.stubGlobal('navigator', { hardwareConcurrency: 3 })
+    const started: number[] = []
+    let finishOther!: () => void
+    let settled = false
+    const run = runExportBatches([[0], [1], [2]], 3, async ([item]) => {
+      started.push(item)
+      if (item === 0) throw new Error('invalid outline')
+      await new Promise<void>((resolve) => { finishOther = resolve })
+    }, () => {}, (_batch, error) => { throw error }, () => false)
+    const outcome = run.catch((error) => { settled = true; return error })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    finishOther()
+    expect((await outcome).message).toBe('invalid outline')
+    expect(started).toEqual([0, 1])
+  })
   it('limits concurrent batches, reports monotonic progress, and returns input order', async () => {
     vi.stubGlobal('navigator', { hardwareConcurrency: 3 })
     const started: number[] = []

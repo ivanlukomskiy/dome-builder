@@ -40,6 +40,8 @@ export interface PlacedDxfPart extends DxfPart {
   label: { x: number; y: number; height: number; angleDeg: number }
 }
 
+export interface DxfSheet { x: number; y: number; width: number; height: number }
+
 // Layer per part kind (so a CAM package can treat them separately) and one for the ID labels;
 // the labels get their own color so they stand out from the outlines. Colors are AutoCAD's ACI
 // numbers (7 = white/black, 1 = red).
@@ -229,7 +231,7 @@ function pair(code: number, value: string | number): string {
 
 // The DXF file text for the laid-out parts: each outline a closed POLYLINE on its kind's layer,
 // each ID a TEXT on the LABELS layer.
-export function writeDxf(parts: PlacedDxfPart[]): string {
+export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): string {
   let out = ''
   out += pair(0, 'SECTION') + pair(2, 'HEADER') + pair(9, '$ACADVER') + pair(1, 'AC1009')
   out += pair(9, '$INSUNITS') + pair(70, 4) // millimeters
@@ -239,14 +241,22 @@ export function writeDxf(parts: PlacedDxfPart[]): string {
   out += pair(0, 'TABLE') + pair(2, 'LTYPE') + pair(70, 1)
   out += pair(0, 'LTYPE') + pair(2, 'CONTINUOUS') + pair(70, 0) + pair(3, 'Solid line') + pair(72, 65) + pair(73, 0) + pair(40, 0)
   out += pair(0, 'ENDTAB')
-  out += pair(0, 'TABLE') + pair(2, 'LAYER') + pair(70, DXF_LAYERS.length)
-  for (const layer of DXF_LAYERS) {
+  const layers = sheets.length ? [...DXF_LAYERS, { name: 'SHEETS', color: 5 }] : DXF_LAYERS
+  out += pair(0, 'TABLE') + pair(2, 'LAYER') + pair(70, layers.length)
+  for (const layer of layers) {
     out += pair(0, 'LAYER') + pair(2, layer.name) + pair(70, 0) + pair(62, layer.color) + pair(6, 'CONTINUOUS')
   }
   out += pair(0, 'ENDTAB')
   out += pair(0, 'ENDSEC')
 
   out += pair(0, 'SECTION') + pair(2, 'ENTITIES')
+  for (const sheet of sheets) {
+    out += pair(0, 'POLYLINE') + pair(8, 'SHEETS') + pair(66, 1) + pair(70, 1)
+    out += pair(10, 0) + pair(20, 0) + pair(30, 0)
+    for (const [x, y] of [[sheet.x, sheet.y], [sheet.x + sheet.width, sheet.y], [sheet.x + sheet.width, sheet.y + sheet.height], [sheet.x, sheet.y + sheet.height]])
+      out += pair(0, 'VERTEX') + pair(8, 'SHEETS') + pair(10, num(x)) + pair(20, num(y)) + pair(30, 0)
+    out += pair(0, 'SEQEND') + pair(8, 'SHEETS')
+  }
   for (const part of parts) {
     const layer = LAYER_OF_KIND[part.kind]
     for (const loop of part.loops) {

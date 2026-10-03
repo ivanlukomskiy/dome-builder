@@ -17,15 +17,17 @@ export async function runExportBatches<Job, Result>(
   const reported = new Array<number>(batches.length).fill(0)
   let completed = 0
   let next = 0
+  let failed = false
+  let fatalError: unknown
   onProgress(0, total)
 
   const runner = async () => {
-    while (!isCancelled()) {
+    while (!isCancelled() && !failed) {
       const index = next++
       const batch = batches[index]
       if (!batch) return
       const report = (done: number) => {
-        if (isCancelled()) return
+        if (isCancelled() || failed) return
         const count = Math.max(reported[index], Math.min(batch.length, done))
         if (count === reported[index]) return
         completed += count - reported[index]
@@ -36,12 +38,14 @@ export async function runExportBatches<Job, Result>(
         results[index] = await runBatch(batch, index, report)
         report(batch.length)
       } catch (error) {
-        onError(batch, error)
+        try { onError(batch, error) }
+        catch (fatal) { failed = true; fatalError = fatal; return }
         report(batch.length)
       }
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(exportWorkerCount(), batches.length) }, runner))
+  if (failed) throw fatalError
   return isCancelled() ? null : results
 }

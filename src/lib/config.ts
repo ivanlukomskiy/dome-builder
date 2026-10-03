@@ -1,4 +1,5 @@
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
+import { DEFAULT_DXF_SHEET_SETTINGS, type DxfSheetSettings } from './dxfSheetSettings'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
 import { DEFAULT_FOOT_PARAMS, type FlangeShapeParams, type FootParams } from './flangeGeometry'
@@ -13,6 +14,7 @@ export interface DomeConfig {
   version: 17
   partIdLabelSize?: number
   connectedPartIdLabelSize?: number
+  dxfSheetSettings?: DxfSheetSettings
   // The dome's sphere diameter in mm (SceneData.diameter).
   diameter: number
   // Polar coordinates about the origin: [r (mm), azimuth (rad), elevation (rad)] - see PolarCoord.
@@ -92,6 +94,7 @@ type LoadableDomeConfig = DomeConfig | LegacyDomeConfigV16
 export interface DomeState {
   partIdLabelSize: number
   connectedPartIdLabelSize: number
+  dxfSheetSettings: DxfSheetSettings
   sceneData: SceneData
   selectionMode: SelectionMode
   extrudeDistance: number
@@ -126,6 +129,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
     version: 17,
     partIdLabelSize: state.partIdLabelSize,
     connectedPartIdLabelSize: state.connectedPartIdLabelSize,
+    dxfSheetSettings: state.dxfSheetSettings,
     diameter: state.sceneData.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
       id,
@@ -209,6 +213,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
       nextBraceId: config.nextBraceId ?? 0,
     },
     partIdLabelSize: config.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize,
+    dxfSheetSettings: { ...DEFAULT_DXF_SHEET_SETTINGS, ...config.dxfSheetSettings },
     connectedPartIdLabelSize: config.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize,
     selectionMode: config.selectionMode,
     extrudeDistance: config.extrudeDistance,

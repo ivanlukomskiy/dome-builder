@@ -71,6 +71,12 @@ describe('config migration', () => {
 
 
 describe('DXF label settings', () => {
+  it('defaults old configs to unpacked DXF and preserves sheet settings', () => {
+    const state = deserializeConfig(legacyConfig)
+    expect(state.dxfSheetSettings.arrangeOnSheet).toBe(false)
+    const settings = { arrangeOnSheet: true, width: 2000, height: 1000, margin: 12, spacing: 3 }
+    expect(deserializeConfig(serializeConfig({ ...state, dxfSheetSettings: settings })).dxfSheetSettings).toEqual(settings)
+  })
   it('defaults old configs to the original text sizes and preserves custom sizes', () => {
     const state = deserializeConfig(legacyConfig)
     expect(state.partIdLabelSize).toBe(8)

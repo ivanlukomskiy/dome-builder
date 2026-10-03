@@ -12,6 +12,7 @@ import {
 } from '../lib/previewParts'
 import type { StepExportProgress } from '../lib/stepExportRunner'
 import type { DxfExportProgress } from '../lib/dxfExportRunner'
+import type { DxfSheetSettings } from '../lib/dxfSheetSettings'
 import {
   BRACE_PARAM_FIELDS,
   BRACE_PLATE_PARAM_FIELDS,
@@ -56,6 +57,10 @@ interface SidebarProps {
   onDownloadStepAssembly: () => void
   onDownloadDxf: () => void
   dxfExportProgress: DxfExportProgress | null
+  dxfExportError: string | null
+  dxfSheetSettings: DxfSheetSettings
+  onDxfSheetSettingsChange: (settings: DxfSheetSettings) => void
+  onCancelDxfExport: () => void
   stepExportProgress: StepExportProgress | null
   stepAssemblyExportProgress: StepExportProgress | null
   partIdLabelSize: number
@@ -292,6 +297,10 @@ export function Sidebar({
   onDownloadStepAssembly,
   onDownloadDxf,
   dxfExportProgress,
+  dxfExportError,
+  dxfSheetSettings,
+  onDxfSheetSettingsChange,
+  onCancelDxfExport,
   stepExportProgress,
   stepAssemblyExportProgress,
   partIdLabelSize,
@@ -913,7 +922,27 @@ export function Sidebar({
             <button onClick={onDownloadDxf} disabled={dxfExportProgress !== null}>
               {t('Download DXF')}
             </button>
+            {dxfExportProgress && <button onClick={onCancelDxfExport}>{t('Cancel DXF export')}</button>}
           </div>
+          <label className="checkbox-field">
+            <input type="checkbox" checked={dxfSheetSettings.arrangeOnSheet} disabled={dxfExportProgress !== null}
+              onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, arrangeOnSheet: event.target.checked })} />
+            {t('Arrange on a sheet')}
+          </label>
+          {dxfSheetSettings.arrangeOnSheet && <fieldset className="dxf-sheet-settings" disabled={dxfExportProgress !== null}>
+            {([
+              ['width', 'Sheet width (mm)', 1],
+              ['height', 'Sheet height (mm)', 1],
+              ['margin', 'Margin (mm)', 0],
+              ['spacing', 'Spacing (mm)', 0],
+            ] as const).map(([key, label, min]) => <div className="transform-field" key={key}>
+              <label htmlFor={`dxf-sheet-${key}`}>{t(label)}</label>
+              <input id={`dxf-sheet-${key}`} type="number" min={min} step="any" value={Number.isNaN(dxfSheetSettings[key]) ? '' : dxfSheetSettings[key]}
+                onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, [key]: event.target.valueAsNumber })} />
+            </div>)}
+            <p className="hint">{t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may rotate by 90°.')}</p>
+          </fieldset>}
+          {dxfExportError && <p className="dxf-export-error" role="alert">{t('DXF export failed: {message}', { message: dxfExportError })}</p>}
           <p className="hint">
             {stepExportProgress
               ? stepProgressText(stepExportProgress)
@@ -930,8 +959,12 @@ export function Sidebar({
             {dxfExportProgress
               ? dxfExportProgress.phase === 'writing'
                 ? t('Writing DXF…')
+                : dxfExportProgress.phase === 'packing'
+                  ? t('DXF: arranging parts — {done} / {total}', { done: dxfExportProgress.done, total: dxfExportProgress.total })
                 : t('DXF: building {phase} — {done} / {total}', { phase: t(dxfExportProgress.phase), done: dxfExportProgress.done, total: dxfExportProgress.total })
-              : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')}
+              : dxfSheetSettings.arrangeOnSheet
+                ? t('The DXF arranges all parts across as many sheets as needed. Blue borders are on the SHEETS layer. Red and green labels stay with their parts.')
+                : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')}
           </p>
         </section>
       )}

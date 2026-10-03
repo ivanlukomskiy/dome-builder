@@ -21,6 +21,7 @@ import { bracePlateNameKey, flangeNameKey, type PartNameMaps } from '../lib/part
 declare const self: DedicatedWorkerGlobalScope
 
 export interface DxfExportRequest {
+  strict?: boolean
   partIdLabelSize: number
   connectedPartIdLabelSize: number
   requestId: number
@@ -208,6 +209,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     } satisfies DxfExportWorkerMessage)
 
     try {
+      if (req.strict && !boundary.main) throw new Error(`Cannot construct strut ${req.names.struts[job.index]}.`)
       if (boundary.main) {
         // Connection info in green: the vertex at each end, and the brace (if any) at its center.
         const helpers: DxfHelperText[] = []
@@ -257,6 +259,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         })
       }
     } catch (err) {
+      if (req.strict) throw new Error(`Cannot export strut ${req.names.struts[job.index]}: ${String(err)}`)
       console.error(`Failed to read strut outline for edge ${job.index}`, err)
     }
 
@@ -280,6 +283,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
         })
       } catch (err) {
+        if (req.strict) throw new Error(`Cannot export brace plate ${brace.braceId} for edge ${job.index}: ${String(err)}`)
         console.error(`Failed to read brace plate ${brace.braceId} outline for edge ${job.index}`, err)
       }
     }
@@ -301,7 +305,10 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         flangeParams,
         side,
       ))
-      if (!boundary.main) continue
+      if (!boundary.main) {
+        if (req.strict) throw new Error(`Cannot construct ${side} flange for vertex ${vertex.vertexId}.`)
+        continue
+      }
       try {
         // Which strut goes into each rectangular hole, in green along the hole.
         const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => {
@@ -334,6 +341,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           helpers,
         })
       } catch (err) {
+        if (req.strict) throw new Error(`Cannot export ${side} flange for vertex ${vertex.vertexId}: ${String(err)}`)
         console.error(`Failed to read ${side} flange outline for vertex ${vertex.vertexId}`, err)
       }
     }
@@ -342,6 +350,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     if (foot) {
       try {
         const boundary = timed('footBoundary2D', () => computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth))
+        if (req.strict && !boundary.main) throw new Error('Cannot construct foot outline.')
         if (boundary.main) {
           const tabOffset = footTabOffset(req.halfWidth * 2, req.grooveDepth)
           parts.push({
@@ -367,6 +376,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           })
         }
       } catch (err) {
+        if (req.strict) throw new Error(`Cannot export foot for vertex ${vertex.vertexId}: ${String(err)}`)
         console.error(`Failed to read foot outline for vertex ${vertex.vertexId}`, err)
       }
     }
