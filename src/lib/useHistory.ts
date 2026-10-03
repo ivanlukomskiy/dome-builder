@@ -1,51 +1,70 @@
 import { useMemo, useState } from 'react'
 
-// Generic bounded undo/redo over snapshots of a value: `commit` pushes the current value onto
-// the past (capped at `maxHistory`) before replacing it and clearing any redo history; `reset`
-// replaces the value without leaving anything to undo back to (a structural boundary, e.g.
-// Create/Import, past which "undo" isn't meaningful). `undo`/`redo` move the pointer between
-// past/present/future the standard way.
+// Bounded snapshots for all editable dome data. A group (the focused field) makes a typing
+// session one undo step even though each valid keystroke updates the document immediately.
 export interface HistoryControls<T> {
   value: T
-  commit: (next: T) => void
+  commit: (next: T | ((previous: T) => T), group?: object | null) => void
   reset: (next: T) => void
   undo: () => void
   redo: () => void
+  endGroup: () => void
   canUndo: boolean
   canRedo: boolean
 }
 
-interface HistoryState<T> {
+export interface HistoryState<T> {
   past: T[]
   present: T
   future: T[]
+  group: object | null
+}
+
+export function initialHistory<T>(present: T): HistoryState<T> {
+  return { past: [], present, future: [], group: null }
+}
+
+export function commitHistory<T>(
+  previous: HistoryState<T>, next: T | ((present: T) => T), maxHistory: number, group: object | null = null,
+): HistoryState<T> {
+  const present = typeof next === 'function' ? (next as (present: T) => T)(previous.present) : next
+  if (Object.is(present, previous.present)) return previous
+  return {
+    past: group !== null && group === previous.group
+      ? previous.past : [...previous.past, previous.present].slice(-maxHistory),
+    present,
+    future: [],
+    group,
+  }
+}
+
+export function undoHistory<T>(previous: HistoryState<T>): HistoryState<T> {
+  if (previous.past.length === 0) return previous
+  return {
+    past: previous.past.slice(0, -1),
+    present: previous.past[previous.past.length - 1],
+    future: [previous.present, ...previous.future],
+    group: null,
+  }
+}
+
+export function redoHistory<T>(previous: HistoryState<T>): HistoryState<T> {
+  if (previous.future.length === 0) return previous
+  const [present, ...future] = previous.future
+  return { past: [...previous.past, previous.present], present, future, group: null }
 }
 
 export function useHistory<T>(initial: T, maxHistory = 50): HistoryControls<T> {
-  const [state, setState] = useState<HistoryState<T>>({ past: [], present: initial, future: [] })
-
+  const [state, setState] = useState<HistoryState<T>>(() => initialHistory(initial))
   return useMemo(
     () => ({
       value: state.present,
-      commit: (next: T) =>
-        setState((prev) => ({
-          past: [...prev.past, prev.present].slice(-maxHistory),
-          present: next,
-          future: [],
-        })),
-      reset: (next: T) => setState({ past: [], present: next, future: [] }),
-      undo: () =>
-        setState((prev) => {
-          if (prev.past.length === 0) return prev
-          const present = prev.past[prev.past.length - 1]
-          return { past: prev.past.slice(0, -1), present, future: [prev.present, ...prev.future] }
-        }),
-      redo: () =>
-        setState((prev) => {
-          if (prev.future.length === 0) return prev
-          const [present, ...future] = prev.future
-          return { past: [...prev.past, prev.present], present, future }
-        }),
+      commit: (next: T | ((previous: T) => T), group: object | null = null) =>
+        setState((previous) => commitHistory(previous, next, maxHistory, group)),
+      reset: (next: T) => setState(initialHistory(next)),
+      undo: () => setState(undoHistory),
+      redo: () => setState(redoHistory),
+      endGroup: () => setState((previous) => previous.group === null ? previous : { ...previous, group: null }),
       canUndo: state.past.length > 0,
       canRedo: state.future.length > 0,
     }),

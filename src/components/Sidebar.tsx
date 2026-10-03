@@ -169,6 +169,7 @@ interface SidebarProps {
   onDeleteSelected: () => void
   onUndo: () => void
   onRedo: () => void
+  onEndHistoryGroup: () => void
 }
 
 // null return means the selected vertices don't all share the same value for this field.
@@ -490,6 +491,7 @@ export function Sidebar({
   onDeleteSelected,
   onUndo,
   onRedo,
+  onEndHistoryGroup,
 }: SidebarProps) {
   const { t, tn, lang, setLang } = useI18n()
   const axisOptions = SHAPE_AXES[shape]
@@ -535,7 +537,7 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" onBlurCapture={onEndHistoryGroup} onPointerUpCapture={onEndHistoryGroup}>
       <SidebarSection id="editor" title={t('Editor')}>
         <div className="button-row editor-actions">
           <button onClick={onOpenNew} disabled={mode === 'new'}>{t('New dome')}</button>
@@ -543,16 +545,38 @@ export function Sidebar({
           <button onClick={() => importInputRef.current?.click()}>{t('Load file')}</button>
         </div>
         <input ref={importInputRef} type="file" accept="application/json" hidden onChange={handleImportFileChange} />
-        <div className="segmented-control lang-switch" role="group" aria-label={t('Language')}>
-          {LANGUAGES.map((opt) => (
-            <button
-              key={opt.value}
-              className={lang === opt.value ? 'active' : ''}
-              onClick={() => setLang(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="editor-tools-row">
+          <div className="segmented-control lang-switch" role="group" aria-label={t('Language')}>
+            {LANGUAGES.map((opt) => (
+              <button
+                key={opt.value}
+                className={lang === opt.value ? 'active' : ''}
+                onClick={() => setLang(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="button-row history-actions">
+            <span className="history-action">
+              <button disabled={mode === 'new' || !canUndo} onClick={onUndo} aria-label={t('Undo')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 14 4 9l5-5" />
+                  <path d="M4 9h10a6 6 0 0 1 0 12h-2" />
+                </svg>
+              </button>
+              <span className="history-action-tooltip" role="tooltip">{t('Undo')}</span>
+            </span>
+            <span className="history-action">
+              <button disabled={mode === 'new' || !canRedo} onClick={onRedo} aria-label={t('Redo')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m15 14 5-5-5-5" />
+                  <path d="M20 9H10a6 6 0 0 0 0 12h2" />
+                </svg>
+              </button>
+              <span className="history-action-tooltip" role="tooltip">{t('Redo')}</span>
+            </span>
+          </div>
         </div>
 
 
@@ -660,14 +684,6 @@ export function Sidebar({
                   {t(opt.label)}
                 </button>
               ))}
-            </div>
-            <div className="button-row">
-              <button disabled={!canUndo} onClick={onUndo}>
-                {t('Undo')}
-              </button>
-              <button disabled={!canRedo} onClick={onRedo}>
-                {t('Redo')}
-              </button>
             </div>
             <div className="button-row">
               <button disabled={!canAddPoints} onClick={onAddPoints}>

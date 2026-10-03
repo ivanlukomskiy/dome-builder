@@ -1,7 +1,7 @@
 import { DEFAULT_DXF_LABEL_SETTINGS } from './lib/dxfLabelSettings'
 import { DEFAULT_DXF_SHEET_SETTINGS } from './lib/dxfSheetSettings'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AxisType, Edge, Face, SceneData, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
+import type { AxisType, Edge, Face, SelectionMode, ShapeType, VertexTransform } from './lib/polyhedra'
 import {
   addFaces,
   addMidpointsBetween,
@@ -29,7 +29,6 @@ import {
   applyBracePlateParams,
   BRACE_PARAM_FIELDS,
   bracePlateParamsDiffer,
-  DEFAULT_BRACE_PLATE_PARAMS,
   deleteBraces,
   firstBracePlateParams,
   resolveBracePair,
@@ -74,7 +73,7 @@ export type EditTarget = 'vertices' | 'edges' | 'faces' | 'braces'
 // The strut-shape fields in the Sidebar's "Edge Curvature" and "Grooves" sections - the only
 // preview settings, since rebuilding every strut solid via replicad/opencascade.js is slow.
 // Kept separate from the live (draft) state below: the Viewport only ever sees this applied
-// snapshot, so editing these fields doesn't retrigger that rebuild until "Apply" is clicked.
+// snapshot, so editing these fields doesn't retrigger that rebuild until Redraw is clicked.
 export interface PreviewShapeParams {
   extrudeDistance: number
   thickness: number
@@ -141,6 +140,74 @@ const EMPTY_EDGE_THICKNESS: ReadonlyMap<number, number> = new Map()
 const EMPTY_VERTEX_CORNER_LENGTH: ReadonlyMap<number, number> = new Map()
 const EMPTY_VERTEX_FLANGE_PARAMS: ReadonlyMap<number, Partial<FlangeShapeParams>> = new Map()
 
+type DomeDocument = Omit<DomeState, 'selectionMode'> & {
+  previewDiameterDraft: number | null
+  bracePlateDraft: BracePlateParams
+  appliedPreviewParams: PreviewShapeParams
+}
+
+function previewParamsFrom(state: Omit<DomeState, 'selectionMode'>): PreviewShapeParams {
+  const {
+    extrudeDistance, thickness, cornerLength, offsetModifier, endGrooveLengthPercent,
+    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge,
+    toleranceLongitudinal, toleranceTransverse, centerHoleDiameter, sideHoleDiameterOuter,
+    sideHoleDiameterInner, sideHoleDiameterOffset, overshoot, minSide,
+    flangeMillingDiameter, footParams,
+  } = state
+  return {
+    extrudeDistance, thickness, cornerLength, offsetModifier, endGrooveLengthPercent,
+    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge,
+    toleranceLongitudinal, toleranceTransverse, centerHoleDiameter, sideHoleDiameterOuter,
+    sideHoleDiameterInner, sideHoleDiameterOffset, overshoot, minSide,
+    flangeMillingDiameter, footParams,
+  }
+}
+
+function createDocument(initial: DomeState | null, sceneData = initial?.sceneData ?? DEFAULT_SCENE_DATA): DomeDocument {
+  const state: Omit<DomeState, 'selectionMode'> = {
+    partIdLabelSize: initial?.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize,
+    connectedPartIdLabelSize: initial?.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize,
+    dxfSheetSettings: initial?.dxfSheetSettings ?? DEFAULT_DXF_SHEET_SETTINGS,
+    sceneData,
+    extrudeDistance: initial?.extrudeDistance ?? DEFAULT_EXTRUDE_DISTANCE,
+    thickness: initial?.thickness ?? DEFAULT_THICKNESS,
+    cornerLength: initial?.cornerLength ?? DEFAULT_CORNER_LENGTH,
+    offsetModifier: initial?.offsetModifier ?? DEFAULT_OFFSET_MODIFIER,
+    endGrooveLengthPercent: initial?.endGrooveLengthPercent ?? DEFAULT_END_GROOVE_LENGTH_PERCENT,
+    midGrooveLengthPercent: initial?.midGrooveLengthPercent ?? DEFAULT_MID_GROOVE_LENGTH_PERCENT,
+    grooveDepth: initial?.grooveDepth ?? DEFAULT_GROOVE_DEPTH,
+    millingDiameter: initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
+    chamferLength: initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH,
+    roundStrutBridge: initial?.roundStrutBridge ?? DEFAULT_ROUND_STRUT_BRIDGE,
+    toleranceLongitudinal: initial?.toleranceLongitudinal ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
+    toleranceTransverse: initial?.toleranceTransverse ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
+    centerHoleDiameter: initial?.centerHoleDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
+    sideHoleDiameterOuter: initial?.sideHoleDiameterOuter ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter,
+    sideHoleDiameterInner: initial?.sideHoleDiameterInner ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner,
+    sideHoleDiameterOffset: initial?.sideHoleDiameterOffset ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
+    overshoot: initial?.overshoot ?? DEFAULT_FLANGE_SHAPE_PARAMS.overshoot,
+    minSide: initial?.minSide ?? DEFAULT_FLANGE_SHAPE_PARAMS.minSide,
+    flangeMillingDiameter: initial?.flangeMillingDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
+    footParams: initial?.footParams ?? DEFAULT_FOOT_PARAMS,
+    vertexTransforms: new Map(initial?.vertexTransforms ?? []),
+    edgeThickness: new Map(initial?.edgeThickness ?? []),
+    vertexCornerLength: new Map(initial?.vertexCornerLength ?? []),
+    vertexFlangeParams: new Map(initial?.vertexFlangeParams ?? []),
+    footVertices: new Set(initial?.footVertices ?? []),
+  }
+  return {
+    ...state,
+    previewDiameterDraft: null,
+    bracePlateDraft: firstBracePlateParams(sceneData.braces),
+    appliedPreviewParams: previewParamsFrom(state),
+  }
+}
+
+function activeNumericField(): HTMLInputElement | null {
+  const active = globalThis.document.activeElement
+  return active instanceof HTMLInputElement && (active.type === 'number' || active.type === 'range') ? active : null
+}
+
 function App() {
   // Restored once, on first render, from whatever was auto-saved last time (see the autosave
   // effect below); null if there's nothing saved, in which case every field below falls back
@@ -198,158 +265,107 @@ function App() {
   // In "New" the diameter is part of the shape recipe. In Preview, keep a draft until Redraw;
   // editing it in Edit mode still resizes the committed dome as an undoable change.
 
-  // The committed geometry actually being edited/previewed - vertices, edges, and faces, plain
-  // and concrete, with bounded undo/redo over every structural edit (delete/add). Only reset
-  // (wiping undo history) when a "New" tab pick is committed or a config is loaded.
-  const sceneHistory = useHistory<SceneData>(initial?.sceneData ?? DEFAULT_SCENE_DATA, 50)
-  const sceneData = sceneHistory.value
-  const [previewDiameterDraft, setPreviewDiameterDraft] = useState<number | null>(null)
-  const previewDiameterDirty = previewDiameterDraft !== null && previewDiameterDraft !== sceneData.diameter
+  const documentHistory = useHistory<DomeDocument>(createDocument(initial), 50)
+  const domeDocument = documentHistory.value
+  const {
+    sceneData,
+    previewDiameterDraft,
+    bracePlateDraft,
+    edgeThickness,
+    vertexCornerLength,
+    vertexFlangeParams,
+    footVertices,
+    vertexTransforms,
+    extrudeDistance,
+    thickness,
+    cornerLength,
+    offsetModifier,
+    endGrooveLengthPercent,
+    midGrooveLengthPercent,
+    grooveDepth,
+    millingDiameter,
+    chamferLength,
+    roundStrutBridge,
+    toleranceLongitudinal,
+    toleranceTransverse,
+    centerHoleDiameter,
+    sideHoleDiameterOuter,
+    sideHoleDiameterInner,
+    sideHoleDiameterOffset,
+    overshoot,
+    minSide,
+    flangeMillingDiameter,
+    footParams,
+    appliedPreviewParams,
+    partIdLabelSize,
+    dxfSheetSettings,
+    connectedPartIdLabelSize,
+  } = domeDocument
+  const setDocumentField = <K extends keyof DomeDocument>(
+    key: K, value: DomeDocument[K] | ((previous: DomeDocument[K]) => DomeDocument[K]),
+  ) => {
+    documentHistory.commit((previous) => {
+      const oldValue = previous[key]
+      const nextValue = typeof value === 'function'
+        ? (value as (previous: DomeDocument[K]) => DomeDocument[K])(oldValue) : value
+      return Object.is(nextValue, oldValue) ? previous : { ...previous, [key]: nextValue }
+    }, activeNumericField())
+  }
+  const setSceneData = (value: DomeDocument['sceneData'] | ((previous: DomeDocument['sceneData']) => DomeDocument['sceneData'])) => setDocumentField('sceneData', value)
+  const setPreviewDiameterDraft = (value: DomeDocument['previewDiameterDraft'] | ((previous: DomeDocument['previewDiameterDraft']) => DomeDocument['previewDiameterDraft'])) => setDocumentField('previewDiameterDraft', value)
+  const setBracePlateDraft = (value: DomeDocument['bracePlateDraft'] | ((previous: DomeDocument['bracePlateDraft']) => DomeDocument['bracePlateDraft'])) => setDocumentField('bracePlateDraft', value)
+  const setEdgeThickness = (value: DomeDocument['edgeThickness'] | ((previous: DomeDocument['edgeThickness']) => DomeDocument['edgeThickness'])) => setDocumentField('edgeThickness', value)
+  const setVertexCornerLength = (value: DomeDocument['vertexCornerLength'] | ((previous: DomeDocument['vertexCornerLength']) => DomeDocument['vertexCornerLength'])) => setDocumentField('vertexCornerLength', value)
+  const setVertexFlangeParams = (value: DomeDocument['vertexFlangeParams'] | ((previous: DomeDocument['vertexFlangeParams']) => DomeDocument['vertexFlangeParams'])) => setDocumentField('vertexFlangeParams', value)
+  const setFootVertices = (value: DomeDocument['footVertices'] | ((previous: DomeDocument['footVertices']) => DomeDocument['footVertices'])) => setDocumentField('footVertices', value)
+  const setVertexTransforms = (value: DomeDocument['vertexTransforms'] | ((previous: DomeDocument['vertexTransforms']) => DomeDocument['vertexTransforms'])) => setDocumentField('vertexTransforms', value)
+  const setExtrudeDistance = (value: DomeDocument['extrudeDistance'] | ((previous: DomeDocument['extrudeDistance']) => DomeDocument['extrudeDistance'])) => setDocumentField('extrudeDistance', value)
+  const setThickness = (value: DomeDocument['thickness'] | ((previous: DomeDocument['thickness']) => DomeDocument['thickness'])) => setDocumentField('thickness', value)
+  const setCornerLength = (value: DomeDocument['cornerLength'] | ((previous: DomeDocument['cornerLength']) => DomeDocument['cornerLength'])) => setDocumentField('cornerLength', value)
+  const setOffsetModifier = (value: DomeDocument['offsetModifier'] | ((previous: DomeDocument['offsetModifier']) => DomeDocument['offsetModifier'])) => setDocumentField('offsetModifier', value)
+  const setEndGrooveLengthPercent = (value: DomeDocument['endGrooveLengthPercent'] | ((previous: DomeDocument['endGrooveLengthPercent']) => DomeDocument['endGrooveLengthPercent'])) => setDocumentField('endGrooveLengthPercent', value)
+  const setMidGrooveLengthPercent = (value: DomeDocument['midGrooveLengthPercent'] | ((previous: DomeDocument['midGrooveLengthPercent']) => DomeDocument['midGrooveLengthPercent'])) => setDocumentField('midGrooveLengthPercent', value)
+  const setGrooveDepth = (value: DomeDocument['grooveDepth'] | ((previous: DomeDocument['grooveDepth']) => DomeDocument['grooveDepth'])) => setDocumentField('grooveDepth', value)
+  const setMillingDiameter = (value: DomeDocument['millingDiameter'] | ((previous: DomeDocument['millingDiameter']) => DomeDocument['millingDiameter'])) => setDocumentField('millingDiameter', value)
+  const setChamferLength = (value: DomeDocument['chamferLength'] | ((previous: DomeDocument['chamferLength']) => DomeDocument['chamferLength'])) => setDocumentField('chamferLength', value)
+  const setRoundStrutBridge = (value: DomeDocument['roundStrutBridge'] | ((previous: DomeDocument['roundStrutBridge']) => DomeDocument['roundStrutBridge'])) => setDocumentField('roundStrutBridge', value)
+  const setToleranceLongitudinal = (value: DomeDocument['toleranceLongitudinal'] | ((previous: DomeDocument['toleranceLongitudinal']) => DomeDocument['toleranceLongitudinal'])) => setDocumentField('toleranceLongitudinal', value)
+  const setToleranceTransverse = (value: DomeDocument['toleranceTransverse'] | ((previous: DomeDocument['toleranceTransverse']) => DomeDocument['toleranceTransverse'])) => setDocumentField('toleranceTransverse', value)
+  const setCenterHoleDiameter = (value: DomeDocument['centerHoleDiameter'] | ((previous: DomeDocument['centerHoleDiameter']) => DomeDocument['centerHoleDiameter'])) => setDocumentField('centerHoleDiameter', value)
+  const setSideHoleDiameterOuter = (value: DomeDocument['sideHoleDiameterOuter'] | ((previous: DomeDocument['sideHoleDiameterOuter']) => DomeDocument['sideHoleDiameterOuter'])) => setDocumentField('sideHoleDiameterOuter', value)
+  const setSideHoleDiameterInner = (value: DomeDocument['sideHoleDiameterInner'] | ((previous: DomeDocument['sideHoleDiameterInner']) => DomeDocument['sideHoleDiameterInner'])) => setDocumentField('sideHoleDiameterInner', value)
+  const setSideHoleDiameterOffset = (value: DomeDocument['sideHoleDiameterOffset'] | ((previous: DomeDocument['sideHoleDiameterOffset']) => DomeDocument['sideHoleDiameterOffset'])) => setDocumentField('sideHoleDiameterOffset', value)
+  const setOvershoot = (value: DomeDocument['overshoot'] | ((previous: DomeDocument['overshoot']) => DomeDocument['overshoot'])) => setDocumentField('overshoot', value)
+  const setMinSide = (value: DomeDocument['minSide'] | ((previous: DomeDocument['minSide']) => DomeDocument['minSide'])) => setDocumentField('minSide', value)
+  const setFlangeMillingDiameter = (value: DomeDocument['flangeMillingDiameter'] | ((previous: DomeDocument['flangeMillingDiameter']) => DomeDocument['flangeMillingDiameter'])) => setDocumentField('flangeMillingDiameter', value)
+  const setFootParams = (value: DomeDocument['footParams'] | ((previous: DomeDocument['footParams']) => DomeDocument['footParams'])) => setDocumentField('footParams', value)
+  const setPartIdLabelSize = (value: DomeDocument['partIdLabelSize'] | ((previous: DomeDocument['partIdLabelSize']) => DomeDocument['partIdLabelSize'])) => setDocumentField('partIdLabelSize', value)
+  const setDxfSheetSettings = (value: DomeDocument['dxfSheetSettings'] | ((previous: DomeDocument['dxfSheetSettings']) => DomeDocument['dxfSheetSettings'])) => setDocumentField('dxfSheetSettings', value)
+  const setConnectedPartIdLabelSize = (value: DomeDocument['connectedPartIdLabelSize'] | ((previous: DomeDocument['connectedPartIdLabelSize']) => DomeDocument['connectedPartIdLabelSize'])) => setDocumentField('connectedPartIdLabelSize', value)
 
+  const previewDiameterDirty = previewDiameterDraft !== null && previewDiameterDraft !== sceneData.diameter
   const handleDiameterChange = (d: number) => {
     if (!(d > 0)) return
     if (mode === 'new') setNewShapeParams(shape, axis, subdivisions, d)
     else if (mode === 'preview') setPreviewDiameterDraft(d === sceneData.diameter ? null : d)
-    else {
-      setPreviewDiameterDraft(null)
-      if (d !== sceneData.diameter) sceneHistory.commit(scaleSceneDiameter(sceneData, d))
-    }
+    else documentHistory.commit((previous) => {
+      if (d === previous.sceneData.diameter && previous.previewDiameterDraft === null) return previous
+      return {
+        ...previous,
+        previewDiameterDraft: null,
+        sceneData: d === previous.sceneData.diameter ? previous.sceneData : scaleSceneDiameter(previous.sceneData, d),
+      }
+    }, activeNumericField())
   }
 
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>(
-    initial?.selectionMode ?? 'symmetric',
-  )
-
-  // Which kind of element clicking in the viewport selects, while editing.
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>(initial?.selectionMode ?? 'symmetric')
   const [editTarget, setEditTarget] = useState<EditTarget>('vertices')
-
   const [selectedVertexIndices, setSelectedVertexIndices] = useState<Set<number>>(new Set())
   const [selectedEdgeIndices, setSelectedEdgeIndices] = useState<Set<number>>(new Set())
   const [selectedFaceIndices, setSelectedFaceIndices] = useState<Set<number>>(new Set())
   const [selectedBraceIndices, setSelectedBraceIndices] = useState<Set<number>>(new Set())
-  // The plate properties (width, holes, thickness, ...) shown in the Preview sidebar. Every brace
-  // has the same ones for now: Apply copies this draft onto all of them, and new braces start with
-  // it. Starts out as whatever the first brace already has.
-  const [bracePlateDraft, setBracePlateDraft] = useState<BracePlateParams>(() =>
-    firstBracePlateParams((initial?.sceneData ?? DEFAULT_SCENE_DATA).braces),
-  )
-  const [edgeThickness, setEdgeThickness] = useState<Map<number, number>>(
-    new Map(initial?.edgeThickness ?? []),
-  )
-  // Per-vertex corner length override (mm), keyed by vertex id; a vertex without an entry uses the
-  // global `cornerLength`. Like edgeThickness, applies live rather than waiting for "Apply".
-  const [vertexCornerLength, setVertexCornerLength] = useState<Map<number, number>>(
-    new Map(initial?.vertexCornerLength ?? []),
-  )
-  // Per-vertex overrides of any flange parameter, keyed by vertex id; only the overridden
-  // parameters are present, the rest use the global ones. Applies live, like the above.
-  const [vertexFlangeParams, setVertexFlangeParams] = useState<
-    Map<number, Partial<FlangeShapeParams>>
-  >(new Map(initial?.vertexFlangeParams ?? []))
-  // Vertices marked as "feet" (see flangeGeometry.ts's FootParams). Applies live, like the above.
-  const [footVertices, setFootVertices] = useState<Set<number>>(new Set(initial?.footVertices ?? []))
-  const [vertexTransforms, setVertexTransforms] = useState<Map<number, VertexTransform>>(
-    new Map(initial?.vertexTransforms ?? []),
-  )
 
-  const [extrudeDistance, setExtrudeDistance] = useState(
-    initial?.extrudeDistance ?? DEFAULT_EXTRUDE_DISTANCE,
-  )
-  const [thickness, setThickness] = useState(initial?.thickness ?? DEFAULT_THICKNESS)
-  const [cornerLength, setCornerLength] = useState(initial?.cornerLength ?? DEFAULT_CORNER_LENGTH)
-  const [offsetModifier, setOffsetModifier] = useState(
-    initial?.offsetModifier ?? DEFAULT_OFFSET_MODIFIER,
-  )
-  const [endGrooveLengthPercent, setEndGrooveLengthPercent] = useState(
-    initial?.endGrooveLengthPercent ?? DEFAULT_END_GROOVE_LENGTH_PERCENT,
-  )
-  const [midGrooveLengthPercent, setMidGrooveLengthPercent] = useState(
-    initial?.midGrooveLengthPercent ?? DEFAULT_MID_GROOVE_LENGTH_PERCENT,
-  )
-  const [grooveDepth, setGrooveDepth] = useState(initial?.grooveDepth ?? DEFAULT_GROOVE_DEPTH)
-  const [millingDiameter, setMillingDiameter] = useState(
-    initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
-  )
-  const [chamferLength, setChamferLength] = useState(initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH)
-  const [roundStrutBridge, setRoundStrutBridge] = useState(initial?.roundStrutBridge ?? DEFAULT_ROUND_STRUT_BRIDGE)
-
-  // The flange connector plate at each hub vertex - see the "Flange" Sidebar section and
-  // flangeGeometry.ts's FlangeShapeParams (which these mirror field-for-field, aside from its
-  // own `millingDiameter` living here as `flangeMillingDiameter` to stay distinct from the
-  // strut-shared one above).
-  const [toleranceLongitudinal, setToleranceLongitudinal] = useState(
-    initial?.toleranceLongitudinal ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
-  )
-  const [toleranceTransverse, setToleranceTransverse] = useState(
-    initial?.toleranceTransverse ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
-  )
-  const [centerHoleDiameter, setCenterHoleDiameter] = useState(
-    initial?.centerHoleDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
-  )
-  const [sideHoleDiameterOuter, setSideHoleDiameterOuter] = useState(
-    initial?.sideHoleDiameterOuter ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter,
-  )
-  const [sideHoleDiameterInner, setSideHoleDiameterInner] = useState(
-    initial?.sideHoleDiameterInner ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner,
-  )
-  const [sideHoleDiameterOffset, setSideHoleDiameterOffset] = useState(
-    initial?.sideHoleDiameterOffset ?? DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
-  )
-  const [overshoot, setOvershoot] = useState(initial?.overshoot ?? DEFAULT_FLANGE_SHAPE_PARAMS.overshoot)
-  const [minSide, setMinSide] = useState(initial?.minSide ?? DEFAULT_FLANGE_SHAPE_PARAMS.minSide)
-  const [flangeMillingDiameter, setFlangeMillingDiameter] = useState(
-    initial?.flangeMillingDiameter ?? DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
-  )
-  // The dimensions shared by every foot vertex - see the "Foot" Sidebar section.
-  const [footParams, setFootParams] = useState<FootParams>(initial?.footParams ?? DEFAULT_FOOT_PARAMS)
-
-  // The draft values above update live as the Sidebar's Preview fields are edited; the Viewport
-  // instead renders this applied snapshot, only updated by handleApplyPreview - see
-  // PreviewShapeParams's own doc.
-  const [appliedPreviewParams, setAppliedPreviewParams] = useState<PreviewShapeParams>(() => ({
-    extrudeDistance,
-    thickness,
-    cornerLength,
-    offsetModifier,
-    endGrooveLengthPercent,
-    midGrooveLengthPercent,
-    grooveDepth,
-    millingDiameter,
-    chamferLength,
-    roundStrutBridge,
-    toleranceLongitudinal,
-    toleranceTransverse,
-    centerHoleDiameter,
-    sideHoleDiameterOuter,
-    sideHoleDiameterInner,
-    sideHoleDiameterOffset,
-    overshoot,
-    minSide,
-    flangeMillingDiameter,
-    footParams,
-  }))
-  const draftPreviewParams: PreviewShapeParams = {
-    extrudeDistance,
-    thickness,
-    cornerLength,
-    offsetModifier,
-    endGrooveLengthPercent,
-    midGrooveLengthPercent,
-    grooveDepth,
-    millingDiameter,
-    chamferLength,
-    roundStrutBridge,
-    toleranceLongitudinal,
-    toleranceTransverse,
-    centerHoleDiameter,
-    sideHoleDiameterOuter,
-    sideHoleDiameterInner,
-    sideHoleDiameterOffset,
-    overshoot,
-    minSide,
-    flangeMillingDiameter,
-    footParams,
-  }
+  const draftPreviewParams = previewParamsFrom(domeDocument)
   const previewParamsDirty = (Object.keys(draftPreviewParams) as (keyof PreviewShapeParams)[]).some(
     (key) =>
       key === 'footParams'
@@ -368,13 +384,18 @@ function App() {
   const handleBracePlateParamChange = (key: keyof BracePlateParams, value: number) =>
     setBracePlateDraft((prev) => ({ ...prev, [key]: sanitizeBraceParam(key, value) }))
   const handleApplyPreview = () => {
-    setAppliedPreviewParams(draftPreviewParams)
-    let nextSceneData = previewDiameterDirty
-      ? scaleSceneDiameter(sceneData, previewDiameterDraft!)
-      : sceneData
-    if (bracePlateDirty) nextSceneData = applyBracePlateParams(nextSceneData, bracePlateDraft)
-    if (nextSceneData !== sceneData) sceneHistory.commit(nextSceneData)
-    setPreviewDiameterDraft(null)
+    documentHistory.commit((previous) => {
+      const nextScene = previous.previewDiameterDraft !== null && previous.previewDiameterDraft !== previous.sceneData.diameter
+        ? scaleSceneDiameter(previous.sceneData, previous.previewDiameterDraft)
+        : previous.sceneData
+      return {
+        ...previous,
+        sceneData: bracePlateParamsDiffer(nextScene, previous.bracePlateDraft)
+          ? applyBracePlateParams(nextScene, previous.bracePlateDraft) : nextScene,
+        appliedPreviewParams: previewParamsFrom(previous),
+        previewDiameterDraft: null,
+      }
+    })
   }
 
   // xyz positions of every vertex: its polar coordinates plus its polar transform diff.
@@ -485,13 +506,13 @@ function App() {
 
   const handleAddBrace = () => {
     if (!canAddBrace) return
-    sceneHistory.commit(addBrace(sceneData, selectedEdgeIndices, bracePlateDraft))
+    setSceneData(addBrace(sceneData, selectedEdgeIndices, bracePlateDraft))
     setSelectedEdgeIndices(new Set())
   }
 
   const handleDeleteSelectedBraces = () => {
     if (liveSelectedBraceIndices.size === 0) return
-    sceneHistory.commit(deleteBraces(sceneData, liveSelectedBraceIndices))
+    setSceneData(deleteBraces(sceneData, liveSelectedBraceIndices))
     setSelectedBraceIndices(new Set())
   }
 
@@ -518,12 +539,12 @@ function App() {
 
   const handleBraceParamChange = (key: keyof BraceParams, value: number) => {
     if (liveSelectedBraceIndices.size === 0) return
-    sceneHistory.commit(setBraceParam(sceneData, liveSelectedBraceIndices, key, value))
+    setSceneData(setBraceParam(sceneData, liveSelectedBraceIndices, key, value))
   }
 
   const handleDeleteSelectedFaces = () => {
     if (selectedFaceIndices.size === 0) return
-    sceneHistory.commit(deleteFaces(sceneData, selectedFaceIndices))
+    setSceneData(deleteFaces(sceneData, selectedFaceIndices))
     setSelectedFaceIndices(new Set())
   }
 
@@ -543,7 +564,7 @@ function App() {
 
   const handleCreateFacesFromEdges = () => {
     if (creatableFaces.length === 0) return
-    sceneHistory.commit(addFaces(sceneData, creatableFaces))
+    setSceneData(addFaces(sceneData, creatableFaces))
     setSelectedEdgeIndices(new Set())
   }
 
@@ -552,7 +573,7 @@ function App() {
   // not worth keeping either (see deleteEdges in polyhedra.ts).
   const handleDeleteSelectedEdges = () => {
     if (selectedEdgeIndices.size === 0) return
-    sceneHistory.commit(deleteEdges(sceneData, selectedEdgeIndices))
+    setSceneData(deleteEdges(sceneData, selectedEdgeIndices))
     setSelectedEdgeIndices(new Set())
   }
 
@@ -621,18 +642,17 @@ function App() {
   const handleResetVertexFlangeParam = (key: keyof FlangeShapeParams) =>
     updateSelectedVertexFlangeParam(key, undefined)
 
-  const handleResetVertexFlangeParams = () => {
-    if (selectedVertexIndices.size === 0) return
-    setVertexFlangeParams((prev) => {
-      const next = new Map(prev)
-      for (const idx of selectedVertexIndices) next.delete(idx)
-      return next
-    })
-  }
-
   const handleResetAllVertexOverrides = () => {
-    handleResetVertexCornerLength()
-    handleResetVertexFlangeParams()
+    if (selectedVertexIndices.size === 0) return
+    documentHistory.commit((previous) => {
+      const vertexCornerLength = new Map(previous.vertexCornerLength)
+      const vertexFlangeParams = new Map(previous.vertexFlangeParams)
+      for (const id of selectedVertexIndices) {
+        vertexCornerLength.delete(id)
+        vertexFlangeParams.delete(id)
+      }
+      return { ...previous, vertexCornerLength, vertexFlangeParams }
+    })
   }
 
   // Marks (or unmarks) every selected vertex as a foot.
@@ -653,17 +673,23 @@ function App() {
 
   const handleDeleteSelected = () => {
     if (selectedVertexIndices.size === 0) return
-    sceneHistory.commit(deleteVertices(sceneData, selectedVertexIndices))
+    setSceneData(deleteVertices(sceneData, selectedVertexIndices))
     setSelectedVertexIndices(new Set())
   }
 
+  const clearSelection = () => {
+    setSelectedVertexIndices(new Set())
+    setSelectedEdgeIndices(new Set())
+    setSelectedFaceIndices(new Set())
+    setSelectedBraceIndices(new Set())
+  }
   const handleUndo = () => {
-    setPreviewDiameterDraft(null)
-    sceneHistory.undo()
+    documentHistory.undo()
+    clearSelection()
   }
   const handleRedo = () => {
-    setPreviewDiameterDraft(null)
-    sceneHistory.redo()
+    documentHistory.redo()
+    clearSelection()
   }
 
   const handleDeselectAll = () => {
@@ -728,7 +754,7 @@ function App() {
   const handleAddPoints = () => {
     if (!canPairVertices) return
     const positionOf = (id: number) => transformedVertices.get(id)!
-    sceneHistory.commit(addMidpointsBetween(sceneData, Array.from(selectedVertexIndices), positionOf))
+    setSceneData(addMidpointsBetween(sceneData, Array.from(selectedVertexIndices), positionOf))
     setSelectedVertexIndices(new Set())
   }
 
@@ -738,7 +764,7 @@ function App() {
   const handleConnectVertices = () => {
     if (!canPairVertices) return
     const positionOf = (id: number) => transformedVertices.get(id)!
-    sceneHistory.commit(connectVertexPairs(sceneData, Array.from(selectedVertexIndices), positionOf))
+    setSceneData(connectVertexPairs(sceneData, Array.from(selectedVertexIndices), positionOf))
     setSelectedVertexIndices(new Set())
   }
 
@@ -758,61 +784,15 @@ function App() {
   // resetting every other tab's settings (center, edge curvature, ...) back to their defaults,
   // since they were tuned for a dome that no longer exists.
   const handleCreateNew = () => {
-    sceneHistory.reset(pruneToLayerCount(previewData, layerCount))
-    setPreviewDiameterDraft(null)
-    setVertexTransforms(new Map())
-    setEdgeThickness(new Map())
-    setVertexCornerLength(new Map())
-    setVertexFlangeParams(new Map())
-    setFootVertices(new Set())
-    setSelectedVertexIndices(new Set())
-    setSelectedEdgeIndices(new Set())
-    setSelectedFaceIndices(new Set())
-    setSelectedBraceIndices(new Set())
-    setBracePlateDraft(DEFAULT_BRACE_PLATE_PARAMS)
-    setEditTarget('vertices')
-    setExtrudeDistance(DEFAULT_EXTRUDE_DISTANCE)
-    setThickness(DEFAULT_THICKNESS)
-    setCornerLength(DEFAULT_CORNER_LENGTH)
-    setOffsetModifier(DEFAULT_OFFSET_MODIFIER)
-    setEndGrooveLengthPercent(DEFAULT_END_GROOVE_LENGTH_PERCENT)
-    setMidGrooveLengthPercent(DEFAULT_MID_GROOVE_LENGTH_PERCENT)
-    setGrooveDepth(DEFAULT_GROOVE_DEPTH)
-    setMillingDiameter(DEFAULT_MILLING_DIAMETER)
-    setChamferLength(DEFAULT_CHAMFER_LENGTH)
-    setRoundStrutBridge(DEFAULT_ROUND_STRUT_BRIDGE)
-    setToleranceLongitudinal(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal)
-    setToleranceTransverse(DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse)
-    setCenterHoleDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter)
-    setSideHoleDiameterOuter(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter)
-    setSideHoleDiameterInner(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner)
-    setSideHoleDiameterOffset(DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset)
-    setOvershoot(DEFAULT_FLANGE_SHAPE_PARAMS.overshoot)
-    setMinSide(DEFAULT_FLANGE_SHAPE_PARAMS.minSide)
-    setFlangeMillingDiameter(DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter)
-    setFootParams(DEFAULT_FOOT_PARAMS)
-    setAppliedPreviewParams({
-      extrudeDistance: DEFAULT_EXTRUDE_DISTANCE,
-      thickness: DEFAULT_THICKNESS,
-      cornerLength: DEFAULT_CORNER_LENGTH,
-      offsetModifier: DEFAULT_OFFSET_MODIFIER,
-      endGrooveLengthPercent: DEFAULT_END_GROOVE_LENGTH_PERCENT,
-      midGrooveLengthPercent: DEFAULT_MID_GROOVE_LENGTH_PERCENT,
-      grooveDepth: DEFAULT_GROOVE_DEPTH,
-      millingDiameter: DEFAULT_MILLING_DIAMETER,
-      chamferLength: DEFAULT_CHAMFER_LENGTH,
-      roundStrutBridge: DEFAULT_ROUND_STRUT_BRIDGE,
-      toleranceLongitudinal: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
-      toleranceTransverse: DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
-      centerHoleDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.centerHoleDiameter,
-      sideHoleDiameterOuter: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOuter,
-      sideHoleDiameterInner: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterInner,
-      sideHoleDiameterOffset: DEFAULT_FLANGE_SHAPE_PARAMS.sideHoleDiameterOffset,
-      overshoot: DEFAULT_FLANGE_SHAPE_PARAMS.overshoot,
-      minSide: DEFAULT_FLANGE_SHAPE_PARAMS.minSide,
-      flangeMillingDiameter: DEFAULT_FLANGE_SHAPE_PARAMS.millingDiameter,
-      footParams: DEFAULT_FOOT_PARAMS,
+    const next = createDocument(null, pruneToLayerCount(previewData, layerCount))
+    documentHistory.reset({
+      ...next,
+      dxfSheetSettings,
+      partIdLabelSize,
+      connectedPartIdLabelSize,
     })
+    clearSelection()
+    setEditTarget('vertices')
     setMode(preNewMode)
   }
 
@@ -821,69 +801,10 @@ function App() {
     setMode(preNewMode)
   }
 
-  const [partIdLabelSize, setPartIdLabelSize] = useState(initial?.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize)
-  const [dxfSheetSettings, setDxfSheetSettings] = useState(initial?.dxfSheetSettings ?? DEFAULT_DXF_SHEET_SETTINGS)
-  const [connectedPartIdLabelSize, setConnectedPartIdLabelSize] = useState(initial?.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize)
-
   const applyConfig = (state: DomeState) => {
-    setPartIdLabelSize(state.partIdLabelSize)
-    setDxfSheetSettings(state.dxfSheetSettings)
-    setConnectedPartIdLabelSize(state.connectedPartIdLabelSize)
-    sceneHistory.reset(state.sceneData)
-    setPreviewDiameterDraft(null)
+    documentHistory.reset(createDocument(state))
     setSelectionMode(state.selectionMode)
-    setExtrudeDistance(state.extrudeDistance)
-    setThickness(state.thickness)
-    setCornerLength(state.cornerLength)
-    setOffsetModifier(state.offsetModifier)
-    setEndGrooveLengthPercent(state.endGrooveLengthPercent)
-    setMidGrooveLengthPercent(state.midGrooveLengthPercent)
-    setGrooveDepth(state.grooveDepth)
-    setMillingDiameter(state.millingDiameter)
-    setChamferLength(state.chamferLength)
-    setRoundStrutBridge(state.roundStrutBridge)
-    setToleranceLongitudinal(state.toleranceLongitudinal)
-    setToleranceTransverse(state.toleranceTransverse)
-    setCenterHoleDiameter(state.centerHoleDiameter)
-    setSideHoleDiameterOuter(state.sideHoleDiameterOuter)
-    setSideHoleDiameterInner(state.sideHoleDiameterInner)
-    setSideHoleDiameterOffset(state.sideHoleDiameterOffset)
-    setOvershoot(state.overshoot)
-    setMinSide(state.minSide)
-    setFlangeMillingDiameter(state.flangeMillingDiameter)
-    setFootParams(state.footParams)
-    setAppliedPreviewParams({
-      extrudeDistance: state.extrudeDistance,
-      thickness: state.thickness,
-      cornerLength: state.cornerLength,
-      offsetModifier: state.offsetModifier,
-      endGrooveLengthPercent: state.endGrooveLengthPercent,
-      midGrooveLengthPercent: state.midGrooveLengthPercent,
-      grooveDepth: state.grooveDepth,
-      millingDiameter: state.millingDiameter,
-      chamferLength: state.chamferLength,
-      roundStrutBridge: state.roundStrutBridge,
-      toleranceLongitudinal: state.toleranceLongitudinal,
-      toleranceTransverse: state.toleranceTransverse,
-      centerHoleDiameter: state.centerHoleDiameter,
-      sideHoleDiameterOuter: state.sideHoleDiameterOuter,
-      sideHoleDiameterInner: state.sideHoleDiameterInner,
-      sideHoleDiameterOffset: state.sideHoleDiameterOffset,
-      overshoot: state.overshoot,
-      minSide: state.minSide,
-      flangeMillingDiameter: state.flangeMillingDiameter,
-      footParams: state.footParams,
-    })
-    setVertexTransforms(new Map(state.vertexTransforms))
-    setEdgeThickness(new Map(state.edgeThickness))
-    setVertexCornerLength(new Map(state.vertexCornerLength))
-    setVertexFlangeParams(new Map(state.vertexFlangeParams))
-    setFootVertices(new Set(state.footVertices))
-    setSelectedVertexIndices(new Set())
-    setSelectedEdgeIndices(new Set())
-    setSelectedFaceIndices(new Set())
-    setSelectedBraceIndices(new Set())
-    setBracePlateDraft(firstBracePlateParams(state.sceneData.braces))
+    clearSelection()
     setEditTarget('vertices')
     setMode('edit')
   }
@@ -1204,11 +1125,12 @@ function App() {
         onApplyPreview={handleApplyPreview}
         partVisibility={partVisibility}
         onPartVisibilityChange={handlePartVisibilityChange}
-        canUndo={sceneHistory.canUndo}
-        canRedo={sceneHistory.canRedo}
+        canUndo={documentHistory.canUndo}
+        canRedo={documentHistory.canRedo}
         onDeleteSelected={handleDeleteSelected}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        onEndHistoryGroup={documentHistory.endGroup}
       />
       {exportSession && <ExportProgressModal session={exportSession} onCancel={cancelExport} onClose={() => setExportSession(null)} />}
       <Viewport

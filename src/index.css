@@ -43,10 +43,7 @@ body,
   overflow-y: auto;
 }
 
-.lang-switch {
-  width: 96px;
-  margin-bottom: 16px;
-}
+.lang-switch { width: 96px; }
 
 
 .control-group {
@@ -348,7 +345,43 @@ body,
 .sidebar h2 { font-size: 11px; color: var(--text-dim); font-weight: 500; }
 .editor-actions { margin: 0 0 12px; }
 .editor-actions button { flex: 1; }
-.lang-switch { margin-bottom: 12px; }
+.editor-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.editor-tools-row .lang-switch { margin: 0; }
+.history-actions { flex-wrap: nowrap; margin: 0; }
+.history-action { position: relative; display: flex; }
+.history-actions button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 32px;
+  padding: 5px;
+}
+.history-actions svg { width: 18px; height: 18px; }
+.history-action-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  padding: 4px 7px;
+  white-space: nowrap;
+  color: var(--text);
+  background: #272b35;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px #0008;
+  font-size: 12px;
+  pointer-events: none;
+}
+.history-action:hover .history-action-tooltip,
+.history-action:focus-within .history-action-tooltip { display: block; }
 .transform-field { position: relative; }
 .transform-field input[type='number'] { flex-shrink: 0; width: 80px; }
 .field-help { display: none; }
