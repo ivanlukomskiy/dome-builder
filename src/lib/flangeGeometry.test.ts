@@ -555,6 +555,27 @@ describe("foot", () => {
     });
   });
 
+  it("narrows tab holes with negative tolerance and widens them with positive tolerance", () => {
+    const foot = footAt(VERTEX_21.edges[0].projectedAngleDeg + 180);
+    const cutAreas = (tolerance: number) => {
+      const result = computeFlangeBoundary2D(
+        { vertexId: SINGLE_STRUT.vertexId, edges: SINGLE_STRUT.edges, foot },
+        { ...params, toleranceLongitudinal: tolerance, toleranceTransverse: tolerance },
+      );
+      return {
+        foot: areaOf(result.helpers.find((helper) => helper.name === "foot rect cut")!.drawing),
+        strut: areaOf(result.helpers.find((helper) => helper.name.startsWith("rect cut "))!.drawing),
+      };
+    };
+    const tighter = cutAreas(-1);
+    const nominal = cutAreas(0);
+    const looser = cutAreas(1);
+    expect(tighter.foot).toBeLessThan(nominal.foot);
+    expect(nominal.foot).toBeLessThan(looser.foot);
+    expect(tighter.strut).toBeLessThan(nominal.strut);
+    expect(nominal.strut).toBeLessThan(looser.strut);
+  });
+
   it("keeps both foot sides straight in a face-filled wedge", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const angle = VERTEX_0.edges[0].projectedAngleDeg + 30;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { createTranslator } from "./i18n";
 import { ru } from "./translations/ru";
+import { FOOT_PARAM_FIELDS } from "./flangeGeometry";
 
 describe("createTranslator", () => {
   const en = createTranslator("en", () => {});
@@ -38,6 +39,13 @@ describe("createTranslator", () => {
 });
 
 describe("Russian dictionary", () => {
+  it("translates every dynamically rendered Foot property", () => {
+    const tr = createTranslator("ru", () => {});
+    for (const { label } of FOOT_PARAM_FIELDS) {
+      expect(tr.t(label), label).not.toBe(label);
+    }
+  });
+
   it("has three forms for every plural entry", () => {
     for (const [key, entry] of Object.entries(ru)) {
       if (typeof entry !== "string") expect([key, entry.length]).toEqual([key, 3]);

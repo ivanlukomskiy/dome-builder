@@ -897,9 +897,9 @@ export function Sidebar({
                     <NumberField
                       value={shared.value}
                       step={1}
-                      min={0}
+                      min={key.startsWith('tolerance') ? undefined : 0}
                       placeholder={shared.mixed ? t('Mixed') : t('{value} (default)', { value: flangeDefaults[key] })}
-                      clamp={(n) => Math.max(n, 0)}
+                      clamp={key.startsWith('tolerance') ? undefined : (n) => Math.max(n, 0)}
                       onCommit={(v) => onVertexFlangeParamChange(key, v)}
                     />
                     <button
@@ -992,6 +992,14 @@ export function Sidebar({
               <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
             </div>
             <Help text={t('Resizes the whole dome around its center, keeping its shape.')} />
+            <div className="transform-field">
+              <label>{t('Tolerance longitudinal (mm)')} <Help text={t('Tolerance applies wherever a tab fits into a hole. Positive values add clearance for a looser fit; negative values reduce clearance for a tighter fit.')} /></label>
+              <NumberField value={toleranceLongitudinal} step={1} onCommit={onToleranceLongitudinalChange} />
+            </div>
+            <div className="transform-field">
+              <label>{t('Tolerance transverse (mm)')} <Help text={t('Tolerance applies wherever a tab fits into a hole. Positive values add clearance for a looser fit; negative values reduce clearance for a tighter fit.')} /></label>
+              <NumberField value={toleranceTransverse} step={1} onCommit={onToleranceTransverseChange} />
+            </div>
           </section>
         </SidebarSection>
         <>
@@ -1073,27 +1081,9 @@ export function Sidebar({
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 <div className="transform-field">
-                  <label>{t('Tolerance longitudinal (mm)')} <Help text={t(
-                    "The flat connector plate pair at each hub vertex, filling the wedges between struts that have no face of their own - a plate on each face of the strut ends, seated in the groove notch cut into them (see Groove depth above). Tolerances loosen the fit lengthwise/across each strut arm; overshoot and min side set how far the plate reaches past a strut's own corner and how narrow it's allowed to pinch; the side/center holes and their offsets are the plate's own bolt pattern.",
+                  <label>{t('Center hole diameter (mm)')} <Help text={t(
+                    "The flat connector plate pair at each hub vertex fills the wedges between struts that have no face of their own. Overshoot and min side set how far the plate reaches past a strut's corner and how narrow it may get; the side and center holes define its bolt pattern.",
                   )} /></label>
-                  <NumberField
-                    value={toleranceLongitudinal}
-                    step={1}
-                    min={0}
-                    onCommit={onToleranceLongitudinalChange}
-                  />
-                </div>
-                <div className="transform-field">
-                  <label>{t('Tolerance transverse (mm)')}</label>
-                  <NumberField
-                    value={toleranceTransverse}
-                    step={1}
-                    min={0}
-                    onCommit={onToleranceTransverseChange}
-                  />
-                </div>
-                <div className="transform-field">
-                  <label>{t('Center hole diameter (mm)')}</label>
                   <NumberField
                     value={centerHoleDiameter}
                     step={1}
