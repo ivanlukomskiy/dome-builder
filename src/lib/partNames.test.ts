@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { bracePlateNameKey, createPartNameMaps, flangeNameKey } from './partNames'
 
 describe('createPartNameMaps', () => {
-  it('marks ambiguous upside-down IDs, including multi-digit combinations', () => {
+  it('adds a dot only to IDs made entirely of 6 and 9', () => {
     const items = Array.from({ length: 197 }, (_, i) => ({
       id: i + 1, center: [1, -i, 0] as [number, number, number],
     }))
@@ -12,8 +12,10 @@ describe('createPartNameMaps', () => {
       bracePlates: items.map(({ id, center }) => ({ id: String(id), center })),
     })
     for (const map of [names.struts, names.feet, names.braces, names.bracePlates]) {
-      for (const id of [6, 9, 16, 18, 66, 69, 81, 96, 99, 169, 196]) expect(map[id]).toBe(`${id}.`)
-      for (const id of [1, 8, 11, 26, 49, 67, 88, 101, 197]) expect(map[id]).toBe(String(id))
+      for (const id of [6, 9, 66, 69, 96, 99]) expect(map[id]).toBe(`${id}.`)
+      for (const id of [1, 8, 11, 16, 18, 26, 49, 60, 67, 81, 88, 90, 101, 169, 196, 197]) {
+        expect(map[id]).toBe(String(id))
+      }
     }
     expect(names.flanges[flangeNameKey(69, 'inner')]).toBe('69.')
     expect(names.flanges[flangeNameKey(96, 'inner')]).toBe('96.')
