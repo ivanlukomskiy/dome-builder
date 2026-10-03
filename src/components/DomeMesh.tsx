@@ -5,8 +5,9 @@ import type { ThreeEvent } from '@react-three/fiber'
 import type { EditTarget, ViewMode } from '../App'
 import type { SceneData } from '../lib/polyhedra'
 import { computeBraceEndpoints } from '../lib/braces'
-import { buildBraceSolids, type BracePoints } from '../lib/braceSolid'
+import { buildBraceSolidMesh, pairBracePoints, type BracePoints } from '../lib/braceSolid'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
+import { bracePreviewKey, footPreviewKey, previewPartCache, strutPreviewKey, type CachedPreviewPart } from '../lib/previewPartCache'
 import {
   PREVIEW_PART_KINDS,
   type PartVisibility,
@@ -372,11 +373,26 @@ export function DomeMesh({
       .filter((vertex) => vertex.foot !== undefined)
       .map((vertex) => ({ vertex }))
 
+    const strutKeys = new Map(strutJobs.map((job) => [job.index, strutPreviewKey(job, sharedRequestFields)]))
+    const footKeys = new Map(footJobs.map((job) => [job.vertex.vertexId, footPreviewKey(job.vertex, halfWidth, grooveDepth)]))
+    const builtStruts = new Map<number, CachedPreviewPart>()
+    const builtFeet = new Map<number, CachedPreviewPart>()
+    const strutsToBuild = strutJobs.filter((job) => {
+      const cached = previewPartCache.get(strutKeys.get(job.index)!)
+      if (cached) builtStruts.set(job.index, cached)
+      return !cached
+    })
+    const feetToBuild = footJobs.filter((job) => {
+      const cached = previewPartCache.get(footKeys.get(job.vertex.vertexId)!)
+      if (cached) builtFeet.set(job.vertex.vertexId, cached)
+      return !cached
+    })
+
     const poolSize = Math.max(1, Math.min(MAX_WORKERS, (navigator.hardwareConcurrency || 2) - 1))
 
     // Progress, in units the user recognizes: struts, and vertices (a built flange counts for
     // every vertex it stands for). Batches run concurrently, so each reports into shared counters.
-    const progress = { struts: 0, flanges: cachedVertexCount, foot: 0 }
+    const progress = { struts: builtStruts.size, flanges: cachedVertexCount, foot: builtFeet.size }
     const strutTotal = strutJobs.length
     const flangeTotal = vertices.length * FLANGE_SIDES.length
     const footTotal = footJobs.length
@@ -468,7 +484,6 @@ export function DomeMesh({
       // Every strut's brace plate end points, across all batches - a brace's two struts can land
       // in different batches, so its body is only built once they're all in.
       const allBracePoints: BracePoints[] = []
-      const strutResults: Extract<PreviewWorkerMessage, { type: 'result' }>[] = []
 
       // Independent batches, longest first. A batch failing to build flanges shouldn't sink the
       // whole preview (a degenerate wedge angle, an opencascade edge case, ...): log which vertices
@@ -496,7 +511,7 @@ export function DomeMesh({
           }
         })
       }
-      chunk(footJobs, BATCH_SIZE).forEach((jobs) => {
+      chunk(feetToBuild, BATCH_SIZE).forEach((jobs) => {
         tasks.push(async () => {
           try {
             const result = await runBatch(
@@ -504,19 +519,30 @@ export function DomeMesh({
               'foot',
               jobs.map(() => 1),
             )
-            allPieces.push(...result.pieces)
+            if (cancelled) return
+            for (const item of result.feet) {
+              const part: CachedPreviewPart = { pieces: item.pieces, bracePoints: [] }
+              builtFeet.set(item.vertexId, part)
+              previewPartCache.set(footKeys.get(item.vertexId)!, part)
+            }
           } catch (err) {
             console.error(`Failed to build foot parts for vertices ${jobs.map((j) => j.vertex.vertexId).join(', ')}`, err)
           }
         })
       })
-      chunk(strutJobs, BATCH_SIZE).forEach((jobs, i) => {
+      chunk(strutsToBuild, BATCH_SIZE).forEach((jobs) => {
         tasks.push(async () => {
-          strutResults[i] = await runBatch(
+          const result = await runBatch(
             { strutJobs: jobs, flangeJobs: [], footJobs: [] },
             'struts',
             jobs.map(() => 1),
           )
+          if (cancelled) return
+          for (const item of result.struts) {
+            const part: CachedPreviewPart = { pieces: item.pieces, bracePoints: item.bracePoints }
+            builtStruts.set(item.index, part)
+            previewPartCache.set(strutKeys.get(item.index)!, part)
+          }
         })
       })
 
@@ -533,9 +559,12 @@ export function DomeMesh({
         await Promise.all(Array.from({ length: Math.min(poolSize, tasks.length) }, runner))
 
         if (cancelled) return
-        for (const result of strutResults) {
-          allPieces.push(...result.pieces)
-          allBracePoints.push(...result.bracePoints)
+        for (const job of footJobs) allPieces.push(...(builtFeet.get(job.vertex.vertexId)?.pieces ?? []))
+        for (const job of strutJobs) {
+          const part = builtStruts.get(job.index)
+          if (!part) continue
+          allPieces.push(...part.pieces)
+          allBracePoints.push(...part.bracePoints)
         }
 
         // Both plates of every hub: the group's side-specific mesh, turned to this vertex's orientation and
@@ -569,13 +598,19 @@ export function DomeMesh({
           }
         })
 
-        for (const { braceId, mesh } of timedMain('buildBraceSolids', () => buildBraceSolids(allBracePoints))) {
-          try {
-            allPieces.push({ ...mesh, color: BRACE_BODY_COLOR, part: 'braces' })
-          } catch (err) {
-            console.error(`Failed to build brace ${braceId}`, err)
+        timedMain('buildBraceSolids', () => {
+          for (const body of pairBracePoints(allBracePoints)) {
+            const key = bracePreviewKey(body)
+            let part = previewPartCache.get(key)
+            if (!part) {
+              const mesh = buildBraceSolidMesh(body.a, body.b, body.thickness)
+              if (!mesh) continue
+              part = { pieces: [{ ...mesh, color: BRACE_BODY_COLOR, part: 'braces' }], bracePoints: [] }
+              previewPartCache.set(key, part)
+            }
+            allPieces.push(...part.pieces)
           }
-        }
+        })
         const merged = timedMain('buildColoredGeometry + mergeGeometries', () => {
           const result: Partial<Record<PreviewPartKind, THREE.BufferGeometry>> = {}
           for (const { kind } of PREVIEW_PART_KINDS) {
@@ -594,8 +629,12 @@ export function DomeMesh({
         })
         profiler?.finish({
           struts: strutJobs.length,
+          strutsBuilt: strutsToBuild.length,
+          strutsCached: builtStruts.size - strutsToBuild.length,
           vertices: vertices.length,
           foot: footJobs.length,
+          footBuilt: feetToBuild.length,
+          footCached: builtFeet.size - feetToBuild.length,
           poolSize,
           flangeGroups: flangeGroups.length,
           flangeGroupsBuilt: flangesToBuild.length,

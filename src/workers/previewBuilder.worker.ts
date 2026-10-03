@@ -84,6 +84,17 @@ export interface PreviewPiece {
   part: PreviewPartKind
 }
 
+export interface PreviewStrutResult {
+  index: number
+  pieces: PreviewPiece[]
+  bracePoints: BracePoints[]
+}
+
+export interface PreviewFootResult {
+  vertexId: number
+  pieces: PreviewPiece[]
+}
+
 export type PreviewBuildPhase = 'struts' | 'flanges' | 'foot'
 
 export type PreviewWorkerMessage =
@@ -92,8 +103,8 @@ export type PreviewWorkerMessage =
   | {
       type: 'result'
       requestId: number
-      pieces: PreviewPiece[]
-      bracePoints: BracePoints[]
+      struts: PreviewStrutResult[]
+      feet: PreviewFootResult[]
       flangeMeshes: FlangeMeshResult[]
       profile?: WorkerProfile
     }
@@ -129,8 +140,8 @@ function footPartPlane(vertex: VertexEdgesInfo) {
 async function buildPreview(
   req: PreviewBuildRequest,
 ): Promise<{
-  pieces: PreviewPiece[]
-  bracePoints: BracePoints[]
+  struts: PreviewStrutResult[]
+  feet: PreviewFootResult[]
   flangeMeshes: FlangeMeshResult[]
   profile?: WorkerProfile
 }> {
@@ -148,12 +159,13 @@ async function buildPreview(
   self.postMessage({ type: 'ready', requestId: req.requestId } satisfies PreviewWorkerMessage)
 
   const center = new THREE.Vector3(0, 0, 0)
-  const pieces: PreviewPiece[] = []
+  const struts: PreviewStrutResult[] = []
+  const feet: PreviewFootResult[] = []
   // Each strut's brace plate end points, in 3D - the main thread pairs them up per brace and builds
   // the brace solids (see braceSolid.ts).
-  const bracePoints: BracePoints[] = []
-
   req.strutJobs.forEach((job, i) => {
+    const pieces: PreviewPiece[] = []
+    const bracePoints: BracePoints[] = []
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
     const boundary = timed('strutBoundary2D', () =>
@@ -234,6 +246,7 @@ async function buildPreview(
       }
     }
     prof?.items.push({ kind: 'strut', id: job.index, boundaryMs: strutBoundaryMs, solidMs: strutSolidMs })
+    struts.push({ index: job.index, pieces, bracePoints })
   })
 
   // Each flange is built once, in the canonical local frame, as a plate `grooveDepth` thick
@@ -292,6 +305,7 @@ async function buildPreview(
     const { vertex } = job
     const foot = vertex.foot
     if (!foot) return
+    const pieces: PreviewPiece[] = []
 
     const boundary = timed('footBoundary2D', () =>
       computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth),
@@ -306,7 +320,10 @@ async function buildPreview(
 
     const drawing = boundary.main
     const plane = footPartPlane(vertex)
-    if (!drawing || !plane || foot.thickness <= 0) return
+    if (!drawing || !plane || foot.thickness <= 0) {
+      feet.push({ vertexId: vertex.vertexId, pieces })
+      return
+    }
 
     try {
       const mesh = timed('footSolid (sketch+extrude+mesh)', () =>
@@ -316,6 +333,7 @@ async function buildPreview(
     } catch (err) {
       console.error(`Failed to build foot solid for vertex ${vertex.vertexId}`, err)
     }
+    feet.push({ vertexId: vertex.vertexId, pieces })
   })
 
   const profile: WorkerProfile | undefined = prof
@@ -327,19 +345,20 @@ async function buildPreview(
         replicad: snapshotReplicadStats(),
       }
     : undefined
-  return { pieces, bracePoints, flangeMeshes, profile }
+  return { struts, feet, flangeMeshes, profile }
 }
 
 self.onmessage = (event: MessageEvent<PreviewBuildRequest>) => {
   const req = event.data
   buildPreview(req).then(
-    ({ pieces, bracePoints, flangeMeshes, profile }) => {
+    ({ struts, feet, flangeMeshes, profile }) => {
       const transfer: Transferable[] = []
-      for (const p of pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
+      for (const result of struts) for (const p of result.pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
+      for (const result of feet) for (const p of result.pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
       for (const f of flangeMeshes) {
         if (f.mesh) transfer.push(f.mesh.positions.buffer, f.mesh.normals.buffer, f.mesh.indices.buffer)
       }
-      self.postMessage({ type: 'result', requestId: req.requestId, pieces, bracePoints, flangeMeshes, profile } satisfies PreviewWorkerMessage, {
+      self.postMessage({ type: 'result', requestId: req.requestId, struts, feet, flangeMeshes, profile } satisfies PreviewWorkerMessage, {
         transfer,
       })
     },
