@@ -1,4 +1,4 @@
-import { draw, drawCircle, drawRoundedRectangle, DrawingPen } from "replicad";
+import { draw, drawCircle, drawRoundedRectangle } from "replicad";
 import { Drawing, type Point2D } from "replicad";
 import * as THREE from "three";
 import type { SceneData } from "./polyhedra";
@@ -135,10 +135,6 @@ export function lineIntersection2D(
   if (Math.abs(denom) < 1e-9) return null;
   const t = cross2(sub2(p2, p1), d2) / denom;
   return add2(p1, scale2(d1, t));
-}
-
-function drawPointMarker(p: Point2D, radius: number): Drawing {
-  return drawCircle(radius).translate(p);
 }
 
 type MillingDirection =
@@ -459,24 +455,6 @@ export function computeStrutBoundary(
   }
 }
 
-const MARKER_RADIUS = 8;
-
-interface Geometry {
-  main: Drawing;
-  helpers: HelperDrawing[];
-  // Cuts (grooves, chamfers, mill-relief) - kept separate from `main` rather than subtracted
-  // right away, so the caller can combine shoulder geometry from both ends first (fusing their
-  // `main`s and pooling their negativeShapes) and cut once, instead of each end fighting over
-  // its own copy of `main`.
-  negativeShapes: DrawingWithLabel[];
-}
-
-export const nullShoulderGeometry: Geometry = {
-  main: draw().close(),
-  helpers: [],
-  negativeShapes: [],
-};
-
 // The brace plate, flat: the rectangle `rect` (centered at `c`, its length along `axis`) with
 // corners rounded by `plateRadius`, and 6 bolt holes cut in it (see bracePlateHoleCenters; the
 // two on the center line have their own diameter, plateHoleCenterDiameter).
@@ -597,92 +575,54 @@ export function precalculateStrutEnd(
   };
 }
 
-function createStrutEndHalf(p: StrutEndMeasurements): Geometry {
-  let main: DrawingPen = draw();
-
-  main = main.movePointerTo([p.offset, 0]);
-  main = main.vLineTo(p.halfWidth - p.grooveDepth);
-  main = main.hLineTo(p.tenonStart);
-  main = main.vLineTo(p.halfWidth);
-
+// One side of an end, from its tip to the bridge, in the end's local frame.
+// Chamfers are explicit boundary vertices, just like the groove shoulders.
+function strutEndSidePoints(p: StrutEndMeasurements): Point2D[] {
+  const grooveY = p.halfWidth - p.grooveDepth;
+  const points: Point2D[] = [
+    [p.offset, grooveY],
+    [p.tenonStart, grooveY],
+  ];
   if (p.chamferLength > 0) {
-    main = main.customCorner(p.chamferLength, "chamfer");
+    points.push(
+      [p.tenonStart, p.halfWidth - p.chamferLength],
+      [p.tenonStart + p.chamferLength, p.halfWidth],
+      [p.tenonEnd - p.chamferLength, p.halfWidth],
+      [p.tenonEnd, p.halfWidth - p.chamferLength],
+    );
+  } else {
+    points.push([p.tenonStart, p.halfWidth], [p.tenonEnd, p.halfWidth]);
   }
-  main = main.hLineTo(p.tenonEnd);
+  points.push([p.tenonEnd, grooveY], [p.cornerLength, grooveY]);
   if (p.chamferLength > 0) {
-    main = main.customCorner(p.chamferLength, "chamfer");
-  }
-  main = main.vLineTo(p.halfWidth - p.grooveDepth);
-  main = main.hLineTo(p.cornerLength);
-
-  if (p.chamferLength > 0) {
-    main = main.vLineTo(p.halfWidth - p.chamferLength);
-    main = main.lineTo([p.cornerLength + p.chamferLength, p.halfWidth]);
-    main = main.hLineTo(p.effectiveCornerLength);
+    points.push(
+      [p.cornerLength, p.halfWidth - p.chamferLength],
+      [p.cornerLength + p.chamferLength, p.halfWidth],
+    );
   } else if (p.effectiveCornerLength > p.cornerLength) {
-    main = main.vLineTo(p.halfWidth);
-    main = main.hLineTo(p.effectiveCornerLength);
+    points.push([p.cornerLength, p.halfWidth]);
   }
-  main = main.vLineTo(0);
-
-  // let negativeShapes: HelperDrawing[] = []
-  let helpers: HelperDrawing[] = [];
-  let negativeShapes: DrawingWithLabel[] = [];
-  if (p.millingDiameter) {
-    const mp1 = drawMillingCircle(
-      [p.tenonStart, p.halfWidth - p.grooveDepth],
-      "top-left",
-      p.millingDiameter,
-    );
-    helpers.push({ drawing: mp1, color: "red", name: "mp1" });
-    negativeShapes.push({ drawing: mp1, name: "mp1" });
-    const mp2 = drawMillingCircle(
-      [p.tenonEnd, p.halfWidth - p.grooveDepth],
-      "top-right",
-      p.millingDiameter,
-    );
-    helpers.push({ drawing: mp2, color: "red", name: "mp2" });
-    negativeShapes.push({ drawing: mp2, name: "mp2" });
-    const mp3 = drawMillingCircle(
-      [p.cornerLength, p.halfWidth - p.grooveDepth],
-      "top-left",
-      p.millingDiameter,
-    );
-    helpers.push({ drawing: mp3, color: "red", name: "mp3" });
-    negativeShapes.push({ drawing: mp3, name: "mp3" });
-  }
-
-  return {
-    main: main.close(),
-    helpers,
-    negativeShapes,
-  };
+  // With no chamfer or relief the end is narrower here. The bridge's full-width
+  // cap supplies the short step from the groove floor to this final point.
+  points.push([p.effectiveCornerLength, p.halfWidth]);
+  return points;
 }
 
-function createStrutEnd(p: StrutEndMeasurements): Drawing {
-  const half1 = createStrutEndHalf(p);
-  const half2 = half1.main.mirror([1, 0], [0, 0], "plane");
-  let main = half1.main.fuse(half2);
-  half1.negativeShapes.forEach(({ drawing: s, name }) => {
-    // Mirror before cutting - `.cut()` consumes (deletes) its operand, so `s` is no longer valid
-    // afterward.
-    const mirrored = s.mirror([1, 0], [0, 0], "plane");
-    try {
-      main = main.cut(s);
-    } catch (err) {
-      console.error(`createStrutEnd: cutting negative shape "${name}" failed`, { cause: err })
-      // throw new Error(`createStrutEnd: cutting negative shape "${name}" failed`, { cause: err });
-    }
-    try {
-      main = main.cut(mirrored);
-    } catch (err) {
-      console.error(`createStrutEnd: cutting mirrored negative shape "${name}" failed`, { cause: err })
-      // throw new Error(`createStrutEnd: cutting mirrored negative shape "${name}" failed`, {
-      //   cause: err,
-      // });
-    }
+function strutEndCuts(p: StrutEndMeasurements): DrawingWithLabel[] {
+  if (!p.millingDiameter) return [];
+  const grooveY = p.halfWidth - p.grooveDepth;
+  const corners: [number, MillingDirection][] = [
+    [p.tenonStart, "top-left"],
+    [p.tenonEnd, "top-right"],
+    [p.cornerLength, "top-left"],
+  ];
+  return corners.flatMap(([x, direction], i) => {
+    const drawing = drawMillingCircle([x, grooveY], direction, p.millingDiameter);
+    return [
+      { drawing, name: `mp${i + 1}` },
+      { drawing: drawing.mirror([1, 0], [0, 0], "plane"), name: `mirrored mp${i + 1}` },
+    ];
   });
-  return main;
 }
 
 function arcStart(
@@ -743,60 +683,42 @@ function arcEndpoints(
   };
 }
 
-function arc(
+// Walk the complete perimeter once: A inner side, inner bridge, B end,
+// outer bridge, then A outer side. No shared caps or positive-shape booleans.
+function strutOutlinePoints(
   a: Point2D,
   b: Point2D,
   center: Point2D,
-  aMeasurements: StrutEndMeasurements,
-  bMeasurements: StrutEndMeasurements,
-): Drawing {
-  const { innA, innB, extA, extB } = arcEndpoints(
-    a,
-    b,
-    center,
-    aMeasurements,
-    bMeasurements,
+  endA: StrutEndMeasurements,
+  endB: StrutEndMeasurements,
+  ends: ArcEndpoints,
+  roundBridge: boolean,
+): Point2D[] {
+  const sideA = strutEndSidePoints(endA);
+  const sideB = strutEndSidePoints(endB);
+  const placeSide = (points: Point2D[], origin: Point2D, axis: Point2D, sign: 1 | -1) =>
+    points.map(([x, y]) => add2(origin, add2(scale2(axis, x), scale2(rotate90(axis, sign), y))));
+  const axisA = tangentDirection2D(a, b, center);
+  const axisB = tangentDirection2D(b, a, center);
+  const innerBridge = roundBridge
+    ? calculateArcPoints(ends.innA, ends.innB, center, 20)
+    : [ends.innA, ends.innB];
+  const outerBridge = roundBridge
+    ? calculateArcPoints(ends.extA, ends.extB, center, 20)
+    : [ends.extA, ends.extB];
+  const points = [
+    ...placeSide(sideA, a, axisA, 1),
+    ...innerBridge,
+    ...placeSide(sideB, b, axisB, -1).reverse(),
+    ...placeSide(sideB, b, axisB, 1),
+    ...outerBridge.reverse(),
+    ...placeSide(sideA, a, axisA, -1).reverse(),
+  ];
+  // Shared bridge endpoints and disabled grooves/chamfers can repeat vertices.
+  // Remove zero-length edges before handing the wire to the CAD kernel.
+  return points.filter((point, i) =>
+    length2(sub2(point, points[(i + points.length - 1) % points.length])) > 1e-7,
   );
-
-  let conn = draw();
-  const innArcPoints = calculateArcPoints(innA, innB, center, 20); // fixme parametrize
-  const extArcPoints = calculateArcPoints(extA, extB, center, 20);
-
-  innArcPoints.forEach((p, i) => {
-    if (i == 0) {
-      conn = conn.movePointerTo(p);
-      return;
-    }
-    conn = conn.lineTo(p);
-  });
-  extArcPoints.reverse().forEach((p) => {
-    conn = conn.lineTo(p);
-  });
-
-  return conn.close();
-}
-
-function straightBridge(
-  a: Point2D,
-  b: Point2D,
-  center: Point2D,
-  aMeasurements: StrutEndMeasurements,
-  bMeasurements: StrutEndMeasurements,
-): Drawing {
-  const { innA, innB, extA, extB } = arcEndpoints(
-    a,
-    b,
-    center,
-    aMeasurements,
-    bMeasurements,
-  );
-
-  return draw()
-    .movePointerTo(innA)
-    .lineTo(innB)
-    .lineTo(extB)
-    .lineTo(extA)
-    .close();
 }
 
 function lerp2(a: Point2D, b: Point2D, t: number): Point2D {
@@ -886,20 +808,7 @@ export function computeStrutBoundary2D(
   braces: StrutBraces = NO_STRUT_BRACES,
   roundBridge = true,
 ): StrutBoundaryResult {
-  // calculate intersection point
-
-  // const intersection = lineIntersection2D(a, tangentA, b, tangentB);
-  // if (!intersection) return nullShoulderGeometry;
-  // const distanceToIntersection = length2(sub2(intersection, a));
-  let helpers = [
-    {
-      drawing: drawPointMarker(center, MARKER_RADIUS),
-      color: "red",
-      name: "center",
-    },
-    { drawing: drawPointMarker(a, MARKER_RADIUS), color: "green", name: "A" },
-    { drawing: drawPointMarker(b, MARKER_RADIUS), color: "green", name: "B" },
-  ];
+  const helpers: HelperDrawing[] = [];
 
   const endA = precalculateStrutEnd(
     offsetA,
@@ -911,12 +820,6 @@ export function computeStrutBoundary2D(
     grooveDepth,
     halfWidth,
   );
-  let strutA = createStrutEnd(endA);
-  strutA = strutA.rotate(
-    (Math.atan2(center[1] - a[1], center[0] - a[0]) * 180) / Math.PI - 90,
-  );
-  strutA = strutA.translate(a[0], a[1]);
-
   const endB = precalculateStrutEnd(
     offsetB,
     cornerLengthB,
@@ -927,23 +830,25 @@ export function computeStrutBoundary2D(
     grooveDepth,
     halfWidth,
   );
-  let strutB = createStrutEnd(endB);
-  strutB = strutB.rotate(
-    (Math.atan2(center[1] - b[1], center[0] - b[0]) * 180) / Math.PI + 90,
-  );
-  strutB = strutB.translate(b[0], b[1]);
-
   const arcEnds = arcEndpoints(a, b, center, endA, endB);
-  const arcBody = roundBridge
-    ? arc(a, b, center, endA, endB)
-    : straightBridge(a, b, center, endA, endB);
+  const points = strutOutlinePoints(a, b, center, endA, endB, arcEnds, roundBridge);
+  let outline = draw(points[0]);
+  for (const point of points.slice(1)) outline = outline.lineTo(point);
+  let main = outline.close();
 
-  helpers = [
-    // { drawing: strutB, color: "magenta", name: "shoulder b" },
-    // { drawing: strutA, color: "magenta", name: "shoulder a" },
-    // { drawing: arcBody, color: "magenta", name: "arc" },
-    // ...helpers,
-  ];
+  for (const [end, origin, measurements, axis] of [
+    ["A", a, endA, tangentDirection2D(a, b, center)],
+    ["B", b, endB, tangentDirection2D(b, a, center)],
+  ] as const) {
+    const angle = (Math.atan2(axis[1], axis[0]) * 180) / Math.PI;
+    for (const { drawing, name } of strutEndCuts(measurements)) {
+      try {
+        main = main.cut(drawing.rotate(angle).translate(origin));
+      } catch (err) {
+        console.error(`computeStrutBoundary2D: cutting negative shape "${end} ${name}" failed`, { cause: err });
+      }
+    }
+  }
 
   // braceCenterNoRounding: for a brace on end A, the point reached by going from A toward B by
   // shift * |AB|; for a brace on end B, the same going from B toward A.
@@ -1117,8 +1022,6 @@ export function computeStrutBoundary2D(
       }
     }
   }
-
-  let main = strutA.fuse(arcBody).fuse(strutB);
 
   // The brace plates' corner holes go through the strut too.
   for (const [holeCenter, holeRadius] of strutHoles) {
