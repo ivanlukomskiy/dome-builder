@@ -1,6 +1,6 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { ChangeEvent, ReactNode } from 'react'
+import type { ChangeEvent, ReactNode, SyntheticEvent } from 'react'
 import type { EditOrPreviewMode, EditTarget, ViewMode } from '../App'
 import { LANGUAGES, useI18n } from '../lib/i18n'
 import {
@@ -284,37 +284,92 @@ export function NumberField({ value, onCommit, step, min, placeholder, clamp }: 
   )
 }
 
-function SidebarSection({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
-  return <details className="sidebar-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+function SidebarSection({ id, title, children, defaultOpen = true }: { id: string; title: string; children: ReactNode; defaultOpen?: boolean }) {
+  const storageKey = `dome-builder.sidebar.${id}`
+  const [open, setOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      return saved === null ? defaultOpen : saved === 'true'
+    } catch {
+      return defaultOpen
+    }
+  })
+  const handleToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    const isOpen = event.currentTarget.open
+    setOpen(isOpen)
+    try {
+      localStorage.setItem(storageKey, String(isOpen))
+    } catch {
+      // The sidebar still works when browser storage is unavailable.
+    }
+  }
+  return <details className="sidebar-section" open={open} onToggle={handleToggle}>
     <summary>{title}</summary>
     <div className="sidebar-section-content">{children}</div>
   </details>
 }
 
-function Help({ text }: { text: string }) {
+function Help({ text, buttonIndex }: { text: string; buttonIndex?: number }) {
   const id = useId()
   const [visible, setVisible] = useState(false)
-  const trigger = useRef<HTMLButtonElement>(null)
+  const marker = useRef<HTMLSpanElement>(null)
+  const anchor = useRef<HTMLElement | null>(null)
   const tooltip = useRef<HTMLSpanElement>(null)
 
+  useEffect(() => {
+    const element = marker.current
+    if (!element) return
+    const field = element.closest('.transform-field')
+    let previous = element.previousElementSibling
+    while (previous?.matches('.field-help, .hint')) previous = previous.previousElementSibling
+    const group = element.parentElement
+    const fields = !field && previous?.matches('.transform-field')
+      ? Array.from(group?.querySelectorAll<HTMLElement>('.transform-field') ?? [])
+      : []
+    const targets = field
+      ? [field as HTMLElement]
+      : fields.length > 1
+        ? fields
+        : previous?.matches('.button-row') && buttonIndex !== undefined
+          ? [previous.querySelectorAll<HTMLElement>('button')[buttonIndex]].filter((item): item is HTMLElement => !!item)
+          : previous instanceof HTMLElement ? [previous] : []
+
+    const cleanups = targets.map((target) => {
+      const show = () => { anchor.current = target; setVisible(true) }
+      const hide = () => { if (anchor.current === target) setVisible(false) }
+      const leave = () => { if (!target.contains(document.activeElement)) hide() }
+      target.addEventListener('mouseenter', show)
+      target.addEventListener('mouseleave', leave)
+      target.addEventListener('focusin', show)
+      target.addEventListener('focusout', hide)
+      const focusable = target.matches('input, button') ? [target] : Array.from(target.querySelectorAll<HTMLElement>('input, button'))
+      const describedBy = focusable.map((item) => [item, item.getAttribute('aria-describedby')] as const)
+      focusable.forEach((item) => item.setAttribute('aria-describedby', [item.getAttribute('aria-describedby'), id].filter(Boolean).join(' ')))
+      return () => {
+        target.removeEventListener('mouseenter', show)
+        target.removeEventListener('mouseleave', leave)
+        target.removeEventListener('focusin', show)
+        target.removeEventListener('focusout', hide)
+        describedBy.forEach(([item, value]) => value === null ? item.removeAttribute('aria-describedby') : item.setAttribute('aria-describedby', value))
+      }
+    })
+    return () => cleanups.forEach((cleanup) => cleanup())
+  }, [buttonIndex, id])
+
   useLayoutEffect(() => {
-    if (!visible || !trigger.current || !tooltip.current) return
-    const anchor = trigger.current.getBoundingClientRect()
+    if (!visible || !anchor.current || !tooltip.current) return
+    const anchorRect = anchor.current.getBoundingClientRect()
     const box = tooltip.current.getBoundingClientRect()
-    tooltip.current.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`
-    tooltip.current.style.top = `${Math.max(8, anchor.bottom + box.height + 8 <= window.innerHeight
-      ? anchor.bottom + 4
-      : anchor.top - box.height - 4)}px`
+    tooltip.current.style.left = `${Math.max(8, Math.min(anchorRect.left, window.innerWidth - box.width - 8))}px`
+    tooltip.current.style.top = `${Math.max(8, anchorRect.bottom + box.height + 8 <= window.innerHeight
+      ? anchorRect.bottom + 4
+      : anchorRect.top - box.height - 4)}px`
   }, [visible, text])
 
-  return <span className="field-help" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
-    <button ref={trigger} type="button" className="help-trigger" aria-label={text}
-      aria-describedby={visible ? id : undefined}
-      onFocus={() => setVisible(true)} onBlur={() => setVisible(false)}
-      onKeyDown={(event) => { if (event.key === 'Escape') setVisible(false) }}>?</button>
+  return <>
+    <span ref={marker} className="field-help" hidden />
     {visible && createPortal(<span ref={tooltip} id={id} className="help-tooltip" role="tooltip">{text}</span>, document.body)}
-  </span>
+  </>
 }
 
 export function Sidebar({
@@ -498,7 +553,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <SidebarSection title={t('Editor')}>
+      <SidebarSection id="editor" title={t('Editor')}>
         <div className="button-row editor-actions">
           <button onClick={onOpenNew} disabled={mode === 'new'}>{t('New dome')}</button>
           <button onClick={onExportConfig}>{t('Save as')}</button>
@@ -522,7 +577,7 @@ export function Sidebar({
           {EDIT_OR_PREVIEW_OPTIONS.map((opt) => <button key={opt.value} className={mode === opt.value ? 'active' : ''} onClick={() => onSwitchMode(opt.value)}>{t(opt.label)}</button>)}
         </div>}
       </SidebarSection>
-      {mode === 'new' && <SidebarSection title={t('New dome')}>
+      {mode === 'new' && <SidebarSection id="new-dome" title={t('New dome')}>
         <section className="control-group">
           <h2>{t('Shape')}</h2>
           {(Object.keys(SHAPE_LABELS) as ShapeType[]).map((s) => (
@@ -591,7 +646,7 @@ export function Sidebar({
         </section>
         <div className="button-row"><button onClick={onCreateNew}>{t('Create')}</button><button onClick={onCancelNew}>{t('Cancel')}</button></div>
       </SidebarSection>}
-      {mode === 'edit' && <SidebarSection title={t('Edit')}>
+      {mode === 'edit' && <SidebarSection id="edit" title={t('Edit')}>
         {mode === 'edit' && (
           <section className="control-group">
             <div className="segmented-control">
@@ -647,11 +702,11 @@ export function Sidebar({
               </button>
             </div>
             {selectedCount > 0 && !canAddPoints && (
-              <Help text={t('Select an even number of points to pair them up.')} />
+              <Help text={t('Select an even number of points to pair them up.')} buttonIndex={0} />
             )}
             <Help text={t(
               "Connect Vertices pairs them by nearest neighbor and joins each pair with a direct edge, skipping any pair that's already connected.",
-            )} />
+            )} buttonIndex={1} />
           </section>
         )}
 
@@ -916,20 +971,20 @@ export function Sidebar({
         )}
 
       </SidebarSection>}
-      {mode === 'preview' && <SidebarSection title={t('Preview')}>
+      {mode === 'preview' && <SidebarSection id="preview" title={t('Preview')}>
         <div className="button-row">
           <button onClick={onApplyPreview} disabled={!previewParamsDirty}>{t('Redraw')}</button>
         </div>
         {previewParamsDirty && <p className="hint" role="status">{t('Unapplied geometry changes')}</p>}
         <Help text={t('Geometry changes take effect when you click Redraw.')} />
-        <SidebarSection title={t('Parts visibility')} defaultOpen={false}>
+        <SidebarSection id="preview-parts-visibility" title={t('Parts visibility')} defaultOpen={false}>
           {PREVIEW_PART_KINDS.map(({ kind, label }) => <label className="checkbox-field" key={kind}>
             <input type="checkbox" checked={partVisibility[kind]} onChange={(e) => onPartVisibilityChange(kind, e.target.checked)} />{t(label)}
           </label>)}
         </SidebarSection>
       </SidebarSection>}
-      {mode !== 'new' && <SidebarSection title={t('Dome geometry')}>
-        <SidebarSection title={t('General')} defaultOpen={false}>
+      {mode !== 'new' && <SidebarSection id="dome-geometry" title={t('Dome geometry')}>
+        <SidebarSection id="geometry-general" title={t('General')} defaultOpen={false}>
           <section className="control-group">
 
             <div className="transform-field">
@@ -940,7 +995,7 @@ export function Sidebar({
           </section>
         </SidebarSection>
         <>
-          <SidebarSection title={t('Struts')} defaultOpen={false}>
+          <SidebarSection id="geometry-struts" title={t('Struts')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 <div className="transform-field">
@@ -1014,7 +1069,7 @@ export function Sidebar({
               </section>
             )}
           </SidebarSection>
-          <SidebarSection title={t('Flanges')} defaultOpen={false}>
+          <SidebarSection id="geometry-flanges" title={t('Flanges')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 <div className="transform-field">
@@ -1093,7 +1148,7 @@ export function Sidebar({
               </section>
             )}
           </SidebarSection>
-          <SidebarSection title={t('Foot')} defaultOpen={false}>
+          <SidebarSection id="geometry-foot" title={t('Foot')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 {FOOT_PARAM_FIELDS.map(({ key, label }) => (
@@ -1114,7 +1169,7 @@ export function Sidebar({
               </section>
             )}
           </SidebarSection>
-          <SidebarSection title={t('Braces')} defaultOpen={false}>
+          <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
@@ -1137,8 +1192,8 @@ export function Sidebar({
           </SidebarSection>
         </>
       </SidebarSection>}
-      {mode !== 'new' && <SidebarSection title={t('Export')}>
-        <SidebarSection title={t('DXF')} defaultOpen={false}>
+      {mode !== 'new' && <SidebarSection id="export" title={t('Export')}>
+        <SidebarSection id="export-dxf" title={t('DXF')} defaultOpen={false}>
           <div className="transform-field">
             <label>{t('Part ID label size (mm)')}</label>
             <NumberField value={partIdLabelSize} step={0.5} min={0.1} onCommit={onPartIdLabelSizeChange} />
@@ -1184,11 +1239,11 @@ export function Sidebar({
             : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')} />}
 
         </SidebarSection>
-        <SidebarSection title={t('STEP parts')} defaultOpen={false}>
+        <SidebarSection id="export-step-parts" title={t('STEP parts')} defaultOpen={false}>
           <div className="button-row"><button onClick={onDownloadSteps} disabled={stepExportBusy}>{t('Download STEP Archive')}</button></div>
           {stepExportProgress && <p className="hint" role="status">{stepProgressText(stepExportProgress)}</p>}
         </SidebarSection>
-        <SidebarSection title={t('STEP assembly')} defaultOpen={false}>
+        <SidebarSection id="export-step-assembly" title={t('STEP assembly')} defaultOpen={false}>
           <div className="button-row"><button onClick={onDownloadStepAssembly} disabled={stepExportBusy}>{t('Download STEP Assembly')}</button></div>
           {stepAssemblyExportProgress && <p className="hint" role="status">{stepProgressText(stepAssemblyExportProgress)}</p>}
         </SidebarSection>

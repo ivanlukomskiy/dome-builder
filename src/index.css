@@ -346,21 +346,7 @@ body,
 .lang-switch { margin-bottom: 12px; }
 .transform-field { position: relative; }
 .transform-field input[type='number'] { flex-shrink: 0; width: 80px; }
-.field-help { display: inline-block; position: relative; font-weight: normal; }
-.help-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 10px;
-  cursor: help;
-}
+.field-help { display: none; }
 .help-tooltip {
   position: fixed;
   top: 0;
@@ -378,5 +364,4 @@ body,
   line-height: 1.5;
   z-index: 10;
 }
-.transform-field .field-help { position: static; }
 .sidebar :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
