@@ -630,6 +630,11 @@ function App() {
     })
   }
 
+  const handleResetAllVertexOverrides = () => {
+    handleResetVertexCornerLength()
+    handleResetVertexFlangeParams()
+  }
+
   // Marks (or unmarks) every selected vertex as a foot.
   const handleFootVertexToggle = (isFoot: boolean) => {
     if (selectedVertexIndices.size === 0) return
@@ -1140,7 +1145,7 @@ function App() {
         vertexFlangeParams={vertexFlangeParams}
         onVertexFlangeParamChange={handleVertexFlangeParamChange}
         onResetVertexFlangeParam={handleResetVertexFlangeParam}
-        onResetVertexFlangeParams={handleResetVertexFlangeParams}
+        onResetAllVertexOverrides={handleResetAllVertexOverrides}
         footVertices={footVertices}
         onFootVertexToggle={handleFootVertexToggle}
         footParams={footParams}

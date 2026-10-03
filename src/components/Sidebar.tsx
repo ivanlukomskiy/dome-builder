@@ -100,7 +100,7 @@ interface SidebarProps {
   vertexFlangeParams: ReadonlyMap<number, Partial<FlangeShapeParams>>
   onVertexFlangeParamChange: (key: keyof FlangeShapeParams, value: number) => void
   onResetVertexFlangeParam: (key: keyof FlangeShapeParams) => void
-  onResetVertexFlangeParams: () => void
+  onResetAllVertexOverrides: () => void
   // Vertices marked as feet; the toggle marks/unmarks every selected vertex.
   footVertices: ReadonlySet<number>
   onFootVertexToggle: (isFoot: boolean) => void
@@ -426,7 +426,7 @@ export function Sidebar({
   vertexFlangeParams,
   onVertexFlangeParamChange,
   onResetVertexFlangeParam,
-  onResetVertexFlangeParams,
+  onResetAllVertexOverrides,
   footVertices,
   onFootVertexToggle,
   footParams,
@@ -661,7 +661,6 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            {selectedCount > 0 && <p className="hint">{tn(selectedCount, '{n} vertex selected', '{n} vertices selected')}</p>}
             <div className="button-row">
               <button disabled={!canUndo} onClick={onUndo}>
                 {t('Undo')}
@@ -708,7 +707,6 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            {selectedEdgeCount > 0 && <p className="hint">{tn(selectedEdgeCount, '{n} edge selected', '{n} edges selected')}</p>}
             <div className="button-row">
               <button disabled={selectedEdgeCount === 0} onClick={onDeleteSelectedEdges}>
                 {t('Delete')}
@@ -770,7 +768,6 @@ export function Sidebar({
                 </button>
               ))}
             </div>
-            {selectedFaceCount > 0 && <p className="hint">{tn(selectedFaceCount, '{n} face selected', '{n} faces selected')}</p>}
             <div className="button-row">
               <button disabled={selectedFaceCount === 0} onClick={onDeleteSelectedFaces}>
                 {t('Delete')}
@@ -782,11 +779,7 @@ export function Sidebar({
         {mode === 'edit' && editTarget === 'braces' && (
           <section className="control-group">
             <h2>{t('Edit braces')}</h2>
-            <p className="hint">
-              {selectedBraceCount > 0
-                ? tn(selectedBraceCount, '{n} brace selected', '{n} braces selected')
-                : t('Click a brace to select it. Add braces from two edges in the Edges tab.')}
-            </p>
+            {selectedBraceCount === 0 && <p className="hint">{t('Click a brace to select it. Add braces from two edges in the Edges tab.')}</p>}
             <div className="button-row">
               <button disabled={selectedBraceCount === 0} onClick={onDeleteSelectedBraces}>
                 {t('Delete')}
@@ -819,31 +812,6 @@ export function Sidebar({
 
         {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
           <section className="control-group">
-            <h2>{t('Corner Length')}</h2>
-            <div className="transform-field">
-              <label><FieldLabel text={t('Corner length override (mm)')} /> <Help text={t(
-                'Applies to every strut end and flange at the selected vertices. 0 uses the global corner length set in Edge Curvature.',
-              )} /></label>
-              <NumberField
-                value={vertexCornerLengthValue}
-                step={5}
-                min={0}
-                placeholder={vertexCornerLengthValue === null ? t('Mixed') : undefined}
-                clamp={(n) => Math.max(n, 0)}
-                onCommit={onVertexCornerLengthChange}
-              />
-            </div>
-            <div className="button-row">
-              <button disabled={!hasVertexCornerLengthOverrides} onClick={onResetVertexCornerLength}>
-                {t('Reset Corner Length')}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
-          <section className="control-group">
-            <h2>{t('Foot Geometry')}</h2>
             <label className="checkbox-field">
               <input
                 type="checkbox"
@@ -862,48 +830,8 @@ export function Sidebar({
         )}
 
         {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+          <SidebarSection id="edit-vertex-transform" title={t('Transform')} defaultOpen={false}>
           <section className="control-group">
-            <h2>{t('Flange Overrides')}</h2>
-            {FLANGE_PARAM_FIELDS.map(({ key, label }) => {
-              const shared = sharedFlangeOverride(selectedVertexIndices, vertexFlangeParams, key)
-              return (
-                <div className="transform-field" key={key}>
-                  <label><FieldLabel text={t(label)} /></label>
-                  <span className="field-with-reset">
-                    <NumberField
-                      value={shared.value}
-                      step={1}
-                      min={key.startsWith('tolerance') ? undefined : 0}
-                      placeholder={shared.mixed ? t('Mixed') : t('{value} (default)', { value: flangeDefaults[key] })}
-                      clamp={key.startsWith('tolerance') ? undefined : (n) => Math.max(n, 0)}
-                      onCommit={(v) => onVertexFlangeParamChange(key, v)}
-                    />
-                    <button
-                      className="reset-field"
-                      title={t('Use the global value')}
-                      disabled={!shared.any}
-                      onClick={() => onResetVertexFlangeParam(key)}
-                    >
-                      &times;
-                    </button>
-                  </span>
-                </div>
-              )
-            })}
-            <Help text={t(
-              "Overrides the Flange section's values for the flange at the selected vertices only. A blank field uses the global value (shown in grey); × goes back to it. Overridden vertices are shown in cyan.",
-            )} />
-            <div className="button-row">
-              <button disabled={!hasVertexFlangeOverrides} onClick={onResetVertexFlangeParams}>
-                {t('Reset Flange Overrides')}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
-          <section className="control-group">
-            <h2>{t('Transform')}</h2>
             <div className="transform-field">
               <label><FieldLabel text={t('Radius (Δr, mm)')} /></label>
               <NumberField
@@ -944,6 +872,71 @@ export function Sidebar({
               </button>
             </div>
           </section>
+          </SidebarSection>
+        )}
+
+        {mode === 'edit' && editTarget === 'vertices' && selectedCount > 0 && (
+          <SidebarSection id="edit-vertex-corner-flange" title={t('Overrides')} defaultOpen={false}>
+          <section className="control-group">
+            <div className="transform-field">
+              <label><FieldLabel text={t('Corner length (mm)')} /> <Help text={t(
+                'Applies to every strut end and flange at the selected vertices. 0 uses the global corner length set in Edge Curvature.',
+              )} /></label>
+              <span className="field-with-reset">
+                <NumberField
+                  value={vertexCornerLengthValue === 0 ? null : vertexCornerLengthValue}
+                  step={5}
+                  min={0}
+                  placeholder={vertexCornerLengthValue === null ? t('Mixed')
+                    : vertexCornerLengthValue === 0 ? t('{value} (default)', { value: cornerLength }) : undefined}
+                  clamp={(n) => Math.max(n, 0)}
+                  onCommit={onVertexCornerLengthChange}
+                />
+                <button className="reset-field" title={t('Use the global value')}
+                  disabled={!hasVertexCornerLengthOverrides} onClick={onResetVertexCornerLength}>
+                  &times;
+                </button>
+              </span>
+            </div>
+          </section>
+          <section className="control-group">
+            <h2>{t('Flange')}</h2>
+            {FLANGE_PARAM_FIELDS.map(({ key, label }) => {
+              const shared = sharedFlangeOverride(selectedVertexIndices, vertexFlangeParams, key)
+              return (
+                <div className="transform-field" key={key}>
+                  <label><FieldLabel text={t(label)} /></label>
+                  <span className="field-with-reset">
+                    <NumberField
+                      value={shared.value}
+                      step={1}
+                      min={key.startsWith('tolerance') ? undefined : 0}
+                      placeholder={shared.mixed ? t('Mixed') : t('{value} (default)', { value: flangeDefaults[key] })}
+                      clamp={key.startsWith('tolerance') ? undefined : (n) => Math.max(n, 0)}
+                      onCommit={(v) => onVertexFlangeParamChange(key, v)}
+                    />
+                    <button
+                      className="reset-field"
+                      title={t('Use the global value')}
+                      disabled={!shared.any}
+                      onClick={() => onResetVertexFlangeParam(key)}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
+            <Help text={t(
+              "Overrides the Flange section's values for the flange at the selected vertices only. A blank field uses the global value (shown in grey); × goes back to it. Overridden vertices are shown in cyan.",
+            )} />
+          </section>
+          <div className="button-row">
+            <button disabled={!hasVertexCornerLengthOverrides && !hasVertexFlangeOverrides} onClick={onResetAllVertexOverrides}>
+              {t('Reset all overrides')}
+            </button>
+          </div>
+          </SidebarSection>
         )}
 
       </SidebarSection>}
@@ -1130,7 +1123,7 @@ export function Sidebar({
                   </div>
                 ))}
                 <Help text={t(
-                  'The same for every vertex marked as a foot (Edit → Vertices → Foot Geometry), applied to the preview with Redraw.',
+                  'The same for every vertex marked as a foot (Edit → Vertices → Foot geometry checkbox), applied to the preview with Redraw.',
                 )} />
               </section>
             )}
