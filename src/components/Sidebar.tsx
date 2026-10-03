@@ -8,8 +8,6 @@ import {
   type PartVisibility,
   type PreviewPartKind,
 } from '../lib/previewParts'
-import type { StepExportProgress } from '../lib/stepExportRunner'
-import type { DxfExportProgress } from '../lib/dxfExportRunner'
 import type { DxfSheetSettings } from '../lib/dxfSheetSettings'
 import {
   BRACE_PARAM_FIELDS,
@@ -53,13 +51,9 @@ interface SidebarProps {
   onDownloadSteps: () => void
   onDownloadStepAssembly: () => void
   onDownloadDxf: () => void
-  dxfExportProgress: DxfExportProgress | null
-  dxfExportError: string | null
+  exportBusy: boolean
   dxfSheetSettings: DxfSheetSettings
   onDxfSheetSettingsChange: (settings: DxfSheetSettings) => void
-  onCancelDxfExport: () => void
-  stepExportProgress: StepExportProgress | null
-  stepAssemblyExportProgress: StepExportProgress | null
   partIdLabelSize: number
   onPartIdLabelSizeChange: (size: number) => void
   connectedPartIdLabelSize: number
@@ -383,13 +377,9 @@ export function Sidebar({
   onDownloadSteps,
   onDownloadStepAssembly,
   onDownloadDxf,
-  dxfExportProgress,
-  dxfExportError,
+  exportBusy,
   dxfSheetSettings,
   onDxfSheetSettingsChange,
-  onCancelDxfExport,
-  stepExportProgress,
-  stepAssemblyExportProgress,
   partIdLabelSize,
   onPartIdLabelSizeChange,
   connectedPartIdLabelSize,
@@ -538,18 +528,6 @@ export function Sidebar({
   const someSelectedAreFeet = selectedFootCount > 0 && !allSelectedAreFeet
 
   const importInputRef = useRef<HTMLInputElement>(null)
-  const stepExportBusy = stepExportProgress !== null || stepAssemblyExportProgress !== null
-
-  const stepProgressText = (progress: StepExportProgress) => {
-    if (progress.phase === 'zipping') return t('Zipping…')
-    if (progress.phase === 'writing') return t('Writing STEP…')
-    return t('Building {phase} — {done} / {total}', {
-      phase: t(progress.phase),
-      done: progress.done,
-      total: progress.total,
-    })
-  }
-
   const handleImportFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) onImportConfig(file)
@@ -1191,11 +1169,11 @@ export function Sidebar({
             <NumberField value={connectedPartIdLabelSize} step={0.5} min={0.1} onCommit={onConnectedPartIdLabelSizeChange} />
           </div>
           <label className="checkbox-field">
-            <input type="checkbox" checked={dxfSheetSettings.arrangeOnSheet} disabled={dxfExportProgress !== null}
+            <input type="checkbox" checked={dxfSheetSettings.arrangeOnSheet} disabled={exportBusy}
               onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, arrangeOnSheet: event.target.checked })} />
             {t('Arrange on a sheet')}
           </label>
-          {dxfSheetSettings.arrangeOnSheet && <fieldset className="dxf-sheet-settings" disabled={dxfExportProgress !== null}>
+          {dxfSheetSettings.arrangeOnSheet && <fieldset className="dxf-sheet-settings" disabled={exportBusy}>
             {([
               ['width', 'Sheet width (mm)', 1],
               ['height', 'Sheet height (mm)', 1],
@@ -1208,32 +1186,19 @@ export function Sidebar({
             </div>)}
             <Help text={t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may rotate by 90°.')} />
           </fieldset>}
-          {dxfExportError && <p className="dxf-export-error" role="alert">{t('DXF export failed: {message}', { message: dxfExportError })}</p>}
-
           <div className="button-row">
-            <button onClick={onDownloadDxf} disabled={dxfExportProgress !== null}>{t('Download DXF')}</button>
-            {dxfExportProgress && <button onClick={onCancelDxfExport}>{t('Cancel DXF export')}</button>}
+            <button onClick={onDownloadDxf} disabled={exportBusy}>{t('Download DXF')}</button>
           </div>
-          {dxfExportProgress ? <p className="hint" role="status">
-            {dxfExportProgress
-              ? dxfExportProgress.phase === 'writing'
-                ? t('Writing DXF…')
-                : dxfExportProgress.phase === 'packing'
-                  ? t('DXF: arranging parts — {done} / {total}', { done: dxfExportProgress.done, total: dxfExportProgress.total })
-                  : t('DXF: building {phase} — {done} / {total}', { phase: t(dxfExportProgress.phase), done: dxfExportProgress.done, total: dxfExportProgress.total })
-              : ''}
-          </p> : <Help text={dxfSheetSettings.arrangeOnSheet
+          <Help text={dxfSheetSettings.arrangeOnSheet
             ? t('The DXF arranges all parts across as many sheets as needed. Blue borders are on the SHEETS layer. Red and green labels stay with their parts.')
-            : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')} />}
+            : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')} />
 
         </SidebarSection>
         <SidebarSection id="export-step-parts" title={t('STEP parts')} defaultOpen={false}>
-          <div className="button-row"><button onClick={onDownloadSteps} disabled={stepExportBusy}>{t('Download STEP Archive')}</button></div>
-          {stepExportProgress && <p className="hint" role="status">{stepProgressText(stepExportProgress)}</p>}
+          <div className="button-row"><button onClick={onDownloadSteps} disabled={exportBusy}>{t('Download STEP Archive')}</button></div>
         </SidebarSection>
         <SidebarSection id="export-step-assembly" title={t('STEP assembly')} defaultOpen={false}>
-          <div className="button-row"><button onClick={onDownloadStepAssembly} disabled={stepExportBusy}>{t('Download STEP Assembly')}</button></div>
-          {stepAssemblyExportProgress && <p className="hint" role="status">{stepProgressText(stepAssemblyExportProgress)}</p>}
+          <div className="button-row"><button onClick={onDownloadStepAssembly} disabled={exportBusy}>{t('Download STEP Assembly')}</button></div>
         </SidebarSection>
       </SidebarSection>}
     </aside>

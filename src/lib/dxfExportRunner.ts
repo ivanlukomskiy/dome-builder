@@ -23,7 +23,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export interface DxfExportProgress {
-  phase: DxfExportPhase | 'packing' | 'writing'
+  phase: DxfExportPhase | 'braces' | 'packing' | 'writing'
   done: number
   total: number
 }
@@ -129,15 +129,20 @@ function runBatch(
   shared: Shared,
   requestId: number,
   onProgress: (done: number) => void,
+  signal?: AbortSignal,
 ): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
     const createdAt = performance.now()
     let readyAt = createdAt
     const worker = new Worker(new URL('../workers/dxfExportWorker.ts', import.meta.url), { type: 'module' })
     const settle = (fn: () => void) => {
+      signal?.removeEventListener('abort', abort)
       worker.terminate()
       fn()
     }
+    const abort = () => settle(() => reject(new DOMException('Export cancelled', 'AbortError')))
+    if (signal?.aborted) { abort(); return }
+    signal?.addEventListener('abort', abort, { once: true })
     worker.onmessage = (event: MessageEvent<DxfExportWorkerMessage>) => {
       const msg = event.data
       if (msg.requestId !== requestId) return
@@ -162,13 +167,14 @@ function runBatch(
 
 // Builds a single DXF sheet with the flat 2D outline of every visible strut, flange plate, foot,
 // brace plate and brace (each with its ID as a label in its own color - see dxf.ts), scaled by
-// `params.scale`. `isCancelled` is polled between batches. Returns null if cancelled.
+// `params.scale`. Cancellation stops active workers when a signal is provided. Returns null if cancelled.
 export async function runDxfExport(
   params: RunStepExportParams,
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
   labelSettings: DxfLabelSettings = DEFAULT_DXF_LABEL_SETTINGS,
   sheetSettings: DxfSheetSettings = DEFAULT_DXF_SHEET_SETTINGS,
+  signal?: AbortSignal,
 ): Promise<Blob | null> {
   if (sheetSettings.arrangeOnSheet) validateDxfSheetSettings(sheetSettings)
   const startedAt = performance.now()
@@ -199,7 +205,7 @@ export async function runDxfExport(
   const strutResults = await runExportBatches(
     strutBatches,
     strutEntries.length,
-    (batch, i, report) => runBatch(batch, [], shared, i + 1, report),
+    (batch, i, report) => runBatch(batch, [], shared, i + 1, report, signal),
     (done, total) => onProgress({ phase: 'struts', done, total }),
     (batch, err) => {
       if (sheetSettings.arrangeOnSheet) throw err
@@ -223,7 +229,7 @@ export async function runDxfExport(
   const vertexResults = await runExportBatches(
     vertexBatches,
     vertices.length,
-    (batch, i, report) => runBatch([], batch, shared, strutBatches.length + i + 1, report),
+    (batch, i, report) => runBatch([], batch, shared, strutBatches.length + i + 1, report, signal),
     (done, total) => onProgress({ phase: 'flanges', done, total }),
     (batch, err) => {
       if (sheetSettings.arrangeOnSheet) throw err
@@ -243,10 +249,12 @@ export async function runDxfExport(
   }
 
   if (isCancelled()) return null
-  onProgress({ phase: 'writing', done: 0, total: parts.length })
+  const bodies = pairBracePoints(bracePoints)
+  onProgress({ phase: 'braces', done: 0, total: bodies.length })
 
   // A brace's body is the flat quad through its four plate end points - no WASM needed for that.
-  for (const body of pairBracePoints(bracePoints)) {
+  for (const [index, body] of bodies.entries()) {
+    if (isCancelled()) return null
     const frame = braceQuadFrame(body.a, body.b)
     if (!frame) {
       if (sheetSettings.arrangeOnSheet) throw new Error(`Cannot construct brace ${names.braces[body.braceId]}.`)
@@ -285,6 +293,7 @@ export async function runDxfExport(
       labelAngleDeg: (Math.atan2(unit[1], unit[0]) * 180) / Math.PI,
       helpers,
     })
+    onProgress({ phase: 'braces', done: index + 1, total: bodies.length })
   }
 
   const layoutStart = performance.now()
@@ -294,12 +303,13 @@ export async function runDxfExport(
     ? await runDxfNesting({ parts, options, settings: sheetSettings }, (done, total) => onProgress({ phase: 'packing', done, total }), isCancelled)
     : { parts: layoutDxfParts(parts, options), sheets: [] }
   if (!layout || isCancelled()) return null
-  onProgress({ phase: 'writing', done: parts.length, total: parts.length })
+  onProgress({ phase: 'writing', done: 0, total: 1 })
   const writeStart = performance.now()
   const blob = new Blob([writeDxf(layout.parts, layout.sheets)], { type: 'application/dxf' })
   if (profiling) publishExportProfile('dxf', startedAt, batchProfiles, {
     layoutDxfParts: writeStart - layoutStart,
     writeDxf: performance.now() - writeStart,
   })
-  return blob
+  onProgress({ phase: 'writing', done: 1, total: 1 })
+  return isCancelled() ? null : blob
 }

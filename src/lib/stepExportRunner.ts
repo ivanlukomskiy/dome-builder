@@ -46,6 +46,7 @@ function runBatch(
   shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'>,
   requestId: number,
   onProgress: (done: number) => void,
+  signal?: AbortSignal,
 ): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
     const createdAt = performance.now()
@@ -55,9 +56,13 @@ function runBatch(
     })
 
     const settle = (fn: () => void) => {
+      signal?.removeEventListener('abort', abort)
       worker.terminate()
       fn()
     }
+    const abort = () => settle(() => reject(new DOMException('Export cancelled', 'AbortError')))
+    if (signal?.aborted) { abort(); return }
+    signal?.addEventListener('abort', abort, { once: true })
 
     worker.onmessage = (event: MessageEvent<StepExportWorkerMessage>) => {
       const msg = event.data
@@ -95,6 +100,7 @@ function runAssembly(
   shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies' | 'mode'>,
   requestId: number,
   onProgress: (progress: StepExportProgress) => void,
+  signal?: AbortSignal,
 ): Promise<{ blob: Blob | null; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
     const createdAt = performance.now()
@@ -104,9 +110,13 @@ function runAssembly(
     })
 
     const settle = (fn: () => void) => {
+      signal?.removeEventListener('abort', abort)
       worker.terminate()
       fn()
     }
+    const abort = () => settle(() => reject(new DOMException('Export cancelled', 'AbortError')))
+    if (signal?.aborted) { abort(); return }
+    signal?.addEventListener('abort', abort, { once: true })
 
     worker.onmessage = (event: MessageEvent<StepExportWorkerMessage>) => {
       const msg = event.data
@@ -145,13 +155,13 @@ function runAssembly(
 }
 
 // Builds a STEP file for every visible strut and flange plate (see stepExportWorker.ts) and zips
-// them into a single archive, reporting progress as it goes. `isCancelled` is polled between
-// batches so a caller can abandon an in-flight export (e.g. the user navigated away) without
-// starting more work. Already-running batches finish in their own workers and are discarded.
+// them into a single archive, reporting progress as it goes. Cancellation stops active workers
+// when a signal is provided and prevents subsequent batches from starting.
 export async function runStepExport(
   params: RunStepExportParams,
   onProgress: (progress: StepExportProgress | null) => void,
   isCancelled: () => boolean,
+  signal?: AbortSignal,
 ): Promise<Blob | null> {
   const startedAt = performance.now()
   const profiling = exportProfilingEnabled()
@@ -180,7 +190,7 @@ export async function runStepExport(
   const strutResults = await runExportBatches(
     strutBatches,
     strutEntries.length,
-    (batch, i, report) => runBatch(batch, [], [], shared, i + 1, report),
+    (batch, i, report) => runBatch(batch, [], [], shared, i + 1, report, signal),
     (done, total) => onProgress({ phase: 'struts', done, total }),
     (batch, err) => console.error(`Failed to export struts ${batch.map((job) => job.index).join(', ')}`, err),
     isCancelled,
@@ -201,7 +211,7 @@ export async function runStepExport(
   const vertexResults = await runExportBatches(
     vertexBatches,
     vertices.length,
-    (batch, i, report) => runBatch([], batch, [], shared, strutBatches.length + i + 1, report),
+    (batch, i, report) => runBatch([], batch, [], shared, strutBatches.length + i + 1, report, signal),
     (done, total) => onProgress({ phase: 'flanges', done, total }),
     (batch, err) => console.error(`Failed to export flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}`, err),
     isCancelled,
@@ -222,7 +232,7 @@ export async function runStepExport(
   const braceResults = await runExportBatches(
     braceBatches,
     braceBodies.length,
-    (batch, i, report) => runBatch([], [], batch, shared, strutBatches.length + vertexBatches.length + i + 1, report),
+    (batch, i, report) => runBatch([], [], batch, shared, strutBatches.length + vertexBatches.length + i + 1, report, signal),
     (done, total) => onProgress({ phase: 'braces', done, total }),
     (batch, err) => console.error(`Failed to export braces ${batch.map((b) => b.braceId).join(', ')}`, err),
     isCancelled,
@@ -240,11 +250,13 @@ export async function runStepExport(
 
   if (isCancelled()) return null
 
-  onProgress({ phase: 'zipping', done: 0, total: allPieces.length })
+  onProgress({ phase: 'zipping', done: 0, total: 100 })
   const zipStart = performance.now()
   const zip = new JSZip()
   for (const piece of allPieces) zip.file(piece.name, piece.blob)
-  const zipBlob = await zip.generateAsync({ type: 'blob' })
+  const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+    if (!isCancelled()) onProgress({ phase: 'zipping', done: Math.round(metadata.percent), total: 100 })
+  })
 
   if (profiling && !isCancelled()) publishExportProfile('stepArchive', startedAt, batchProfiles, { zip: performance.now() - zipStart })
   return isCancelled() ? null : zipBlob
@@ -257,6 +269,7 @@ export async function runStepAssemblyExport(
   params: RunStepExportParams,
   onProgress: (progress: StepExportProgress | null) => void,
   isCancelled: () => boolean,
+  signal?: AbortSignal,
 ): Promise<Blob | null> {
   const startedAt = performance.now()
   const profiling = exportProfilingEnabled()
@@ -277,7 +290,7 @@ export async function runStepAssemblyExport(
 
   if (isCancelled()) return null
 
-  const result = await runAssembly(strutEntries, vertices, shared, 1, onProgress)
+  const result = await runAssembly(strutEntries, vertices, shared, 1, onProgress, signal)
   if (profiling && !isCancelled() && result.profile) publishExportProfile('stepAssembly', startedAt, [{
     phase: 'assembly', items: strutEntries.length + vertices.length,
     createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,

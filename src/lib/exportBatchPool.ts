@@ -38,6 +38,7 @@ export async function runExportBatches<Job, Result>(
         results[index] = await runBatch(batch, index, report)
         report(batch.length)
       } catch (error) {
+        if (isCancelled()) return
         try { onError(batch, error) }
         catch (fatal) { failed = true; fatalError = fatal; return }
         report(batch.length)

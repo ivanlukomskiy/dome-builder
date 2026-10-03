@@ -39,6 +39,7 @@ import {
   type BracePlateParams,
 } from './lib/braces'
 import { Sidebar } from './components/Sidebar'
+import { ExportProgressModal, type ExportKind, type ExportSession } from './components/ExportProgressModal'
 import { Viewport } from './components/Viewport'
 import type { DomeConfig, DomeState } from './lib/config'
 import {
@@ -965,8 +966,33 @@ function App() {
   // miter offsets the live Preview solids are built from (see DomeMesh's preview effect), plus
   // - per vertex - which adjacent edges have a face between them and which don't, and the
   // tangent plane those edges were projected onto to work that out.
-  const [stepExportProgress, setStepExportProgress] = useState<StepExportProgress | null>(null)
-  const [stepAssemblyExportProgress, setStepAssemblyExportProgress] = useState<StepExportProgress | null>(null)
+  const [exportSession, setExportSession] = useState<ExportSession | null>(null)
+  const exportController = useRef<AbortController | null>(null)
+  const beginExport = (kind: ExportKind): AbortController | null => {
+    if (exportController.current) return null
+    const controller = new AbortController()
+    exportController.current = controller
+    setExportSession({ kind, status: 'running', progress: { phase: 'struts', done: 0, total: 0 }, arrangeOnSheet: dxfSheetSettings.arrangeOnSheet })
+    return controller
+  }
+  const updateExportProgress = (controller: AbortController, progress: StepExportProgress | DxfExportProgress | null) => {
+    if (!progress || controller.signal.aborted || exportController.current !== controller) return
+    setExportSession((session) => session?.status === 'running' ? { ...session, progress } : session)
+  }
+  const finishExport = (controller: AbortController, error?: unknown) => {
+    if (controller.signal.aborted) return
+    exportController.current = null
+    setExportSession((session) => session ? {
+      ...session,
+      status: error === undefined ? 'completed' : 'failed',
+      error: error instanceof Error ? error.message : error === undefined ? undefined : String(error),
+    } : null)
+  }
+  const cancelExport = () => {
+    exportController.current?.abort()
+    exportController.current = null
+    setExportSession(null)
+  }
   // Everything the STEP archive/assembly and DXF exports build their parts from - the applied
   // Preview params.
   const buildExportParams = (): RunStepExportParams => (
@@ -1004,56 +1030,54 @@ function App() {
   )
 
   const handleDownloadSteps = async () => {
-    if (stepExportProgress || stepAssemblyExportProgress) return
-    setStepExportProgress({ phase: 'struts', done: 0, total: 0 })
+    const controller = beginExport('step-parts')
+    if (!controller) return
     try {
       const zipBlob = await runStepExport(
         buildExportParams(),
-        setStepExportProgress,
-        () => false,
+        (progress) => updateExportProgress(controller, progress),
+        () => controller.signal.aborted,
+        controller.signal,
       )
-      if (zipBlob) downloadBlob(zipBlob, 'dome-parts.zip')
+      if (zipBlob && !controller.signal.aborted) {
+        downloadBlob(zipBlob, 'dome-parts.zip')
+        finishExport(controller)
+      }
     } catch (err) {
-      console.error('Failed to export STEP archive', err)
-    } finally {
-      setStepExportProgress(null)
+      if (!controller.signal.aborted) finishExport(controller, err)
     }
   }
 
   const handleDownloadStepAssembly = async () => {
-    if (stepExportProgress || stepAssemblyExportProgress) return
-    setStepAssemblyExportProgress({ phase: 'struts', done: 0, total: 0 })
+    const controller = beginExport('step-assembly')
+    if (!controller) return
     try {
       const stepBlob = await runStepAssemblyExport(
         buildExportParams(),
-        setStepAssemblyExportProgress,
-        () => false,
+        (progress) => updateExportProgress(controller, progress),
+        () => controller.signal.aborted,
+        controller.signal,
       )
-      if (stepBlob) downloadBlob(stepBlob, 'dome-assembly.step')
+      if (stepBlob && !controller.signal.aborted) {
+        downloadBlob(stepBlob, 'dome-assembly.step')
+        finishExport(controller)
+      }
     } catch (err) {
-      console.error('Failed to export STEP assembly', err)
-    } finally {
-      setStepAssemblyExportProgress(null)
+      if (!controller.signal.aborted) finishExport(controller, err)
     }
   }
 
-  const [dxfExportProgress, setDxfExportProgress] = useState<DxfExportProgress | null>(null)
-  const [dxfExportError, setDxfExportError] = useState<string | null>(null)
-  const dxfCancelled = useRef(false)
-
   const handleDownloadDxf = async () => {
-    if (dxfExportProgress) return
-    dxfCancelled.current = false
-    setDxfExportError(null)
-    setDxfExportProgress({ phase: 'struts', done: 0, total: 0 })
+    const controller = beginExport('dxf')
+    if (!controller) return
     try {
-      const blob = await runDxfExport(buildExportParams(), setDxfExportProgress, () => dxfCancelled.current, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings)
-      if (blob) downloadBlob(blob, 'dome-parts.dxf')
+      const blob = await runDxfExport(buildExportParams(), (progress) => updateExportProgress(controller, progress), () => controller.signal.aborted, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings, controller.signal)
+      if (blob && !controller.signal.aborted) {
+        downloadBlob(blob, 'dome-parts.dxf')
+        finishExport(controller)
+      }
     } catch (err) {
-      console.error('Failed to export DXF', err)
-      setDxfExportError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setDxfExportProgress(null)
+      if (!controller.signal.aborted) finishExport(controller, err)
     }
   }
 
@@ -1067,13 +1091,9 @@ function App() {
         onDownloadSteps={handleDownloadSteps}
         onDownloadStepAssembly={handleDownloadStepAssembly}
         onDownloadDxf={handleDownloadDxf}
-        dxfExportProgress={dxfExportProgress}
-        dxfExportError={dxfExportError}
+        exportBusy={exportSession?.status === 'running'}
         dxfSheetSettings={dxfSheetSettings}
         onDxfSheetSettingsChange={setDxfSheetSettings}
-        onCancelDxfExport={() => { dxfCancelled.current = true }}
-        stepExportProgress={stepExportProgress}
-        stepAssemblyExportProgress={stepAssemblyExportProgress}
         partIdLabelSize={partIdLabelSize}
         onPartIdLabelSizeChange={setPartIdLabelSize}
         connectedPartIdLabelSize={connectedPartIdLabelSize}
@@ -1185,6 +1205,7 @@ function App() {
         onUndo={handleUndo}
         onRedo={handleRedo}
       />
+      {exportSession && <ExportProgressModal session={exportSession} onCancel={cancelExport} onClose={() => setExportSession(null)} />}
       <Viewport
         mode={mode}
         editTarget={editTarget}
