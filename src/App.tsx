@@ -194,20 +194,25 @@ function App() {
   const handleShapeChange = (s: ShapeType) => setNewShapeParams(s, axis, subdivisions, newDiameter)
   const handleAxisChange = (a: AxisType) => setNewShapeParams(shape, a, subdivisions, newDiameter)
   const handleSubdivisionsChange = (s: number) => setNewShapeParams(shape, axis, s, newDiameter)
-  // In "New" the diameter is part of the shape recipe (regenerates the preview and marks it dirty
-  // to commit). Once a dome exists, changing it resizes the committed dome (an undoable edit, see
-  // scaleSceneDiameter) - defined below, next to the scene it edits.
+  // In "New" the diameter is part of the shape recipe. In Preview, keep a draft until Redraw;
+  // editing it in Edit mode still resizes the committed dome as an undoable change.
 
   // The committed geometry actually being edited/previewed - vertices, edges, and faces, plain
   // and concrete, with bounded undo/redo over every structural edit (delete/add). Only reset
   // (wiping undo history) when a "New" tab pick is committed or a config is loaded.
   const sceneHistory = useHistory<SceneData>(initial?.sceneData ?? DEFAULT_SCENE_DATA, 50)
   const sceneData = sceneHistory.value
+  const [previewDiameterDraft, setPreviewDiameterDraft] = useState<number | null>(null)
+  const previewDiameterDirty = previewDiameterDraft !== null && previewDiameterDraft !== sceneData.diameter
 
   const handleDiameterChange = (d: number) => {
     if (!(d > 0)) return
     if (mode === 'new') setNewShapeParams(shape, axis, subdivisions, d)
-    else if (d !== sceneData.diameter) sceneHistory.commit(scaleSceneDiameter(sceneData, d))
+    else if (mode === 'preview') setPreviewDiameterDraft(d === sceneData.diameter ? null : d)
+    else {
+      setPreviewDiameterDraft(null)
+      if (d !== sceneData.diameter) sceneHistory.commit(scaleSceneDiameter(sceneData, d))
+    }
   }
 
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(
@@ -363,7 +368,12 @@ function App() {
     setBracePlateDraft((prev) => ({ ...prev, [key]: sanitizeBraceParam(key, value) }))
   const handleApplyPreview = () => {
     setAppliedPreviewParams(draftPreviewParams)
-    if (bracePlateDirty) sceneHistory.commit(applyBracePlateParams(sceneData, bracePlateDraft))
+    let nextSceneData = previewDiameterDirty
+      ? scaleSceneDiameter(sceneData, previewDiameterDraft!)
+      : sceneData
+    if (bracePlateDirty) nextSceneData = applyBracePlateParams(nextSceneData, bracePlateDraft)
+    if (nextSceneData !== sceneData) sceneHistory.commit(nextSceneData)
+    setPreviewDiameterDraft(null)
   }
 
   // xyz positions of every vertex: its polar coordinates plus its polar transform diff.
@@ -641,8 +651,14 @@ function App() {
     setSelectedVertexIndices(new Set())
   }
 
-  const handleUndo = () => sceneHistory.undo()
-  const handleRedo = () => sceneHistory.redo()
+  const handleUndo = () => {
+    setPreviewDiameterDraft(null)
+    sceneHistory.undo()
+  }
+  const handleRedo = () => {
+    setPreviewDiameterDraft(null)
+    sceneHistory.redo()
+  }
 
   const handleDeselectAll = () => {
     setSelectedVertexIndices(new Set())
@@ -737,6 +753,7 @@ function App() {
   // since they were tuned for a dome that no longer exists.
   const handleCreateNew = () => {
     sceneHistory.reset(pruneToLayerCount(previewData, layerCount))
+    setPreviewDiameterDraft(null)
     setVertexTransforms(new Map())
     setEdgeThickness(new Map())
     setVertexCornerLength(new Map())
@@ -807,6 +824,7 @@ function App() {
     setDxfSheetSettings(state.dxfSheetSettings)
     setConnectedPartIdLabelSize(state.connectedPartIdLabelSize)
     sceneHistory.reset(state.sceneData)
+    setPreviewDiameterDraft(null)
     setSelectionMode(state.selectionMode)
     setExtrudeDistance(state.extrudeDistance)
     setThickness(state.thickness)
@@ -1071,7 +1089,7 @@ function App() {
         onAxisChange={handleAxisChange}
         subdivisions={subdivisions}
         onSubdivisionsChange={handleSubdivisionsChange}
-        diameter={isNew ? newDiameter : sceneData.diameter}
+        diameter={isNew ? newDiameter : mode === 'preview' ? previewDiameterDraft ?? sceneData.diameter : sceneData.diameter}
         onDiameterChange={handleDiameterChange}
         layerCount={layerCount}
         onLayerCountChange={setLayerCount}
@@ -1155,7 +1173,7 @@ function App() {
         onMinSideChange={setMinSide}
         flangeMillingDiameter={flangeMillingDiameter}
         onFlangeMillingDiameterChange={setFlangeMillingDiameter}
-        previewParamsDirty={previewParamsDirty || bracePlateDirty}
+        previewParamsDirty={previewParamsDirty || bracePlateDirty || previewDiameterDirty}
         bracePlateDraft={bracePlateDraft}
         onBracePlateParamChange={handleBracePlateParamChange}
         onApplyPreview={handleApplyPreview}

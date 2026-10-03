@@ -284,6 +284,13 @@ export function NumberField({ value, onCommit, step, min, placeholder, clamp }: 
   )
 }
 
+function FieldLabel({ text }: { text: string }) {
+  const match = /^(.*?)\s*\((?:(.+),\s*)?(mm|мм|%|Δ°)\)$/.exec(text)
+  if (!match) return text
+  const [, name, notation, unit] = match
+  return <>{name}{notation ? ` (${notation})` : ''}, <em>{unit}</em></>
+}
+
 function SidebarSection({ id, title, children, defaultOpen = true }: { id: string; title: string; children: ReactNode; defaultOpen?: boolean }) {
   const storageKey = `dome-builder.sidebar.${id}`
   const [open, setOpen] = useState(() => {
@@ -758,7 +765,7 @@ export function Sidebar({
           <section className="control-group">
             <h2>{t('Edge Thickness')}</h2>
             <div className="transform-field">
-              <label>{t('Thickness override (mm)')} <Help text={t('0 uses the global default thickness set in Preview.')} /></label>
+              <label><FieldLabel text={t('Thickness override (mm)')} /> <Help text={t('0 uses the global default thickness set in Preview.')} /></label>
               <NumberField
                 value={edgeThicknessValue}
                 step={5}
@@ -824,7 +831,7 @@ export function Sidebar({
             <h2>{t('Brace Properties')}</h2>
             {BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
               <div className="transform-field" key={key}>
-                <label>{t(label)}</label>
+                <label><FieldLabel text={t(label)} /></label>
                 <NumberField
                   value={braceParamValues[key]}
                   step={step}
@@ -845,7 +852,7 @@ export function Sidebar({
           <section className="control-group">
             <h2>{t('Corner Length')}</h2>
             <div className="transform-field">
-              <label>{t('Corner length override (mm)')} <Help text={t(
+              <label><FieldLabel text={t('Corner length override (mm)')} /> <Help text={t(
                 'Applies to every strut end and flange at the selected vertices. 0 uses the global corner length set in Edge Curvature.',
               )} /></label>
               <NumberField
@@ -892,7 +899,7 @@ export function Sidebar({
               const shared = sharedFlangeOverride(selectedVertexIndices, vertexFlangeParams, key)
               return (
                 <div className="transform-field" key={key}>
-                  <label>{t(label)}</label>
+                  <label><FieldLabel text={t(label)} /></label>
                   <span className="field-with-reset">
                     <NumberField
                       value={shared.value}
@@ -929,7 +936,7 @@ export function Sidebar({
           <section className="control-group">
             <h2>{t('Transform')}</h2>
             <div className="transform-field">
-              <label>{t('Radius (Δr, mm)')}</label>
+              <label><FieldLabel text={t('Radius (Δr, mm)')} /></label>
               <NumberField
                 value={rValue}
                 step={10}
@@ -938,7 +945,7 @@ export function Sidebar({
               />
             </div>
             <div className="transform-field">
-              <label>{t('Azimuth (Δ°)')}</label>
+              <label><FieldLabel text={t('Azimuth (Δ°)')} /></label>
               <NumberField
                 value={azimuthValue === null ? null : Math.round(((azimuthValue * 180) / Math.PI) * 100) / 100}
                 step={1}
@@ -947,7 +954,7 @@ export function Sidebar({
               />
             </div>
             <div className="transform-field">
-              <label>{t('Elevation (Δ°)')}</label>
+              <label><FieldLabel text={t('Elevation (Δ°)')} /></label>
               <NumberField
                 value={elevationValue === null ? null : Math.round(((elevationValue * 180) / Math.PI) * 100) / 100}
                 step={1}
@@ -988,16 +995,16 @@ export function Sidebar({
           <section className="control-group">
 
             <div className="transform-field">
-              <label>{t('Sphere diameter (mm)')}</label>
+              <label><FieldLabel text={t('Sphere diameter (mm)')} /></label>
               <NumberField value={diameter} step={100} min={1} onCommit={onDiameterChange} />
             </div>
             <Help text={t('Resizes the whole dome around its center, keeping its shape.')} />
             <div className="transform-field">
-              <label>{t('Tolerance longitudinal (mm)')} <Help text={t('Tolerance applies wherever a tab fits into a hole. Positive values add clearance for a looser fit; negative values reduce clearance for a tighter fit.')} /></label>
+              <label><FieldLabel text={t('Tolerance longitudinal (mm)')} /> <Help text={t('Tolerance applies wherever a tab fits into a hole. Positive values add clearance for a looser fit; negative values reduce clearance for a tighter fit.')} /></label>
               <NumberField value={toleranceLongitudinal} step={1} onCommit={onToleranceLongitudinalChange} />
             </div>
             <div className="transform-field">
-              <label>{t('Tolerance transverse (mm)')} <Help text={t('Tolerance applies wherever a tab fits into a hole. Positive values add clearance for a looser fit; negative values reduce clearance for a tighter fit.')} /></label>
+              <label><FieldLabel text={t('Tolerance transverse (mm)')} /> <Help text={t('Tolerance applies wherever a tab fits into a hole. Positive values add clearance for a looser fit; negative values reduce clearance for a tighter fit.')} /></label>
               <NumberField value={toleranceTransverse} step={1} onCommit={onToleranceTransverseChange} />
             </div>
           </section>
@@ -1007,19 +1014,19 @@ export function Sidebar({
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 <div className="transform-field">
-                  <label>{t('Corner length (D, mm)')} <Help text={t(
+                  <label><FieldLabel text={t('Corner length (D, mm)')} /> <Help text={t(
                     "Corner length (D): straight lead-in at each end, tangent to the sphere and angled toward the other end - trimmed back from the vertex by that hub's own minimum offset (shown when a single vertex is selected in Edit mode), up to this budget. Meeting lead-ins form a sharp point; otherwise the gap between them is bridged by an arc centered on the sphere center.",
                   )} /></label>
                   <NumberField value={cornerLength} step={5} min={0} onCommit={onCornerLengthChange} />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Offset modifier (mm)')} <Help text={t(
+                  <label><FieldLabel text={t('Offset modifier (mm)')} /> <Help text={t(
                     "Offset modifier: added to every edge end's own minimum offset before it's trimmed back from the vertex (still capped by the corner length budget). Positive pulls every strut end further in; negative pushes it back out, toward the vertex.",
                   )} /></label>
                   <NumberField value={offsetModifier} step={5} onCommit={onOffsetModifierChange} />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Width (mm)')} <Help text={t(
+                  <label><FieldLabel text={t('Width (mm)')} /> <Help text={t(
                     "Width: extrudes each arc symmetrically toward/away from the sphere's center.",
                   )} /></label>
                   <NumberField value={extrudeDistance} step={5} min={0} onCommit={onExtrudeDistanceChange} />
@@ -1033,7 +1040,7 @@ export function Sidebar({
                   {t('Round bridge')}
                 </label>
                 <div className="transform-field">
-                  <label>{t('Thickness (mm)')} <Help text={t(
+                  <label><FieldLabel text={t('Thickness (mm)')} /> <Help text={t(
                     'Thickness: extrudes that ribbon symmetrically along its own surface normal, turning it into a solid beam.',
                   )} /></label>
                   <NumberField value={thickness} step={5} min={0} onCommit={onThicknessChange} />
@@ -1043,7 +1050,7 @@ export function Sidebar({
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 <div className="transform-field">
-                  <label>{t('End groove length (%)')} <Help text={t(
+                  <label><FieldLabel text={t('End groove length (%)')} /> <Help text={t(
                     "Each strut end forms a shouldered tenon: the end and mid groove percentages split the workable length (past the offset) into the shoulder, tenon, and far shoulder, cut back by groove depth. Chamfer length bevels the tenon's top corners; milling diameter sets a relief circle tucked into each of its concave base corners, clearing room for a square mating part to seat flush against a round cutting bit.",
                   )} /></label>
                   <NumberField
@@ -1054,7 +1061,7 @@ export function Sidebar({
                   />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Mid groove length (%)')}</label>
+                  <label><FieldLabel text={t('Mid groove length (%)')} /></label>
                   <NumberField
                     value={midGrooveLengthPercent}
                     step={5}
@@ -1063,15 +1070,15 @@ export function Sidebar({
                   />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Groove depth (mm)')}</label>
+                  <label><FieldLabel text={t('Groove depth (mm)')} /></label>
                   <NumberField value={grooveDepth} step={1} min={0} onCommit={onGrooveDepthChange} />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Milling diameter (mm)')}</label>
+                  <label><FieldLabel text={t('Milling diameter (mm)')} /></label>
                   <NumberField value={millingDiameter} step={1} min={0} onCommit={onMillingDiameterChange} />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Chamfer length (mm)')}</label>
+                  <label><FieldLabel text={t('Chamfer length (mm)')} /></label>
                   <NumberField value={chamferLength} step={1} min={0} onCommit={onChamferLengthChange} />
                 </div>
               </section>
@@ -1081,7 +1088,7 @@ export function Sidebar({
             {(mode === 'preview' || mode === 'edit') && (
               <section className="control-group">
                 <div className="transform-field">
-                  <label>{t('Center hole diameter (mm)')} <Help text={t(
+                  <label><FieldLabel text={t('Center hole diameter (mm)')} /> <Help text={t(
                     "The flat connector plate pair at each hub vertex fills the wedges between struts that have no face of their own. Overshoot and min side set how far the plate reaches past a strut's corner and how narrow it may get; the side and center holes define its bolt pattern.",
                   )} /></label>
                   <NumberField
@@ -1092,7 +1099,7 @@ export function Sidebar({
                   />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Side hole diameter outer (mm)')}</label>
+                  <label><FieldLabel text={t('Side hole diameter outer (mm)')} /></label>
                   <NumberField
                     value={sideHoleDiameterOuter}
                     step={1}
@@ -1101,7 +1108,7 @@ export function Sidebar({
                   />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Side hole diameter inner (mm)')}</label>
+                  <label><FieldLabel text={t('Side hole diameter inner (mm)')} /></label>
                   <NumberField
                     value={sideHoleDiameterInner}
                     step={1}
@@ -1110,7 +1117,7 @@ export function Sidebar({
                   />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Side hole diameter offset (mm)')}</label>
+                  <label><FieldLabel text={t('Side hole diameter offset (mm)')} /></label>
                   <NumberField
                     value={sideHoleDiameterOffset}
                     step={1}
@@ -1119,15 +1126,15 @@ export function Sidebar({
                   />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Overshoot (mm)')}</label>
+                  <label><FieldLabel text={t('Overshoot (mm)')} /></label>
                   <NumberField value={overshoot} step={1} min={0} onCommit={onOvershootChange} />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Min side (mm)')}</label>
+                  <label><FieldLabel text={t('Min side (mm)')} /></label>
                   <NumberField value={minSide} step={1} min={0} onCommit={onMinSideChange} />
                 </div>
                 <div className="transform-field">
-                  <label>{t('Flange milling diameter (mm)')}</label>
+                  <label><FieldLabel text={t('Flange milling diameter (mm)')} /></label>
                   <NumberField
                     value={flangeMillingDiameter}
                     step={1}
@@ -1143,7 +1150,7 @@ export function Sidebar({
               <section className="control-group">
                 {FOOT_PARAM_FIELDS.map(({ key, label }) => (
                   <div className="transform-field" key={key}>
-                    <label>{t(label)}</label>
+                    <label><FieldLabel text={t(label)} /></label>
                     <NumberField
                       value={footParams[key]}
                       step={1}
@@ -1164,7 +1171,7 @@ export function Sidebar({
               <section className="control-group">
                 {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
                   <div className="transform-field" key={key}>
-                    <label>{t(label)}</label>
+                    <label><FieldLabel text={t(label)} /></label>
                     <NumberField
                       value={bracePlateDraft[key]}
                       step={step}
@@ -1185,11 +1192,11 @@ export function Sidebar({
       {mode !== 'new' && <SidebarSection id="export" title={t('Export')}>
         <SidebarSection id="export-dxf" title={t('DXF')} defaultOpen={false}>
           <div className="transform-field">
-            <label>{t('Part ID label size (mm)')}</label>
+            <label><FieldLabel text={t('Part ID label size (mm)')} /></label>
             <NumberField value={partIdLabelSize} step={0.5} min={0.1} onCommit={onPartIdLabelSizeChange} />
           </div>
           <div className="transform-field">
-            <label>{t('Connected part ID labels size (mm)')}</label>
+            <label><FieldLabel text={t('Connected part ID labels size (mm)')} /></label>
             <NumberField value={connectedPartIdLabelSize} step={0.5} min={0.1} onCommit={onConnectedPartIdLabelSizeChange} />
           </div>
           <label className="checkbox-field">
@@ -1204,7 +1211,7 @@ export function Sidebar({
               ['margin', 'Margin (mm)', 0],
               ['spacing', 'Spacing (mm)', 0],
             ] as const).map(([key, label, min]) => <div className="transform-field" key={key}>
-              <label htmlFor={`dxf-sheet-${key}`}>{t(label)}</label>
+              <label htmlFor={`dxf-sheet-${key}`}><FieldLabel text={t(label)} /></label>
               <input id={`dxf-sheet-${key}`} type="number" min={min} step="any" value={Number.isNaN(dxfSheetSettings[key]) ? '' : dxfSheetSettings[key]}
                 onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, [key]: event.target.valueAsNumber })} />
             </div>)}
