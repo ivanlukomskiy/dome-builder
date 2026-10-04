@@ -271,11 +271,16 @@ body,
   display: block;
 }
 
-.viewport-fit {
+.viewport-actions {
   position: absolute;
   top: 16px;
   left: 16px;
   z-index: 1;
+  display: flex;
+  gap: 8px;
+}
+
+.viewport-action {
   padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -284,7 +289,8 @@ body,
   cursor: pointer;
 }
 
-.viewport-fit:hover {
+.viewport-action:hover,
+.viewport-action-primary {
   border-color: var(--accent);
 }
 

@@ -1177,6 +1177,8 @@ function App() {
         minSide={appliedPreviewParams.minSide}
         flangeMillingDiameter={appliedPreviewParams.flangeMillingDiameter}
         partVisibility={partVisibility}
+        previewParamsDirty={previewParamsDirty || bracePlateDirty || previewDiameterDirty}
+        onApplyPreview={handleApplyPreview}
         onVertexClick={handleVertexClick}
         onEdgeClick={handleEdgeClick}
         onFaceClick={handleFaceClick}

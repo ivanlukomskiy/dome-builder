@@ -50,6 +50,8 @@ interface ViewportProps {
   minSide: number
   flangeMillingDiameter: number
   partVisibility: PartVisibility
+  previewParamsDirty: boolean
+  onApplyPreview: () => void
   onVertexClick: (index: number) => void
   onEdgeClick: (index: number) => void
   onFaceClick: (id: number) => void
@@ -92,6 +94,8 @@ export function Viewport({
   minSide,
   flangeMillingDiameter,
   partVisibility,
+  previewParamsDirty,
+  onApplyPreview,
   onVertexClick,
   onEdgeClick,
   onFaceClick,
@@ -184,9 +188,16 @@ export function Viewport({
         selectedVertexHubMetrics={selectedVertexHubMetrics}
         previewProgress={mode === 'preview' ? previewProgress : null}
       />
-      <button className="viewport-fit" type="button" onClick={() => setFitRequest((n) => n + 1)}>
-        {t('Fit model')}
-      </button>
+      <div className="viewport-actions">
+        <button className="viewport-action" type="button" onClick={() => setFitRequest((n) => n + 1)}>
+          {t('Fit model')}
+        </button>
+        {mode === 'preview' && previewParamsDirty && (
+          <button className="viewport-action viewport-action-primary" type="button" onClick={onApplyPreview}>
+            {t('Redraw')}
+          </button>
+        )}
+      </div>
       {previewFailures.length > 0 && (
         <div className="preview-failures" role="region" aria-label={t('Preview errors')}>
           <div className="preview-failures-header">

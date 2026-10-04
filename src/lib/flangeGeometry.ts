@@ -73,7 +73,7 @@ export interface FlangeShapeParams {
   minSide: number;
   // Diameter (mm) of the relief circle tucked into the plate's own inside corners, same idea as
   // strutGeometry.ts's precalculateStrutEnd - clears room for a round end mill at a square
-  // notch.
+  // notch. 0 means no relief circles at all.
   millingDiameter: number;
 }
 
@@ -505,6 +505,7 @@ function computeWedgeCornerMillingCuts(
   params: FlangeShapeParams,
 ): Drawing[] {
   const cuts: Drawing[] = [];
+  if (params.millingDiameter <= 0) return cuts;
 
   if (edge.overshoot !== 0) {
     cuts.push(
@@ -878,6 +879,8 @@ function computeRectangleCornerMillingCuts(
   angleDeg: number,
   millingDiameter: number,
 ): Drawing[] {
+  if (millingDiameter <= 0) return [];
+
   const corners: { point: Point2D; direction: MillingDirection }[] = [
     { point: [x0, y1], direction: "bottom-right" },
     { point: [x1, y1], direction: "bottom-left" },
