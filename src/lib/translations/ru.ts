@@ -6,6 +6,11 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  "Add labels": "Добавить подписи",
+  "Depth (mm)": "Глубина (мм)",
+  "Engraves bold part and connection labels. Depth is measured in exported millimeters.": "Гравирует жирные подписи деталей и соединений. Глубина указана в миллиметрах экспортируемой модели.",
+  "Parts lie flat with their bottom at Z = 0 and labels facing up.": "Детали лежат плоско основанием на Z = 0 и подписями вверх.",
+
   "Editor": "Редактор",
   "Mode": "Режим",
   "Parts visibility": "Видимость деталей",

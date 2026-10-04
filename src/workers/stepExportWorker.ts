@@ -1,4 +1,8 @@
 /// <reference lib="webworker" />
+import { buildFlatStepPart, ensureEngravingFont } from '../lib/stepPartSolid'
+import { strutPartLabels, flangePartLabels, bracePartLabels, angleDegOf, pointTuple, type PartLabels } from '../lib/partLabels'
+import { bracePlateNameKey, type PartNameMaps } from '../lib/partNames'
+import type { DxfLabelSettings } from '../lib/dxfLabelSettings'
 import * as THREE from 'three'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
@@ -19,6 +23,7 @@ import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/expo
 declare const self: DedicatedWorkerGlobalScope
 
 export interface StepExportRequest {
+  engraving?: DxfLabelSettings & { depth: number; names: PartNameMaps }
   requestId: number
   profile?: boolean
   mode?: 'archive' | 'assembly'
@@ -76,18 +81,26 @@ async function buildStepExports(
   // Each strut's brace plate end points in 3D, for the caller to pair up into brace bodies.
   const bracePoints: BracePoints[] = []
   const mode = req.mode ?? 'archive'
+  const engraving = mode === 'archive' ? req.engraving : undefined
+  const labelContext = engraving ? { ...req, ...engraving } : undefined
+  if (engraving) await ensureEngravingFont()
 
-  const addStepShape = (name: string, drawing: Drawing, plane: StrutPlane, thickness: number) => {
-    const solid = timed('solidFromDrawing', () => buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale))
+  const addStepShape = (name: string, drawing: Drawing, plane: StrutPlane, thickness: number, labels?: PartLabels) => {
+    const solid = timed('solidFromDrawing', () => mode === 'assembly'
+      ? buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale)
+      : buildFlatStepPart(drawing, thickness, req.scale, engraving && labels ? {
+        labels, depth: engraving.depth, partIdLabelSize: engraving.partIdLabelSize,
+      } : undefined))
     if (!solid) return
     if (mode === 'assembly') {
       assemblyShapes.push({ name, shape: solid })
       return
     }
 
-    const blob = timed('partStepWrite', () => solid.blobSTEP())
-    solid.delete()
-    if (blob) pieces.push({ name, blob })
+    try {
+      const blob = timed('partStepWrite', () => solid.blobSTEP())
+      if (blob) pieces.push({ name, blob })
+    } finally { solid.delete() }
   }
 
   req.strutJobs.forEach((job, i) => {
@@ -121,8 +134,9 @@ async function buildStepExports(
 
     if (boundary.main) {
       try {
-        addStepShape(`strut-${job.index}.step`, boundary.main, plane, job.beamThickness)
+        addStepShape(`strut-${job.index}.step`, boundary.main, plane, job.beamThickness, labelContext ? strutPartLabels(labelContext, job, boundary) : undefined)
       } catch (err) {
+        if (mode === 'archive') throw err
         console.error(`Failed to export strut solid for edge ${job.index}`, err)
       }
     }
@@ -145,8 +159,13 @@ async function buildStepExports(
           plate,
           bracePlatePlane(plane, job.beamThickness, brace),
           brace.params.plateThickness,
+          engraving ? {
+            name: engraving.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)],
+            labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
+          } : undefined,
         )
       } catch (err) {
+        if (mode === 'archive') throw err
         console.error(`Failed to export brace plate ${brace.braceId} for edge ${job.index}`, err)
       }
     }
@@ -186,9 +205,10 @@ async function buildStepExports(
           normal,
           xDir,
         }
-        addStepShape(`flange-${vertex.vertexId}-${side}.step`, boundary.main, plane, req.grooveDepth)
+        addStepShape(`flange-${vertex.vertexId}-${side}.step`, boundary.main, plane, req.grooveDepth, labelContext ? flangePartLabels(labelContext, vertex, side, boundary) : undefined)
       }
     } catch (err) {
+      if (mode === 'archive') throw err
       console.error(`Failed to export flange solid for vertex ${vertex.vertexId}`, err)
     }
   })
@@ -210,8 +230,9 @@ async function buildStepExports(
       const [first, ...rest] = braceQuadPoints2D(frame)
       let outline = draw(first)
       for (const pt of rest) outline = outline.lineTo(pt)
-      addStepShape(`brace-${body.braceId}.step`, outline.close(), frame.plane, body.thickness)
+      addStepShape(`brace-${body.braceId}.step`, outline.close(), frame.plane, body.thickness, engraving ? bracePartLabels(body, engraving.names, engraving) : undefined)
     } catch (err) {
+      if (mode === 'archive') throw err
       console.error(`Failed to export brace ${body.braceId}`, err)
     }
   })

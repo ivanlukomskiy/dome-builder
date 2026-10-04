@@ -1,3 +1,5 @@
+import { DEFAULT_STEP_EXPORT_SETTINGS, validateStepLabelDepth, type StepExportSettings } from './stepExportSettings'
+import { buildExportPartNames } from './exportPartNames'
 import JSZip from 'jszip'
 import type { FlangeShapeParams } from './flangeGeometry'
 import { computePreviewBuildInputs, type PreviewBuildInputParams, type StrutGeometryEntry } from './previewBuildInputs'
@@ -30,6 +32,7 @@ export interface StepExportProgress {
 }
 
 export interface RunStepExportParams extends PreviewBuildInputParams {
+  stepExportSettings?: StepExportSettings
   flangeParams: FlangeShapeParams
   // Uniform scale factor (1 = no change) applied to every exported solid - see
   // buildStrutStepFromDrawing in replicadCad.ts.
@@ -167,8 +170,16 @@ export async function runStepExport(
   const profiling = exportProfilingEnabled()
   const batchProfiles: ExportBatchProfile[] = []
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
+  const settings = params.stepExportSettings ?? DEFAULT_STEP_EXPORT_SETTINGS
+  if (settings.addLabels) validateStepLabelDepth(settings.depth)
 
   const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'> = {
+    engraving: settings.addLabels ? {
+      depth: settings.depth,
+      partIdLabelSize: settings.partIdLabelSize,
+      connectedPartIdLabelSize: settings.connectedPartIdLabelSize,
+      names: buildExportPartNames(params, strutEntries, vertices, halfWidth),
+    } : undefined,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
     midGrooveLengthPercent: params.midGrooveLengthPercent,
@@ -192,7 +203,7 @@ export async function runStepExport(
     strutEntries.length,
     (batch, i, report) => runBatch(batch, [], [], shared, i + 1, report, signal),
     (done, total) => onProgress({ phase: 'struts', done, total }),
-    (batch, err) => console.error(`Failed to export struts ${batch.map((job) => job.index).join(', ')}`, err),
+    (batch, err) => { throw new Error(`Failed to export struts ${batch.map((job) => job.index).join(', ')}: ${err instanceof Error ? err.message : String(err)}`) },
     isCancelled,
   )
   if (!strutResults) return null
@@ -213,7 +224,7 @@ export async function runStepExport(
     vertices.length,
     (batch, i, report) => runBatch([], batch, [], shared, strutBatches.length + i + 1, report, signal),
     (done, total) => onProgress({ phase: 'flanges', done, total }),
-    (batch, err) => console.error(`Failed to export flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}`, err),
+    (batch, err) => { throw new Error(`Failed to export flanges for vertices ${batch.map((v) => v.vertexId).join(', ')}: ${err instanceof Error ? err.message : String(err)}`) },
     isCancelled,
   )
   if (!vertexResults) return null
@@ -234,7 +245,7 @@ export async function runStepExport(
     braceBodies.length,
     (batch, i, report) => runBatch([], [], batch, shared, strutBatches.length + vertexBatches.length + i + 1, report, signal),
     (done, total) => onProgress({ phase: 'braces', done, total }),
-    (batch, err) => console.error(`Failed to export braces ${batch.map((b) => b.braceId).join(', ')}`, err),
+    (batch, err) => { throw new Error(`Failed to export braces ${batch.map((b) => b.braceId).join(', ')}: ${err instanceof Error ? err.message : String(err)}`) },
     isCancelled,
   )
   if (!braceResults) return null

@@ -2,11 +2,10 @@ import { DEFAULT_DXF_LABEL_SETTINGS, type DxfLabelSettings } from './dxfLabelSet
 import { computePreviewBuildInputs, type StrutGeometryEntry } from './previewBuildInputs'
 import type { VertexEdgesInfo } from './edgesInfo'
 import type { RunStepExportParams } from './stepExportRunner'
-import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, projectToFrame2D, type BracePoints } from './braceSolid'
-import { layoutDxfParts, orientDxfStrut, writeDxf, type DxfHelperText, type DxfPart } from './dxf'
-import type { Vec3 } from './braceSolid'
-import { computeBraceEndpoints } from './braces'
-import { bracePlateNameKey, createPartNameMaps, type PartNameMaps } from './partNames'
+import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, type BracePoints } from './braceSolid'
+import { layoutDxfParts, orientDxfStrut, writeDxf, type DxfPart } from './dxf'
+import { buildExportPartNames } from './exportPartNames'
+import { bracePartLabels } from './partLabels'
 import { runExportBatches } from './exportBatchPool'
 import { exportProfilingEnabled, publishExportProfile, type ExportBatchProfile, type ExportWorkerProfile } from './exportProfile'
 import type { DxfExportPhase, DxfExportRequest, DxfExportWorkerMessage } from '../workers/dxfExportWorker'
@@ -29,99 +28,6 @@ export interface DxfExportProgress {
 }
 
 type Shared = Omit<DxfExportRequest, 'requestId' | 'strutJobs' | 'vertices'>
-
-type Tuple3 = [number, number, number]
-
-function add(a: Tuple3, b: Tuple3): Tuple3 {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
-function sub(a: Tuple3, b: Tuple3): Tuple3 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-function scale(v: Tuple3, s: number): Tuple3 {
-  return [v[0] * s, v[1] * s, v[2] * s]
-}
-
-function length(v: Tuple3): number {
-  return Math.hypot(v[0], v[1], v[2])
-}
-
-function normalize(v: Tuple3): Tuple3 {
-  const len = length(v)
-  return len > 0 ? scale(v, 1 / len) : [0, 0, 0]
-}
-
-function midpoint(a: Tuple3, b: Tuple3): Tuple3 {
-  return scale(add(a, b), 0.5)
-}
-
-function footPartCenter(vertex: VertexEdgesInfo): Tuple3 | null {
-  const foot = vertex.foot
-  if (!foot) return null
-  const e1 = normalize(vertex.tangentPlane.e1)
-  const e2 = normalize(vertex.tangentPlane.e2)
-  const angle = (foot.projectedAngleDeg * Math.PI) / 180
-  const axis = normalize(add(scale(e1, Math.cos(angle)), scale(e2, Math.sin(angle))))
-  if (length(axis) < 1e-12) return null
-  return add(vertex.position, scale(axis, foot.holeOffset + foot.thickness / 2))
-}
-
-function buildDxfPartNames(
-  params: RunStepExportParams,
-  strutEntries: StrutGeometryEntry[],
-  vertices: VertexEdgesInfo[],
-  halfWidth: number,
-): PartNameMaps {
-  const flangeSpan = halfWidth - params.grooveDepth / 2
-  const flanges = vertices.flatMap((vertex) => {
-    const normal = normalize(vertex.tangentPlane.normal)
-    return [
-      { vertexId: vertex.vertexId, side: 'outer' as const, center: add(vertex.position, scale(normal, flangeSpan)) },
-      { vertexId: vertex.vertexId, side: 'inner' as const, center: add(vertex.position, scale(normal, -flangeSpan)) },
-    ]
-  })
-
-  const feet = vertices.flatMap((vertex) => {
-    const center = footPartCenter(vertex)
-    return center ? [{ id: vertex.vertexId, center }] : []
-  })
-
-  const bracePlates = strutEntries.flatMap((job) => {
-    const posA = job.posA
-    const posB = job.posB
-    const axisAB = normalize(sub(posB, posA))
-    return [
-      ...job.braces.a.slice(0, 1).map((brace) => ({
-        id: bracePlateNameKey(brace.braceId, job.index, 'A'),
-        center: add(posA, scale(axisAB, brace.distanceFromVertex)),
-      })),
-      ...job.braces.b.slice(0, 1).map((brace) => ({
-        id: bracePlateNameKey(brace.braceId, job.index, 'B'),
-        center: add(posB, scale(axisAB, -brace.distanceFromVertex)),
-      })),
-    ]
-  })
-
-  const braces = Array.from(params.data.braces.entries()).flatMap(([braceId, brace]) => {
-    const endpoints = computeBraceEndpoints(brace, params.data.edges, (vertexId) => params.transformedVertices.get(vertexId)!)
-    if (!endpoints) return []
-    const a = endpoints[0].toArray() as Tuple3
-    const b = endpoints[1].toArray() as Tuple3
-    return [{ id: braceId, center: midpoint(a, b) }]
-  })
-
-  return createPartNameMaps(
-    {
-      struts: strutEntries.map((job) => ({ id: job.index, center: midpoint(job.posA, job.posB) })),
-      flanges,
-      feet,
-      bracePlates,
-      braces,
-    },
-  )
-}
 
 function runBatch(
   strutJobs: StrutGeometryEntry[],
@@ -181,7 +87,7 @@ export async function runDxfExport(
   const profiling = exportProfilingEnabled()
   const batchProfiles: ExportBatchProfile[] = []
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
-  const names = buildDxfPartNames(params, strutEntries, vertices, halfWidth)
+  const names = buildExportPartNames(params, strutEntries, vertices, halfWidth)
 
   const shared: Shared = {
     ...labelSettings,
@@ -260,38 +166,10 @@ export async function runDxfExport(
       if (sheetSettings.arrangeOnSheet) throw new Error(`Cannot construct brace ${names.braces[body.braceId]}.`)
       continue
     }
-    // Green: the strut each end of the brace goes into, written along the brace just inside
-    // the end (the middle of that strut's two plate end points).
-    const height = labelSettings.connectedPartIdLabelSize
-    const mid = (pts: [Vec3, Vec3]): [number, number] => {
-      const [p, q] = pts.map((pt) => projectToFrame2D(frame, pt))
-      return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
-    }
-    const ends: [string, [number, number]][] = [
-      [names.struts[body.edgeIdA], mid(body.a)],
-      [names.struts[body.edgeIdB], mid(body.b)],
-    ]
-    const dir: [number, number] = [ends[1][1][0] - ends[0][1][0], ends[1][1][1] - ends[0][1][1]]
-    const len = Math.hypot(dir[0], dir[1]) || 1
-    const unit: [number, number] = [dir[0] / len, dir[1] / len]
-    const helpers: DxfHelperText[] = ends.map(([text, at], i) => {
-      // Moved inward, along the brace, by half the text's length plus a little.
-      const inset = (text.length * height * 0.8) / 2 + 2
-      const sign = i === 0 ? 1 : -1
-      return {
-        text,
-        x: at[0] + sign * unit[0] * inset,
-        y: at[1] + sign * unit[1] * inset,
-        angleDeg: (Math.atan2(unit[1], unit[0]) * 180) / Math.PI,
-        height,
-      }
-    })
     parts.push({
-      name: names.braces[body.braceId],
+      ...bracePartLabels(body, names, labelSettings),
       kind: 'brace',
       loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
-      labelAngleDeg: (Math.atan2(unit[1], unit[0]) * 180) / Math.PI,
-      helpers,
     })
     onProgress({ phase: 'braces', done: index + 1, total: bodies.length })
   }

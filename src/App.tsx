@@ -1,3 +1,4 @@
+import { DEFAULT_STEP_EXPORT_SETTINGS } from './lib/stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './lib/dxfLabelSettings'
 import { DEFAULT_DXF_SHEET_SETTINGS } from './lib/dxfSheetSettings'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -167,6 +168,7 @@ function createDocument(initial: DomeState | null, sceneData = initial?.sceneDat
   const state: Omit<DomeState, 'selectionMode'> = {
     partIdLabelSize: initial?.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize,
     connectedPartIdLabelSize: initial?.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize,
+    stepExportSettings: initial?.stepExportSettings ?? DEFAULT_STEP_EXPORT_SETTINGS,
     dxfSheetSettings: initial?.dxfSheetSettings ?? DEFAULT_DXF_SHEET_SETTINGS,
     sceneData,
     extrudeDistance: initial?.extrudeDistance ?? DEFAULT_EXTRUDE_DISTANCE,
@@ -298,6 +300,7 @@ function App() {
     footParams,
     appliedPreviewParams,
     partIdLabelSize,
+    stepExportSettings,
     dxfSheetSettings,
     connectedPartIdLabelSize,
   } = domeDocument
@@ -340,6 +343,7 @@ function App() {
   const setFlangeMillingDiameter = (value: DomeDocument['flangeMillingDiameter'] | ((previous: DomeDocument['flangeMillingDiameter']) => DomeDocument['flangeMillingDiameter'])) => setDocumentField('flangeMillingDiameter', value)
   const setFootParams = (value: DomeDocument['footParams'] | ((previous: DomeDocument['footParams']) => DomeDocument['footParams'])) => setDocumentField('footParams', value)
   const setPartIdLabelSize = (value: DomeDocument['partIdLabelSize'] | ((previous: DomeDocument['partIdLabelSize']) => DomeDocument['partIdLabelSize'])) => setDocumentField('partIdLabelSize', value)
+  const setStepExportSettings = (value: DomeDocument['stepExportSettings']) => setDocumentField('stepExportSettings', value)
   const setDxfSheetSettings = (value: DomeDocument['dxfSheetSettings'] | ((previous: DomeDocument['dxfSheetSettings']) => DomeDocument['dxfSheetSettings'])) => setDocumentField('dxfSheetSettings', value)
   const setConnectedPartIdLabelSize = (value: DomeDocument['connectedPartIdLabelSize'] | ((previous: DomeDocument['connectedPartIdLabelSize']) => DomeDocument['connectedPartIdLabelSize'])) => setDocumentField('connectedPartIdLabelSize', value)
 
@@ -787,6 +791,7 @@ function App() {
     const next = createDocument(null, pruneToLayerCount(previewData, layerCount))
     documentHistory.reset({
       ...next,
+      stepExportSettings,
       dxfSheetSettings,
       partIdLabelSize,
       connectedPartIdLabelSize,
@@ -811,6 +816,7 @@ function App() {
 
   const buildConfig = (): DomeConfig =>
     serializeConfig({
+      stepExportSettings,
       dxfSheetSettings,
       partIdLabelSize,
       connectedPartIdLabelSize,
@@ -847,6 +853,7 @@ function App() {
   useEffect(() => {
     saveConfigToLocalStorage(buildConfig())
   }, [
+    stepExportSettings,
     dxfSheetSettings,
     partIdLabelSize,
     connectedPartIdLabelSize,
@@ -960,7 +967,7 @@ function App() {
     if (!controller) return
     try {
       const zipBlob = await runStepExport(
-        buildExportParams(),
+        { ...buildExportParams(), stepExportSettings },
         (progress) => updateExportProgress(controller, progress),
         () => controller.signal.aborted,
         controller.signal,
@@ -1018,6 +1025,8 @@ function App() {
         onDownloadStepAssembly={handleDownloadStepAssembly}
         onDownloadDxf={handleDownloadDxf}
         exportBusy={exportSession?.status === 'running'}
+        stepExportSettings={stepExportSettings}
+        onStepExportSettingsChange={setStepExportSettings}
         dxfSheetSettings={dxfSheetSettings}
         onDxfSheetSettingsChange={setDxfSheetSettings}
         partIdLabelSize={partIdLabelSize}

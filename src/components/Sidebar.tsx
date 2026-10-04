@@ -1,3 +1,4 @@
+import type { StepExportSettings } from '../lib/stepExportSettings'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ChangeEvent, ReactNode, SyntheticEvent } from 'react'
@@ -52,6 +53,8 @@ interface SidebarProps {
   onDownloadStepAssembly: () => void
   onDownloadDxf: () => void
   exportBusy: boolean
+  stepExportSettings: StepExportSettings
+  onStepExportSettingsChange: (settings: StepExportSettings) => void
   dxfSheetSettings: DxfSheetSettings
   onDxfSheetSettingsChange: (settings: DxfSheetSettings) => void
   partIdLabelSize: number
@@ -379,6 +382,8 @@ export function Sidebar({
   onDownloadStepAssembly,
   onDownloadDxf,
   exportBusy,
+  stepExportSettings,
+  onStepExportSettingsChange,
   dxfSheetSettings,
   onDxfSheetSettingsChange,
   partIdLabelSize,
@@ -1204,6 +1209,31 @@ export function Sidebar({
 
         </SidebarSection>
         <SidebarSection id="export-step-parts" title={t('STEP parts')} defaultOpen={false}>
+          <label className="checkbox-field">
+            <input type="checkbox" checked={stepExportSettings.addLabels} disabled={exportBusy}
+              onChange={(event) => onStepExportSettingsChange({ ...stepExportSettings, addLabels: event.target.checked })} />
+            {t('Add labels')}
+          </label>
+          {stepExportSettings.addLabels && <fieldset className="dxf-sheet-settings" disabled={exportBusy}>
+            <div className="transform-field">
+              <label><FieldLabel text={t('Part ID label size (mm)')} /></label>
+              <NumberField value={stepExportSettings.partIdLabelSize} step={0.5} min={0.1}
+                onCommit={(partIdLabelSize) => onStepExportSettingsChange({ ...stepExportSettings, partIdLabelSize })} />
+            </div>
+            <div className="transform-field">
+              <label><FieldLabel text={t('Connected part ID labels size (mm)')} /></label>
+              <NumberField value={stepExportSettings.connectedPartIdLabelSize} step={0.5} min={0.1}
+                onCommit={(connectedPartIdLabelSize) => onStepExportSettingsChange({ ...stepExportSettings, connectedPartIdLabelSize })} />
+            </div>
+            <div className="transform-field">
+              <label htmlFor="step-label-depth"><FieldLabel text={t('Depth (mm)')} /></label>
+              <input id="step-label-depth" type="number" min={0.01} step="any"
+                value={Number.isNaN(stepExportSettings.depth) ? '' : stepExportSettings.depth}
+                onChange={(event) => onStepExportSettingsChange({ ...stepExportSettings, depth: event.target.valueAsNumber })} />
+            </div>
+            <Help text={t('Engraves bold part and connection labels. Depth is measured in exported millimeters.')} />
+          </fieldset>}
+          <Help text={t('Parts lie flat with their bottom at Z = 0 and labels facing up.')} />
           <div className="button-row"><button onClick={onDownloadSteps} disabled={exportBusy}>{t('Download STEP Archive')}</button></div>
         </SidebarSection>
         <SidebarSection id="export-step-assembly" title={t('STEP assembly')} defaultOpen={false}>

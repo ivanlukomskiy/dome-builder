@@ -88,3 +88,13 @@ describe('DXF label settings', () => {
     expect(restored.connectedPartIdLabelSize).toBe(7)
   })
 })
+
+
+describe('STEP engraving settings', () => {
+  it('defaults older projects to labels off and depth 1 mm, and round trips edits', () => {
+    const state = deserializeConfig(legacyConfig)
+    expect(state.stepExportSettings).toEqual({ addLabels: false, depth: 1, partIdLabelSize: 8, connectedPartIdLabelSize: 5 })
+    const stepExportSettings = { addLabels: true, depth: 0.75, partIdLabelSize: 10, connectedPartIdLabelSize: 6 }
+    expect(deserializeConfig(serializeConfig({ ...state, stepExportSettings })).stepExportSettings).toEqual(stepExportSettings)
+  })
+})

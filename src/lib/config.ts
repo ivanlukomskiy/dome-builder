@@ -1,3 +1,4 @@
+import { DEFAULT_STEP_EXPORT_SETTINGS, type StepExportSettings } from './stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
 import { DEFAULT_DXF_SHEET_SETTINGS, type DxfSheetSettings } from './dxfSheetSettings'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
@@ -14,6 +15,7 @@ export interface DomeConfig {
   version: 17
   partIdLabelSize?: number
   connectedPartIdLabelSize?: number
+  stepExportSettings?: StepExportSettings
   dxfSheetSettings?: DxfSheetSettings
   // The dome's sphere diameter in mm (SceneData.diameter).
   diameter: number
@@ -94,6 +96,7 @@ type LoadableDomeConfig = DomeConfig | LegacyDomeConfigV16
 export interface DomeState {
   partIdLabelSize: number
   connectedPartIdLabelSize: number
+  stepExportSettings: StepExportSettings
   dxfSheetSettings: DxfSheetSettings
   sceneData: SceneData
   selectionMode: SelectionMode
@@ -129,6 +132,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
     version: 17,
     partIdLabelSize: state.partIdLabelSize,
     connectedPartIdLabelSize: state.connectedPartIdLabelSize,
+    stepExportSettings: state.stepExportSettings,
     dxfSheetSettings: state.dxfSheetSettings,
     diameter: state.sceneData.diameter,
     vertices: Array.from(state.sceneData.vertices.entries()).map(([id, v]) => [
@@ -213,6 +217,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
       nextBraceId: config.nextBraceId ?? 0,
     },
     partIdLabelSize: config.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize,
+    stepExportSettings: { ...DEFAULT_STEP_EXPORT_SETTINGS, ...config.stepExportSettings },
     dxfSheetSettings: { ...DEFAULT_DXF_SHEET_SETTINGS, ...config.dxfSheetSettings },
     connectedPartIdLabelSize: config.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize,
     selectionMode: config.selectionMode,
