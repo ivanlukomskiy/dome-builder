@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { Grid, OrbitControls } from '@react-three/drei'
+import { Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import type { EditTarget, ViewMode } from '../App'
 import type { HubEdgeMetric, SceneData } from '../lib/polyhedra'
@@ -10,6 +10,9 @@ import type { FlangeShapeParams, FootParams } from '../lib/flangeGeometry'
 import { DomeMesh, type PreviewProgress } from './DomeMesh'
 import type { PartVisibility } from '../lib/previewParts'
 import { Hud, type HudHubEdgeMetric } from './Hud'
+import { ModelCameraControls } from './ModelCameraControls'
+import { viewportFrame, viewportGridStep } from '../lib/viewportCamera'
+import { useI18n } from '../lib/i18n'
 
 interface ViewportProps {
   mode: ViewMode
@@ -94,6 +97,7 @@ export function Viewport({
   onBraceClick,
   onDeselectAll,
 }: ViewportProps) {
+  const { t } = useI18n()
   const stats = useMemo(
     () => computeModelStats(transformedVertices, data.edges.size, data.faces.size),
     [transformedVertices, data.edges.size, data.faces.size],
@@ -148,6 +152,13 @@ export function Viewport({
   // previewBuilder.worker.ts) - this just holds whatever progress it last reported, to surface in
   // the HUD rather than leaving the viewport looking stuck while it works.
   const [previewProgress, setPreviewProgress] = useState<PreviewProgress | null>(null)
+  const [fitRequest, setFitRequest] = useState(0)
+  const frame = useMemo(
+    () => viewportFrame(stats.bounds, diameter, Math.max(cornerLength, thickness, extrudeDistance, 1)),
+    [stats.bounds, diameter, cornerLength, thickness, extrudeDistance],
+  )
+  const gridStep = viewportGridStep(frame.radius)
+  const topologyKey = `${data.vertices.size}:${data.edges.size}:${data.faces.size}`
 
   return (
     <div className="viewport">
@@ -165,8 +176,11 @@ export function Viewport({
         selectedVertexHubMetrics={selectedVertexHubMetrics}
         previewProgress={mode === 'preview' ? previewProgress : null}
       />
+      <button className="viewport-fit" type="button" onClick={() => setFitRequest((n) => n + 1)}>
+        {t('Fit model')}
+      </button>
       <Canvas
-        camera={{ position: [8750, 7000, 10000], fov: 45, near: 10, far: 200000 }}
+        camera={{ fov: 45 }}
         onPointerMissed={onDeselectAll}
       >
         <color attach="background" args={['#12141a']} />
@@ -179,12 +193,12 @@ export function Viewport({
             grinds on it every frame. fadeDistance alone controls how far the grid actually fades out. */}
         <Grid
           args={[10, 10]}
-          position={[0, -4000, 0]}
-          cellSize={250}
-          sectionSize={1000}
+          position={[frame.center[0], frame.groundY, frame.center[2]]}
+          cellSize={gridStep}
+          sectionSize={gridStep * 5}
           cellColor="#2a2e39"
           sectionColor="#3a4050"
-          fadeDistance={50000}
+          fadeDistance={frame.radius * 12}
           infiniteGrid
         />
         <DomeMesh
@@ -228,7 +242,13 @@ export function Viewport({
           onBraceClick={onBraceClick}
           onPreviewProgress={setPreviewProgress}
         />
-        <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+        <ModelCameraControls
+          frame={frame}
+          diameter={diameter}
+          mode={mode}
+          topologyKey={topologyKey}
+          fitRequest={fitRequest}
+        />
       </Canvas>
     </div>
   )

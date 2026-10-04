@@ -65,6 +65,7 @@ export const ru: Dictionary = {
   "Part type": "Тип детали",
   "Selection mode": "Режим выбора",
   "Preview": "Предпросмотр",
+  "Fit model": "Вписать модель",
   "Vertices": "Вершины",
   "Edges": "Рёбра",
   "Faces": "Грани",

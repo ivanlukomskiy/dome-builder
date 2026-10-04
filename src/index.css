@@ -271,6 +271,23 @@ body,
   display: block;
 }
 
+.viewport-fit {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(24, 26, 32, 0.9);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.viewport-fit:hover {
+  border-color: var(--accent);
+}
+
 .hud {
   position: absolute;
   top: 16px;
