@@ -10,7 +10,7 @@ import {
   type PartVisibility,
   type PreviewPartKind,
 } from '../lib/previewParts'
-import type { DxfSheetSettings } from '../lib/dxfSheetSettings'
+import { DXF_ROTATION_STEPS, type DxfSheetSettings } from '../lib/dxfSheetSettings'
 import {
   BRACE_PARAM_FIELDS,
   BRACE_PLATE_PARAM_FIELDS,
@@ -1249,7 +1249,22 @@ export function Sidebar({
               <input id={`dxf-sheet-${key}`} type="number" min={min} step="any" value={Number.isNaN(dxfSheetSettings[key]) ? '' : dxfSheetSettings[key]}
                 onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, [key]: event.target.valueAsNumber })} />
             </div>)}
-            <Help text={t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may rotate by 90°.')} />
+            <div className="dxf-rotation-step">
+              <label><FieldLabel text={t('Allowed rotation step')} /></label>
+              <div className="segmented-control" role="group" aria-label={t('Allowed rotation step')}>
+                {DXF_ROTATION_STEPS.map((step) => (
+                  <button
+                    key={step}
+                    type="button"
+                    className={dxfSheetSettings.rotationStep === step ? 'active' : ''}
+                    onClick={() => onDxfSheetSettingsChange({ ...dxfSheetSettings, rotationStep: step })}
+                  >
+                    {step === 0 ? t('None') : `${step}°`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Help text={t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may be turned by multiples of the rotation step; a finer step packs tighter but takes longer.')} />
           </fieldset>}
           <div className="button-row">
             <button onClick={onDownloadDxf} disabled={exportBusy}>{t('Download DXF')}</button>

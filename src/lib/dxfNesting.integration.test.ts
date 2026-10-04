@@ -31,6 +31,32 @@ describe('compiled libnest2d', () => {
     expect(result.sheets).toHaveLength(1)
   })
 
+  it('leaves every part unturned when rotation is off', () => {
+    const still = { ...settings, rotationStep: 0 as const }
+    // The quarter turn that would make this one fit is no longer on offer.
+    expect(() => nestDxfParts([rectangle('long', 80, 30)], { scale: 1 }, { ...still, width: 50 }, engine)).toThrow(/long.*usable sheet/)
+    const result = nestDxfParts([rectangle('a', 60, 20), rectangle('b', 60, 20), rectangle('c', 20, 60)], { scale: 1 }, still, engine)
+    for (const [i, [w, h]] of [[60, 20], [60, 20], [20, 60]].entries()) {
+      const vertices = result.parts[i].loops[0].vertices
+      expect(Math.max(...vertices.map((p) => p.x)) - Math.min(...vertices.map((p) => p.x))).toBeCloseTo(w)
+      expect(Math.max(...vertices.map((p) => p.y)) - Math.min(...vertices.map((p) => p.y))).toBeCloseTo(h)
+    }
+  })
+
+  it.each([60, 30, 10] as const)('packs with a %i degree step, turning parts only by its multiples', (rotationStep) => {
+    const triangle = (name: string): DxfPart => ({ name, kind: 'flange', loops: [{ closed: true,
+      vertices: [[0, 0], [45, 0], [0, 30]].map(([x, y]) => ({ x, y, bulge: 0 })) }] })
+    const parts = [...Array.from({ length: 4 }, (_, i) => triangle(`t${i}`)), rectangle('r1', 50, 12), rectangle('r2', 50, 12)]
+    // nestDxfParts itself rejects overlaps, spacing violations and angles off the step.
+    const result = nestDxfParts(parts, { scale: 1 }, { ...settings, rotationStep }, engine)
+    expect(result.parts).toHaveLength(parts.length)
+    for (const [i, placed] of result.parts.entries()) {
+      const [a, b] = placed.loops[0].vertices, [a0, b0] = parts[i].loops[0].vertices
+      const turn = (Math.atan2(b.y - a.y, b.x - a.x) - Math.atan2(b0.y - a0.y, b0.x - a0.x)) * 180 / Math.PI
+      expect(Math.abs(turn / rotationStep - Math.round(turn / rotationStep))).toBeLessThan(1e-6)
+    }
+  })
+
   it('accepts an exact-fit rectangle even with nonzero spacing', () => {
     const result = nestDxfParts([rectangle('exact', 90, 90)], { scale: 1 }, settings, engine)
     expect(result.parts[0].loops[0].vertices[0].x).toBeCloseTo(10)

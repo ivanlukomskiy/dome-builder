@@ -399,6 +399,22 @@ body,
   min-width: 0;
 }
 
+.dxf-rotation-step {
+  padding: 4px 0;
+}
+
+.dxf-rotation-step label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dxf-rotation-step button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .dxf-export-error {
   color: #ff9696;
   font-size: 12px;

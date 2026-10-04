@@ -45,7 +45,8 @@ License notices are distributed with the site in `public/third-party/libnest2d/`
 - Input coordinates use 1,000,000 integer units/mm, matching libnest2d's backend.
   Sheet dimensions, margins and spacing are final millimeters, independent of
   the export scale. Only part geometry and labels are scaled.
-- Allowed rotations are 0, 90, 180, 270 degrees. No mirroring or grain inference.
+- Allowed rotations are passed in by the caller: the multiples of the chosen step
+  (none, 90, 60, 30 or 10 degrees). No mirroring or grain inference.
 - The engine returns a sheet, rotation about the origin, and translation for
   every original part. Original DXF curves, holes and labels are transformed
   together; the packing envelope is never exported as a cut line.

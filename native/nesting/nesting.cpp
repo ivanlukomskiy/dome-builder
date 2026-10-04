@@ -6,12 +6,20 @@
 
 using emscripten::val;
 
-val pack(const val& polygons, double width, double height, double spacing, const val& progress) {
+val pack(const val& polygons, double width, double height, double spacing, const val& rotations, const val& progress) {
     using namespace libnest2d;
     const unsigned count = polygons["length"].as<unsigned>();
     if (!std::isfinite(width) || !std::isfinite(height) || !std::isfinite(spacing)
         || width <= 0 || height <= 0 || spacing < 0 || count == 0)
         throw std::runtime_error("Invalid nesting input");
+    // The angles (radians) a part may be placed at, chosen by the caller.
+    std::vector<Radians> allowedRotations;
+    for (unsigned i = 0; i < rotations["length"].as<unsigned>(); ++i) {
+        const double angle = rotations[i].as<double>();
+        if (!std::isfinite(angle)) throw std::runtime_error("Invalid nesting rotation");
+        allowedRotations.emplace_back(angle);
+    }
+    if (allowedRotations.empty()) throw std::runtime_error("Invalid nesting input");
     std::vector<Item> items;
     items.reserve(count);
     for (unsigned i = 0; i < count; ++i) {
@@ -27,7 +35,7 @@ val pack(const val& polygons, double width, double height, double spacing, const
 
     NestConfig<> config;
     config.placer_config.parallel = false; // The entire call runs in our Web Worker.
-    config.placer_config.rotations = {0, Pi / 2, Pi, 3 * Pi / 2};
+    config.placer_config.rotations = allowedRotations;
     config.placer_config.alignment = NestConfig<>::Placement::Alignment::BOTTOM_LEFT;
     config.placer_config.starting_point = NestConfig<>::Placement::Alignment::BOTTOM_LEFT;
     config.placer_config.explore_holes = false;

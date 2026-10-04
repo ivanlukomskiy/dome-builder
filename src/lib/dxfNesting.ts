@@ -1,12 +1,13 @@
 import type { DxfLayoutOptions, DxfPart, DxfSheet, PlacedDxfPart } from './dxf'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
 import type { DxfPolyline } from './dxfExport'
-import { validateDxfSheetSettings, type DxfSheetSettings } from './dxfSheetSettings'
+import { allowedRotations, validateDxfSheetSettings, type DxfSheetSettings } from './dxfSheetSettings'
 
 export type Point2 = [number, number]
 export interface NestPlacement { index: number; sheet: number; x: number; y: number; angle: number }
 export interface NestingEngine {
-  pack(polygons: Point2[][], width: number, height: number, spacing: number, progress: (done: number, total: number) => void): NestPlacement[]
+  // `rotations`: the angles (radians) a part may be placed at.
+  pack(polygons: Point2[][], width: number, height: number, spacing: number, rotations: number[], progress: (done: number, total: number) => void): NestPlacement[]
 }
 export interface NestedDxf { parts: PlacedDxfPart[]; sheets: DxfSheet[] }
 
@@ -124,17 +125,22 @@ export function nestDxfParts(parts: DxfPart[], options: DxfLayoutOptions, settin
   if (!Number.isFinite(options.scale) || options.scale <= 0) throw new Error('Export scale must be greater than zero.')
   if (!parts.length) throw new Error('There are no parts to arrange on a sheet.')
   const width = settings.width - 2 * settings.margin, height = settings.height - 2 * settings.margin
+  const rotations = allowedRotations(settings.rotationStep)
   const polygons = parts.map((part) => {
     let hull: Point2[]
     try { hull = packingEnvelope(part.loops, options.scale) }
     catch (error) { throw new Error(`Part ${part.name}: ${error instanceof Error ? error.message : String(error)}`) }
-    const bounds = box(hull)
-    const w = (bounds.maxX - bounds.minX) / UNITS, h = (bounds.maxY - bounds.minY) / UNITS
-    if (!((w <= width + EPSILON && h <= height + EPSILON) || (h <= width + EPSILON && w <= height + EPSILON)))
+    const size = (angle: number) => {
+      const bounds = box(angle ? hull.map((point) => transform(point, angle, 0, 0)) : hull)
+      return { w: (bounds.maxX - bounds.minX) / UNITS, h: (bounds.maxY - bounds.minY) / UNITS }
+    }
+    if (!rotations.some((angle) => { const { w, h } = size(angle); return w <= width + EPSILON && h <= height + EPSILON })) {
+      const { w, h } = size(0)
       throw new Error(`Part ${part.name} (${w.toFixed(2)} × ${h.toFixed(2)} mm) is larger than the usable sheet (${width.toFixed(2)} × ${height.toFixed(2)} mm), including allowed rotations.`)
+    }
     return hull
   })
-  const placements = engine.pack(polygons, Math.floor(width * UNITS), Math.floor(height * UNITS), Math.ceil(settings.spacing * UNITS), progress)
+  const placements = engine.pack(polygons, Math.floor(width * UNITS), Math.floor(height * UNITS), Math.ceil(settings.spacing * UNITS), rotations, progress)
   if (placements.length !== parts.length) throw new Error('Packing failed: not every part was placed.')
   const seen = new Set<number>()
   const usedSheets = new Set<number>()
@@ -144,6 +150,8 @@ export function nestDxfParts(parts: DxfPart[], options: DxfLayoutOptions, settin
     if (!Number.isInteger(index) || index < 0 || index >= parts.length || seen.has(index)
       || !Number.isInteger(sheet) || sheet < 0 || sheet >= parts.length || ![x, y, angle].every(Number.isFinite))
       throw new Error('Packing failed: invalid part placement.')
+    if (!rotations.some((allowed) => Math.abs(Math.sin((angle - allowed) / 2)) < 1e-9))
+      throw new Error(`Packing failed: part ${parts[index].name} was turned by an angle that is not allowed.`)
     seen.add(index)
     usedSheets.add(sheet)
     const polygon = polygons[index].map(([px, py]) => transform([px / UNITS, py / UNITS], angle, x / UNITS, y / UNITS))

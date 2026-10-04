@@ -89,4 +89,33 @@ describe('sheet layout', () => {
     expect(() => nestDxfParts([rectangle('big', 40, 40), rectangle('small', 5, 5)], { scale: 1 }, settings,
       engine(placement(), placement(1, 0, 10, 10)))).toThrow(/overlap/)
   })
+
+  it('offers the engine the multiples of the rotation step, and rejects any other angle', () => {
+    const degrees = (rotationStep: 0 | 90 | 60 | 30 | 10) => {
+      const packer = engine(placement())
+      nestDxfParts([rectangle()], { scale: 1 }, { ...settings, rotationStep }, packer)
+      return vi.mocked(packer.pack).mock.calls[0][4].map((angle) => Math.round(angle * 180 / Math.PI))
+    }
+    expect(degrees(0)).toEqual([0])
+    expect(degrees(90)).toEqual([0, 90, 180, 270])
+    expect(degrees(60)).toEqual([0, 60, 120, 180, 240, 300])
+    expect(degrees(30)).toHaveLength(12)
+    expect(degrees(10)).toHaveLength(36)
+
+    const turned = (deg: number) => engine(placement(0, 0, 40, 40, deg * Math.PI / 180))
+    expect(() => nestDxfParts([rectangle()], { scale: 1 }, { ...settings, rotationStep: 60 }, turned(120))).not.toThrow()
+    expect(() => nestDxfParts([rectangle()], { scale: 1 }, { ...settings, rotationStep: 60 }, turned(90))).toThrow(/not allowed/)
+    expect(() => nestDxfParts([rectangle()], { scale: 1 }, { ...settings, rotationStep: 0 }, turned(90))).toThrow(/not allowed/)
+  })
+
+  it('accepts a part that only fits the sheet at one of the finer angles', () => {
+    // 120 mm long: too long for the 80 mm usable square either way up, but not along its diagonal.
+    const long = rectangle('long', 100, 2)
+    expect(() => nestDxfParts([long], { scale: 1 }, { ...settings, rotationStep: 90 }, engine(placement()))).toThrow(/usable sheet/)
+    expect(() => nestDxfParts([long], { scale: 1 }, { ...settings, rotationStep: 0 }, engine(placement()))).toThrow(/usable sheet/)
+    expect(() => nestDxfParts([long], { scale: 1 }, { ...settings, rotationStep: 30 },
+      engine(placement(0, 0, 2, 0, Math.PI / 6)))).toThrow(/usable sheet/)
+    expect(() => nestDxfParts([long], { scale: 1 }, { ...settings, rotationStep: 10 },
+      engine(placement(0, 0, 2, 0, 40 * Math.PI / 180)))).not.toThrow()
+  })
 })
