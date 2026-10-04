@@ -1,5 +1,6 @@
 import { DEFAULT_STEP_EXPORT_SETTINGS, validateStepLabelDepth, type StepExportSettings } from './stepExportSettings'
 import { buildExportPartNames } from './exportPartNames'
+import { stepPartFileNames, type PartNameMaps } from './partNames'
 import JSZip from 'jszip'
 import type { FlangeShapeParams } from './flangeGeometry'
 import { computePreviewBuildInputs, type PreviewBuildInputParams, type StrutGeometryEntry } from './previewBuildInputs'
@@ -163,7 +164,8 @@ type PartsShared = Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices
 // own jobs: the applied geometry params and, with labels on, what to engrave.
 function buildPartsShared(
   params: RunStepExportParams,
-  { strutEntries, vertices, halfWidth }: ReturnType<typeof computePreviewBuildInputs>,
+  { halfWidth }: ReturnType<typeof computePreviewBuildInputs>,
+  names: PartNameMaps,
   profiling: boolean,
 ): PartsShared {
   const settings = params.stepExportSettings ?? DEFAULT_STEP_EXPORT_SETTINGS
@@ -174,7 +176,7 @@ function buildPartsShared(
       depth: settings.depth,
       partIdLabelSize: settings.partIdLabelSize,
       connectedPartIdLabelSize: settings.connectedPartIdLabelSize,
-      names: buildExportPartNames(params, strutEntries, vertices, halfWidth),
+      names,
     } : undefined,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
@@ -203,7 +205,8 @@ export async function runStepExport(
   const batchProfiles: ExportBatchProfile[] = []
   const inputs = computePreviewBuildInputs(params)
   const { strutEntries, vertices } = inputs
-  const shared = buildPartsShared(params, inputs, profiling)
+  const names = buildExportPartNames(params, strutEntries, vertices, inputs.halfWidth)
+  const shared = buildPartsShared(params, inputs, names, profiling)
 
   const allPieces: StepExportPiece[] = []
   // Every strut's brace plate end points, across batches - a brace's two struts can land in
@@ -277,7 +280,9 @@ export async function runStepExport(
   onProgress({ phase: 'zipping', done: 0, total: 100 })
   const zipStart = performance.now()
   const zip = new JSZip()
-  for (const piece of allPieces) zip.file(piece.name, piece.blob)
+  // Workers name pieces by model index; the archive names them by part ID.
+  const fileNames = stepPartFileNames(names)
+  for (const piece of allPieces) zip.file(fileNames.get(piece.name) ?? piece.name, piece.blob)
   const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
     if (!isCancelled()) onProgress({ phase: 'zipping', done: Math.round(metadata.percent), total: 100 })
   })
@@ -306,7 +311,8 @@ export async function runStepDebugExport(
 ): Promise<StepExportPiece | null> {
   const inputs = computePreviewBuildInputs(params)
   const { strutEntries, vertices } = inputs
-  const shared = buildPartsShared(params, inputs, false)
+  const names = buildExportPartNames(params, strutEntries, vertices, inputs.halfWidth)
+  const shared = buildPartsShared(params, inputs, names, false)
 
   let name: string
   let phase: StepExportWorkerPhase = 'struts'
@@ -353,7 +359,7 @@ export async function runStepDebugExport(
   if (isCancelled()) return null
   const piece = result.pieces.find((p) => p.name === name)
   if (!piece) throw new Error(`${name} produced no solid.`)
-  return piece
+  return { ...piece, name: stepPartFileNames(names).get(name) ?? name }
 }
 
 // Builds one STEP assembly containing every visible strut, flange plate, brace plate and brace in

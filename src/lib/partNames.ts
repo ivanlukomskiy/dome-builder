@@ -109,3 +109,21 @@ export function createPartNameMaps(input: PartNameInput): PartNameMaps {
     braces: assignNumericNames(input.braces),
   }
 }
+
+// File name of every part in the STEP parts export, keyed by the name the export worker builds
+// the part under (stepExportWorker.ts names pieces by vertex/edge/brace index). The file is named
+// after the part's ID - the number engraved on it and written on it in the DXF - so the two match.
+export function stepPartFileNames(names: PartNameMaps): Map<string, string> {
+  // An ID's trailing dot (formatPartId) only tells 6 from 9 on the part itself.
+  const file = (kind: string, name: string) => `${kind}-${name.replace(/\.$/, '')}.step`
+  const files = new Map<string, string>()
+  for (const [id, name] of Object.entries(names.struts)) files.set(`strut-${id}.step`, file('strut', name))
+  for (const [key, name] of Object.entries(names.flanges)) files.set(`flange-${key.replace(':', '-')}.step`, file('flange', name))
+  for (const [id, name] of Object.entries(names.feet)) files.set(`foot-${id}.step`, file('foot', name))
+  for (const [key, name] of Object.entries(names.bracePlates)) {
+    const [braceId, edgeId, end] = key.split(':')
+    files.set(`brace-plate-${braceId}-strut-${edgeId}-${end}.step`, file('brace-plate', name))
+  }
+  for (const [id, name] of Object.entries(names.braces)) files.set(`brace-${id}.step`, file('brace', name))
+  return files
+}

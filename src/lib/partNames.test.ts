@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bracePlateNameKey, createPartNameMaps, flangeNameKey } from './partNames'
+import { bracePlateNameKey, createPartNameMaps, flangeNameKey, stepPartFileNames } from './partNames'
 
 describe('createPartNameMaps', () => {
   it('adds a dot only to IDs made entirely of 6 and 9', () => {
@@ -92,5 +92,25 @@ describe('createPartNameMaps', () => {
     expect(names.struts).toEqual({ 2: '1', 10: '2', 20: '3', 1: '4' })
     expect(createPartNameMaps({ ...input, struts: [...input.struts].reverse() })).toEqual(names)
     expect(names.feet).toEqual({})
+  })
+})
+
+describe('stepPartFileNames', () => {
+  it('names each STEP file after the part ID instead of the model index', () => {
+    const files = stepPartFileNames({
+      struts: { 7: '2' },
+      flanges: { [flangeNameKey(3, 'outer')]: '5', [flangeNameKey(3, 'inner')]: '6.' },
+      feet: { 42: '1' },
+      bracePlates: { [bracePlateNameKey(4, 7, 'B')]: '9.' },
+      braces: { 4: '3' },
+    })
+    expect(Object.fromEntries(files)).toEqual({
+      'strut-7.step': 'strut-2.step',
+      'flange-3-outer.step': 'flange-5.step',
+      'flange-3-inner.step': 'flange-6.step',
+      'foot-42.step': 'foot-1.step',
+      'brace-plate-4-strut-7-B.step': 'brace-plate-9.step',
+      'brace-4.step': 'brace-3.step',
+    })
   })
 })
