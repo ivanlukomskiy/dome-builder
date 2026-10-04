@@ -10,7 +10,7 @@ import { bracePlateEndPoints3D } from '../lib/braces'
 import type { BracePoints } from '../lib/braceSolid'
 import { drawingToPolylines } from '../lib/dxfExport'
 import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/exportProfile'
-import type { DxfPart } from '../lib/dxf'
+import { tagHoleLoops, type DxfPart } from '../lib/dxf'
 import { bracePlateNameKey, type PartNameMaps } from '../lib/partNames'
 
 // The DXF-export counterpart to stepExportWorker.ts: builds the same 2D drawings (strut outlines,
@@ -104,7 +104,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           ...labels,
           kind: 'strut',
-          loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
+          loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)), boundary.holes),
           strutPath: { endA, endB, middle: arcPoint2(endA, endB, domeCenter, 0.5) },
         })
       }
@@ -115,10 +115,10 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
 
     const plane = computeStrutPlane(posA, posB, center)
     const plates = [
-      { plate: boundary.bracePlateA, brace: job.braces.a[0], end: 'A', ends: boundary.bracePlateEndsA },
-      { plate: boundary.bracePlateB, brace: job.braces.b[0], end: 'B', ends: boundary.bracePlateEndsB },
+      { plate: boundary.bracePlateA, brace: job.braces.a[0], end: 'A', ends: boundary.bracePlateEndsA, holes: boundary.bracePlateHolesA },
+      { plate: boundary.bracePlateB, brace: job.braces.b[0], end: 'B', ends: boundary.bracePlateEndsB, holes: boundary.bracePlateHolesB },
     ] as const
-    for (const { plate, brace, end, ends } of plates) {
+    for (const { plate, brace, end, ends, holes } of plates) {
       if (!brace) continue
       if (ends) {
         const [p, q] = bracePlateEndPoints3D(plane, job.beamThickness, brace, [ends[0], ends[1]])
@@ -129,7 +129,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)],
           kind: 'brace-plate',
-          loops: timed('outlineToPolylines', () => drawingToPolylines(plate)),
+          loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(plate)), holes),
           labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
         })
       } catch (err) {
@@ -163,7 +163,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           ...flangePartLabels(req, vertex, side, boundary),
           kind: 'flange',
-          loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
+          loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)), boundary.holes),
         })
       } catch (err) {
         if (req.strict) throw new Error(`Cannot export ${side} flange for vertex ${vertex.vertexId}: ${String(err)}`)
@@ -180,7 +180,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           parts.push({
             ...footPartLabels(req, vertex.vertexId),
             kind: 'foot',
-            loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
+            loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)), boundary.holes),
           })
         }
       } catch (err) {

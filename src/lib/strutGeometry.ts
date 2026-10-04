@@ -5,6 +5,7 @@ import type { SceneData } from "./polyhedra";
 import { buildVertexAdjacency, computeVertexHubMetrics } from "./polyhedra";
 import { add2, sub2, scale2, dot2, cross2, length2, normalize2 } from "./vec2";
 import { NO_STRUT_BRACES, type BraceParams, type StrutBraces } from "./braces";
+import type { DxfHoleMark } from "./dxfExport";
 import {
   arcPointAtAngle,
   bracePlateHoleCenters,
@@ -67,6 +68,11 @@ export interface StrutBoundaryResult {
   // coordinates - same brace as bracePlateA / bracePlateB, null when there's no plate.
   bracePlateEndsA: [Point2D, Point2D] | null;
   bracePlateEndsB: [Point2D, Point2D] | null;
+  // Every hole cut through `main` / through bracePlateA / bracePlateB - what it is for and where
+  // its middle is, in the strut's 2D coordinates.
+  holes: DxfHoleMark[];
+  bracePlateHolesA: DxfHoleMark[];
+  bracePlateHolesB: DxfHoleMark[];
   // Reference spots for labeling, in the strut's 2D coordinates. `endMarks`: one per strut end,
   // on the strut's axis in the middle of its tenon; `braceMarks`: the center of every brace on the
   // strut. `axis` is the unit direction along the strut there (labels are written along it).
@@ -872,6 +878,8 @@ export function computeStrutBoundary2D(
   let bracePlateB: Drawing | null = null;
   let bracePlateEndsA: [Point2D, Point2D] | null = null;
   let bracePlateEndsB: [Point2D, Point2D] | null = null;
+  let bracePlateHolesA: DxfHoleMark[] = [];
+  let bracePlateHolesB: DxfHoleMark[] = [];
   const braceMarks: (StrutMark & { braceId: number })[] = [];
   // Middle of each end's tenon, on the strut's axis - where the vertex label goes.
   const endMarks: StrutMark[] = (
@@ -995,9 +1003,31 @@ export function computeStrutBoundary2D(
               [-rect.halfAlong, 0],
             ])
           : null;
-        if (plate && braceIndex === 0) {
+        if (plate && rect && braceIndex === 0) {
           if (end === "A") bracePlateA = plate.clone();
           else bracePlateB = plate.clone();
+          // The same holes drawBracePlate cut, moved into the strut's frame like the plate itself.
+          const plateHoles = bracePlateHoleCenters(
+            rect.halfAlong,
+            rect.halfAcross,
+            brace.params.plateHoleOffsetLongitudinal,
+            brace.params.plateHoleOffsetTransverse,
+            brace.params.plateHoleFarCenterOffset,
+          );
+          const plateHoleMarks: DxfHoleMark[] = [
+            ...(brace.params.plateHoleDiameter > 0
+              ? placeInPlateFrame(braceCenter, endAxis, plateHoles.corner).map(
+                  (center): DxfHoleMark => ({ kind: "brace-plate-corner", center }),
+                )
+              : []),
+            ...(brace.params.plateHoleCenterDiameter > 0
+              ? placeInPlateFrame(braceCenter, endAxis, plateHoles.middle).map(
+                  (center): DxfHoleMark => ({ kind: "brace-plate-center", center }),
+                )
+              : []),
+          ];
+          if (end === "A") bracePlateHolesA = plateHoleMarks;
+          else bracePlateHolesB = plateHoleMarks;
           if (plateEnds) {
             const ends: [Point2D, Point2D] = [plateEnds[0], plateEnds[1]];
             if (end === "A") bracePlateEndsA = ends;
@@ -1026,6 +1056,9 @@ export function computeStrutBoundary2D(
     bracePlateB,
     bracePlateEndsA,
     bracePlateEndsB,
+    holes: strutHoles.map(([center]) => ({ kind: "strut-brace", center })),
+    bracePlateHolesA,
+    bracePlateHolesB,
     endMarks,
     braceMarks,
     helpers,

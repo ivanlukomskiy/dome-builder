@@ -1,5 +1,5 @@
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
-import type { DxfPolyline, DxfVertex } from './dxfExport'
+import type { DxfHoleKind, DxfHoleMark, DxfPolyline, DxfVertex } from './dxfExport'
 
 // The DXF sheet for the parts export: the layout of every part's outlines (with circular arcs
 // kept as bulged polyline segments) and an ASCII DXF writer (AutoCAD R12 flavor - POLYLINE/TEXT
@@ -45,15 +45,44 @@ export interface PlacedDxfPart extends DxfPart {
 
 export interface DxfSheet { x: number; y: number; width: number; height: number }
 
-// Layer per part kind (so a CAM package can treat them separately) and one for the ID labels;
-// the labels get their own color so they stand out from the outlines. Colors are AutoCAD's ACI
-// numbers (7 = white/black, 1 = red).
+// Layer of each kind of hole: a part's outer boundary stays on its part kind's layer, every hole
+// in it goes on the layer of what the hole is for.
+export const LAYER_OF_HOLE: Record<DxfHoleKind, string> = {
+  'flange-center': 'flange-center-holes',
+  'flange-side': 'flange-side-holes',
+  'flange-rect': 'flange-rect-holes',
+  'flange-foot-side': 'flange-foot-side-holes',
+  'flange-foot-rect': 'flange-foot-rect-holes',
+  'strut-brace': 'strut-brace-holes',
+  foot: 'foot-holes',
+  'brace-plate-corner': 'brace-plate-corner-holes',
+  'brace-plate-center': 'brace-plate-center-holes',
+}
+
+// Each hole layer's own color, so the kinds are told apart at a glance - none of them one the
+// other layers use (7 outlines, 1 labels, 3 helpers, 5 sheets).
+const COLOR_OF_HOLE: Record<DxfHoleKind, number> = {
+  'flange-center': 6, // magenta
+  'flange-side': 4, // cyan
+  'flange-rect': 2, // yellow
+  'flange-foot-side': 150, // azure
+  'flange-foot-rect': 30, // orange
+  'strut-brace': 190, // violet
+  foot: 230, // rose
+  'brace-plate-corner': 70, // chartreuse
+  'brace-plate-center': 8, // gray
+}
+
+// Layer per part kind and per hole kind (so a CAM package can treat them separately) and one for
+// the ID labels; the labels get their own color so they stand out from the outlines. Colors are
+// AutoCAD's ACI numbers (7 = white/black, 1 = red).
 export const DXF_LAYERS: { name: string; color: number }[] = [
   { name: 'STRUTS', color: 7 },
   { name: 'FLANGES', color: 7 },
   { name: 'FOOT', color: 7 },
   { name: 'BRACE_PLATES', color: 7 },
   { name: 'BRACES', color: 7 },
+  ...(Object.keys(LAYER_OF_HOLE) as DxfHoleKind[]).map((kind) => ({ name: LAYER_OF_HOLE[kind], color: COLOR_OF_HOLE[kind] })),
   { name: 'LABELS', color: 1 },
   { name: 'HELPERS', color: 3 },
 ]
@@ -134,9 +163,38 @@ function bounds(loops: DxfPolyline[]): { minX: number; minY: number; maxX: numbe
 function transformLoops(loops: DxfPolyline[], dx: number, dy: number, scale: number): DxfPolyline[] {
   // A uniform scale and a translation leave the bulges as they are.
   return loops.map((loop) => ({
-    closed: loop.closed,
+    ...loop,
     vertices: loop.vertices.map((v) => ({ x: (v.x + dx) * scale, y: (v.y + dy) * scale, bulge: v.bulge })),
   }))
+}
+
+// How far (mm) a hole outline's middle may sit from the mark it belongs to.
+const HOLE_MATCH_TOLERANCE = 0.05
+
+// Labels a part's hole outlines with what they are for. A drawing comes back from replicad as bare
+// loops, so each one is matched by its middle to the hole the geometry code says it cut there
+// (`marks`). The largest loop is the part's outer boundary and is never a hole; a loop no mark
+// claims (say two cutouts that ran into each other) is left unlabeled, on the part's own layer.
+export function tagHoleLoops(loops: DxfPolyline[], marks: DxfHoleMark[]): DxfPolyline[] {
+  if (!marks.length) return loops
+  const boxes = loops.map((loop) => bounds([loop]))
+  const area = (i: number) => {
+    const box = boxes[i]
+    return box ? (box.maxX - box.minX) * (box.maxY - box.minY) : -1
+  }
+  const outer = loops.reduce((best, _, i) => (area(i) > area(best) ? i : best), 0)
+  return loops.map((loop, i) => {
+    const box = boxes[i]
+    if (i === outer || !box || !loop.closed) return loop
+    const cx = (box.minX + box.maxX) / 2, cy = (box.minY + box.maxY) / 2
+    let nearest: DxfHoleMark | null = null
+    let nearestDistance = HOLE_MATCH_TOLERANCE
+    for (const mark of marks) {
+      const distance = Math.hypot(mark.center[0] - cx, mark.center[1] - cy)
+      if (distance <= nearestDistance) { nearest = mark; nearestDistance = distance }
+    }
+    return nearest ? { ...loop, hole: nearest.kind } : loop
+  })
 }
 
 // Align the two vertex ends of a strut on a horizontal line, with its curved middle below
@@ -265,8 +323,8 @@ function pair(code: number, value: string | number): string {
   return `${code}\n${value}\n`
 }
 
-// The DXF file text for the laid-out parts: each outline a closed POLYLINE on its kind's layer,
-// each ID a TEXT on the LABELS layer.
+// The DXF file text for the laid-out parts: each outer boundary a closed POLYLINE on its part
+// kind's layer, each hole one on its hole kind's layer, each ID a TEXT on the LABELS layer.
 export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): string {
   let out = ''
   out += pair(0, 'SECTION') + pair(2, 'HEADER') + pair(9, '$ACADVER') + pair(1, 'AC1009')
@@ -294,8 +352,8 @@ export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): strin
     out += pair(0, 'SEQEND') + pair(8, 'SHEETS')
   }
   for (const part of parts) {
-    const layer = LAYER_OF_KIND[part.kind]
     for (const loop of part.loops) {
+      const layer = loop.hole ? LAYER_OF_HOLE[loop.hole] : LAYER_OF_KIND[part.kind]
       out += pair(0, 'POLYLINE') + pair(8, layer) + pair(66, 1) + pair(70, loop.closed ? 1 : 0)
       out += pair(10, 0) + pair(20, 0) + pair(30, 0)
       for (const v of loop.vertices) {

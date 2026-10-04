@@ -14,6 +14,9 @@ import {
   type FlangeVertexInput,
 } from "./flangeGeometry";
 import type { VertexEdgesInfo } from "./edgesInfo";
+import { drawingToPolylines } from "./dxfExport";
+import { tagHoleLoops } from "./dxf";
+import { computeFootPartBoundary2D } from "./footGeometry";
 
 // computeFlangeBoundary2D draws the plate's outline via replicad's own draw() and then .cut()s the
 // holes and slots out of it - primitives that need opencascade's WASM module loaded first (see replicadCad.ts's
@@ -615,6 +618,30 @@ describe("foot", () => {
 
     expect(areaOf(outerHole.drawing)).toBeCloseTo(Math.PI * 2 * 2, 3);
     expect(areaOf(innerHole.drawing)).toBeCloseTo(Math.PI * 5 * 5, 3);
+  });
+
+  it("tells every hole of the exported plate apart by kind", () => {
+    const result = computeFlangeBoundary2D(
+      { vertexId: 2003, edges: ACUTE_OPEN_WEDGE.edges, foot: footAt(70.49) },
+      params,
+    );
+    const loops = tagHoleLoops(drawingToPolylines(result.main!), result.holes);
+    const count = (kind: string | undefined) => loops.filter((loop) => loop.hole === kind).length;
+    const struts = ACUTE_OPEN_WEDGE.edges.length;
+    expect(count("flange-center")).toBe(1);
+    expect(count("flange-side")).toBe(2 * struts);
+    expect(count("flange-rect")).toBe(struts);
+    expect(count("flange-foot-side")).toBe(2);
+    expect(count("flange-foot-rect")).toBe(1);
+    // Only the plate's own outer boundary is left unlabeled.
+    expect(count(undefined)).toBe(1);
+  });
+
+  it("tells the separate foot part's bolt holes from its outline", () => {
+    const result = computeFootPartBoundary2D(DEFAULT_FOOT_PARAMS, 75, 12);
+    const loops = tagHoleLoops(drawingToPolylines(result.main!), result.holes);
+    expect(loops.filter((loop) => loop.hole === "foot")).toHaveLength(2);
+    expect(loops.filter((loop) => !loop.hole)).toHaveLength(1);
   });
 
   it("puts the side bolt holes on the foot's axis, either side of the rectangular hole", () => {

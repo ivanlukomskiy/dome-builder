@@ -1,11 +1,14 @@
 import { draw, drawCircle } from 'replicad'
 import type { Drawing } from 'replicad'
 import type { FootParams } from './flangeGeometry'
+import type { DxfHoleMark } from './dxfExport'
 
 type Point2D = [number, number]
 
 export interface FootPartBoundaryResult {
   main: Drawing | null
+  // Every hole cut through the part - what it is for and where its middle is.
+  holes: DxfHoleMark[]
 }
 
 type MillingDirection =
@@ -66,7 +69,7 @@ export function computeFootPartBoundary2D(
     flangeThickness <= 0 ||
     halfTotalY <= 0
   ) {
-    return { main: null }
+    return { main: null, holes: [] }
   }
 
   let main = draw()
@@ -100,11 +103,13 @@ export function computeFootPartBoundary2D(
     .hLineTo(halfTabX - tabChamfer)
     .close()
 
+  const holes: DxfHoleMark[] = []
   if (foot.holeDiameter > 0) {
     const holeRadius = foot.holeDiameter / 2
-    main = main
-      .cut(drawCircle(holeRadius).translate([straightEndX, 0]))
-      .cut(drawCircle(holeRadius).translate([-straightEndX, 0]))
+    for (const center of [[straightEndX, 0], [-straightEndX, 0]] as Point2D[]) {
+      main = main.cut(drawCircle(holeRadius).translate(center))
+      holes.push({ kind: 'foot', center })
+    }
   }
 
   if (foot.millingDiameter > 0) {
@@ -123,7 +128,7 @@ export function computeFootPartBoundary2D(
     }
   }
 
-  return { main }
+  return { main, holes }
 }
 
 // This file is imported by debug pages dynamically; force a full reload on geometry edits so the

@@ -40,9 +40,31 @@ export interface DxfVertex {
   bulge: number
 }
 
+// What a hole cut through a part is for. Each kind gets its own DXF layer (see dxf.ts), so a CAM
+// package can give e.g. the bolt holes and the tenon slots different operations.
+export type DxfHoleKind =
+  | 'flange-center'
+  | 'flange-side'
+  | 'flange-rect'
+  | 'flange-foot-side'
+  | 'flange-foot-rect'
+  | 'strut-brace'
+  | 'foot'
+  | 'brace-plate-corner'
+  | 'brace-plate-center'
+
+// Where one such hole sits (its middle), in its part's own 2D coordinates - how a drawing's
+// outlines, which come back from replicad unlabeled, are told apart (see tagHoleLoops in dxf.ts).
+export interface DxfHoleMark {
+  kind: DxfHoleKind
+  center: [number, number]
+}
+
 export interface DxfPolyline {
   vertices: DxfVertex[]
   closed: boolean
+  // Set on a hole's outline; absent on the part's outer boundary (and on any cutout of no known kind).
+  hole?: DxfHoleKind
 }
 
 const PATH_COMMAND_ARG_COUNT: Record<string, number> = { M: 2, L: 2, Q: 4, C: 6, A: 7, Z: 0 }

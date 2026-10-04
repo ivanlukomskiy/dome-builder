@@ -5,6 +5,7 @@ import type {
   StrutEndMeasurements,
 } from "./strutGeometry";
 import { add2, length2 } from "./vec2";
+import type { DxfHoleMark } from "./dxfExport";
 
 // A sandbox for hand-building the "flange" part - a flat connector plate at a hub vertex,
 // covering the wedges between struts that have no face between them (see get_edges_info's
@@ -197,6 +198,8 @@ export interface FlangeEdgeMark {
 export interface FlangeBoundaryResult {
   main: Drawing | null;
   edgeMarks: FlangeEdgeMark[];
+  // Every hole cut through the plate - what it is for and where its middle is.
+  holes: DxfHoleMark[];
   helpers: HelperDrawing[];
 }
 
@@ -303,7 +306,7 @@ function computeSideHoles(
   edge: FlangeEdgeInput,
   params: FlangeShapeParams,
   sideHoleDiameter: number,
-): { holeA: Drawing; holeB: Drawing } {
+): { holeA: Drawing; holeB: Drawing; centers: [Point2D, Point2D] } {
   const holeBasis = (edge.strutEnd.tenonStart + edge.strutEnd.tenonEnd) / 2;
   const holeShift = edge.thicknessMm / 2 + params.sideHoleDiameterOffset;
 
@@ -314,6 +317,7 @@ function computeSideHoles(
   return {
     holeA: drawCircle(sideHoleDiameter / 2).translate(holeA),
     holeB: drawCircle(sideHoleDiameter / 2).translate(holeB),
+    centers: [holeA, holeB],
   };
 }
 
@@ -342,7 +346,7 @@ function computeFootSideHoles(
   foot: FlangeFoot,
   params: FlangeShapeParams,
   sideHoleDiameter: number,
-): { holeA: Drawing; holeB: Drawing } {
+): { holeA: Drawing; holeB: Drawing; centers: [Point2D, Point2D] } {
   const { holeCenterX } = computeFootLayout(foot, params);
   const holeShift = foot.thickness / 2 + params.sideHoleDiameterOffset;
 
@@ -352,6 +356,7 @@ function computeFootSideHoles(
   return {
     holeA: drawCircle(sideHoleDiameter / 2).translate(holeA),
     holeB: drawCircle(sideHoleDiameter / 2).translate(holeB),
+    centers: [holeA, holeB],
   };
 }
 
@@ -906,6 +911,7 @@ export function computeFlangeBoundary2D(
 ): FlangeBoundaryResult {
   let helpers: HelperDrawing[] = [];
   const edgeMarks: FlangeEdgeMark[] = [];
+  const holes: DxfHoleMark[] = [];
   const sideHoleDiameter = sideHoleDiameterFor(params, side);
 
   const boundaryCuts: Drawing[] = [];
@@ -914,7 +920,7 @@ export function computeFlangeBoundary2D(
     (kind === "hole" ? holeCuts : boundaryCuts).push(drawing);
   };
 
-  if (vertex.edges.length === 0) return { main: null, edgeMarks: [], helpers };
+  if (vertex.edges.length === 0) return { main: null, edgeMarks: [], holes, helpers };
 
   const { arms, footInRing } = buildPlateArms(
     vertex.edges,
@@ -925,7 +931,8 @@ export function computeFlangeBoundary2D(
 
   vertex.edges.forEach((edge) => {
     if (sideHoleDiameter > 0) {
-      const { holeA, holeB } = computeSideHoles(edge, params, sideHoleDiameter);
+      const { holeA, holeB, centers } = computeSideHoles(edge, params, sideHoleDiameter);
+      for (const center of centers) holes.push({ kind: "flange-side", center });
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, +)` });
       addNegative(holeA, "hole");
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: `side hole (edge ${edge.edgeId}, -)` });
@@ -939,6 +946,7 @@ export function computeFlangeBoundary2D(
     const rectCut = computeRectangleCut(rectX0, rectX1, -rectHalfY, rectHalfY, edge.projectedAngleDeg);
     helpers.push({ drawing: rectCut, color: "cyan", name: `rect cut ${edge.edgeId}` });
     addNegative(rectCut);
+    holes.push({ kind: "flange-rect", center: polar(edge.projectedAngleDeg, (rectX0 + rectX1) / 2) });
     edgeMarks.push({
       edgeId: edge.edgeId,
       center: polar(
@@ -982,7 +990,8 @@ export function computeFlangeBoundary2D(
   const foot = vertex.foot;
   if (foot) {
     if (sideHoleDiameter > 0 && foot.holeDiameter > 0) {
-      const { holeA, holeB } = computeFootSideHoles(foot, params, sideHoleDiameter);
+      const { holeA, holeB, centers } = computeFootSideHoles(foot, params, sideHoleDiameter);
+      for (const center of centers) holes.push({ kind: "flange-foot-side", center });
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: "foot side hole (+)" });
       addNegative(holeA, "hole");
       helpers.push({ drawing: holeB, color: HOLE_COLOR, name: "foot side hole (-)" });
@@ -993,6 +1002,7 @@ export function computeFlangeBoundary2D(
     const footRectCut = computeRectangleCut(holeX0, holeX1, -holeHalfY, holeHalfY, foot.projectedAngleDeg);
     helpers.push({ drawing: footRectCut, color: "cyan", name: "foot rect cut" });
     addNegative(footRectCut);
+    holes.push({ kind: "flange-foot-rect", center: polar(foot.projectedAngleDeg, (holeX0 + holeX1) / 2) });
 
     computeRectangleCornerMillingCuts(
       holeX0,
@@ -1012,6 +1022,7 @@ export function computeFlangeBoundary2D(
     const centerHoleDrawing = drawCircle(params.centerHoleDiameter / 2);
     helpers.push({ drawing: centerHoleDrawing, color: HOLE_COLOR, name: "center hole" });
     addNegative(centerHoleDrawing, "hole");
+    holes.push({ kind: "flange-center", center: [0, 0] });
   }
   // Drawn last so it stays on top of everything else instead of getting z-fought away.
   helpers.push({ drawing: drawCircle(5), color: "#f5e050", name: `vertex ${vertex.vertexId}` });
@@ -1037,7 +1048,7 @@ export function computeFlangeBoundary2D(
     main = main.cut(s);
   });
 
-  return { main, edgeMarks, helpers };
+  return { main, edgeMarks, holes, helpers };
 }
 
 // This file has no component export, so it isn't a React Fast Refresh boundary on its own, and

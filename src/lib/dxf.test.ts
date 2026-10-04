@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutDxfParts, orientDxfStrut, readableAngle, writeDxf, type DxfPart } from './dxf'
+import { layoutDxfParts, orientDxfStrut, readableAngle, tagHoleLoops, writeDxf, type DxfPart } from './dxf'
 import { createPartNameMaps, flangeNameKey } from './partNames'
 import type { DxfPolyline } from './dxfExport'
 
@@ -174,6 +174,50 @@ describe('writeDxf', () => {
     expect(text.includes('LAYER\n2\nSTRUTS\n70\n0\n62\n7\n')).toBe(true)
     // Every group is a code/value line pair.
     expect(lines.length % 2).toBe(1) // trailing newline leaves one empty element
+  })
+})
+
+describe('hole layers', () => {
+  // A two-vertex full circle, the way drawingToPolylines returns one.
+  const circle = (cx: number, cy: number, r: number): DxfPolyline => ({
+    closed: true,
+    vertices: [{ x: cx + r, y: cy, bulge: 1 }, { x: cx - r, y: cy, bulge: 1 }],
+  })
+  const plate: DxfPart = {
+    name: 'F1',
+    kind: 'flange',
+    // The outer boundary is deliberately not first: replicad's loop order is not relied on.
+    loops: tagHoleLoops(
+      [circle(50, 50, 4), rect(100, 100), rect(20, 6, 60, 47), circle(30, 20, 3), circle(80, 80, 2)],
+      [
+        { kind: 'flange-center', center: [50, 50] },
+        { kind: 'flange-rect', center: [70, 50] },
+        { kind: 'flange-side', center: [30, 20] },
+      ],
+    ),
+  }
+
+  it('labels each hole by the mark at its middle, and leaves the rest alone', () => {
+    expect(plate.loops.map((loop) => loop.hole)).toEqual(['flange-center', undefined, 'flange-rect', 'flange-side', undefined])
+  })
+
+  it('never labels the outer boundary, even with a mark at its middle', () => {
+    const [outer] = tagHoleLoops([rect(100, 100)], [{ kind: 'flange-center', center: [50, 50] }])
+    expect(outer.hole).toBeUndefined()
+  })
+
+  it('writes each hole on its own kind\'s layer and keeps the outline on the part\'s', () => {
+    const text = writeDxf(layoutDxfParts([plate], { scale: 1 }))
+    const layers = text.split('\n0\nPOLYLINE\n').slice(1).map((entity) => entity.match(/^8\n([^\n]+)/)![1])
+    expect(layers).toEqual(['flange-center-holes', 'FLANGES', 'flange-rect-holes', 'flange-side-holes', 'FLANGES'])
+    // Vertices sit on their polyline's layer, and every hole layer is declared in the table.
+    expect(text.includes('VERTEX\n8\nflange-rect-holes\n')).toBe(true)
+    const colors = ['flange-center-holes', 'flange-side-holes', 'flange-rect-holes', 'flange-foot-side-holes',
+      'flange-foot-rect-holes', 'strut-brace-holes', 'foot-holes', 'brace-plate-corner-holes', 'brace-plate-center-holes']
+      .map((name) => text.match(new RegExp(`LAYER\\n2\\n${name}\\n70\\n0\\n62\\n(\\d+)\\n`))?.[1])
+    // Each hole layer has a color of its own, none shared with the outlines, labels, helpers or sheets.
+    expect(colors.every((color) => color !== undefined && !['7', '1', '3', '5'].includes(color))).toBe(true)
+    expect(new Set(colors).size).toBe(colors.length)
   })
 })
 
