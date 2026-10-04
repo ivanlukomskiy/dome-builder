@@ -68,7 +68,7 @@ export const ru: Dictionary = {
   "Fit model": "Вписать модель",
   "Preview errors": "Ошибки предпросмотра",
   "Failed to build {part}": "Не удалось построить: {part}",
-  "Dismiss error": "Закрыть ошибку",
+  "Dismiss errors": "Закрыть ошибки",
   "Vertices": "Вершины",
   "Edges": "Рёбра",
   "Faces": "Грани",

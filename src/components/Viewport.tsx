@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Grid } from '@react-three/drei'
 import * as THREE from 'three'
@@ -153,12 +153,11 @@ export function Viewport({
   // previewBuilder.worker.ts) - this just holds whatever progress it last reported, to surface in
   // the HUD rather than leaving the viewport looking stuck while it works.
   const [previewProgress, setPreviewProgress] = useState<PreviewProgress | null>(null)
-  const [previewFailures, setPreviewFailures] = useState<(PreviewPartFailure & { id: number })[]>([])
-  const nextFailureId = useRef(0)
+  const [previewFailures, setPreviewFailures] = useState<PreviewPartFailure[]>([])
   const onPreviewFailure = useCallback((failure: PreviewPartFailure) => {
     setPreviewFailures((current) => {
       if (current.some((item) => item.part === failure.part && item.error === failure.error)) return current
-      return [...current, { ...failure, id: ++nextFailureId.current }]
+      return [...current, failure]
     })
   }, [])
   const [fitRequest, setFitRequest] = useState(0)
@@ -189,21 +188,24 @@ export function Viewport({
         {t('Fit model')}
       </button>
       {previewFailures.length > 0 && (
-        <div className="preview-failures" aria-label={t('Preview errors')}>
-          {previewFailures.map((failure) => (
-            <div className="preview-failure" role="alert" key={failure.id}>
-              <div className="preview-failure-header">
+        <div className="preview-failures" role="region" aria-label={t('Preview errors')}>
+          <div className="preview-failures-header">
+            <strong>{t('Preview errors')} ({previewFailures.length})</strong>
+            <button
+              type="button"
+              aria-label={t('Dismiss errors')}
+              title={t('Dismiss errors')}
+              onClick={() => setPreviewFailures([])}
+            >×</button>
+          </div>
+          <div className="preview-failure-list" aria-live="polite">
+            {previewFailures.map((failure) => (
+              <div className="preview-failure" key={JSON.stringify([failure.part, failure.error])}>
                 <strong>{t('Failed to build {part}', { part: failure.part })}</strong>
-                <button
-                  type="button"
-                  aria-label={t('Dismiss error')}
-                  title={t('Dismiss error')}
-                  onClick={() => setPreviewFailures((current) => current.filter((item) => item.id !== failure.id))}
-                >×</button>
+                <div className="preview-failure-message">{failure.error}</div>
               </div>
-              <div className="preview-failure-message">{failure.error}</div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
       <Canvas

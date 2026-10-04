@@ -295,30 +295,27 @@ body,
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   width: min(420px, calc(100% - 32px));
   max-height: min(60vh, 600px);
-  overflow-y: auto;
-}
-
-.preview-failure {
-  padding: 10px 12px;
   border: 1px solid #9f5353;
   border-radius: 6px;
   background: #2d1c20;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   color: #ffe5e5;
   font-size: 12px;
+  overflow: hidden;
 }
 
-.preview-failure-header {
+.preview-failures-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #9f5353;
 }
 
-.preview-failure-header button {
+.preview-failures-header button {
   flex: 0 0 auto;
   border: 0;
   background: transparent;
@@ -326,6 +323,19 @@ body,
   cursor: pointer;
   font-size: 18px;
   line-height: 1;
+}
+
+.preview-failure-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.preview-failure {
+  padding: 10px 12px;
+}
+
+.preview-failure + .preview-failure {
+  border-top: 1px solid rgba(255, 229, 229, 0.18);
 }
 
 .preview-failure-message {
