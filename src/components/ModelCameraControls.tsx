@@ -16,12 +16,13 @@ interface Props {
 const VIEW_DIRECTION = new THREE.Vector3(0.875, 0.7, 1).normalize()
 
 export function ModelCameraControls({ frame, diameter, mode, topologyKey, fitRequest }: Props) {
-  const { camera, size } = useThree()
+  const { size } = useThree()
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null)
   const previous = useRef<{ frame: ViewportFrame; diameter: number; mode: ViewMode; topologyKey: string; fitRequest: number } | null>(null)
 
   useLayoutEffect(() => {
     const controls = controlsRef.current
+    const camera = controls?.object
     if (!controls || !(camera instanceof THREE.PerspectiveCamera)) return
 
     const center = new THREE.Vector3(...frame.center)
@@ -54,7 +55,7 @@ export function ModelCameraControls({ frame, diameter, mode, topologyKey, fitReq
     if (distance > 0) camera.position.copy(controls.target).addScaledVector(offset, THREE.MathUtils.clamp(distance, minDistance, maxDistance) / distance)
     controls.update()
     previous.current = { frame, diameter, mode, topologyKey, fitRequest }
-  }, [camera, diameter, fitRequest, frame, mode, size.height, size.width, topologyKey])
+  }, [diameter, fitRequest, frame, mode, size.height, size.width, topologyKey])
 
   return <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} />
 }
