@@ -13,6 +13,8 @@ export type DxfPartKind = 'strut' | 'flange' | 'foot' | 'brace-plate' | 'brace'
 export interface DxfPart {
   name: string
   kind: DxfPartKind
+  // Thickness of the material the part is cut from, mm (before the sheet scale is applied).
+  thickness: number
   loops: DxfPolyline[]
   // Optional preferred red-label center in the part's own coordinates. When absent, the label is
   // centered in the part's bounding box.
@@ -43,7 +45,15 @@ export interface PlacedDxfPart extends DxfPart {
   label: { x: number; y: number; height: number; angleDeg: number }
 }
 
-export interface DxfSheet { x: number; y: number; width: number; height: number }
+// `thickness`: the material thickness (exported mm) of every part on the sheet.
+export interface DxfSheet { x: number; y: number; width: number; height: number; thickness: number }
+
+export const SHEET_THICKNESS_LAYER = 'SHEET_THICKNESS'
+
+// The text a sheet's thickness is written as, e.g. "12 mm".
+export function sheetThicknessLabel(thickness: number): string {
+  return `${Number(thickness.toFixed(3))} mm`
+}
 
 // Layer of each kind of hole: a part's outer boundary stays on its part kind's layer, every hole
 // in it goes on the layer of what the hole is for.
@@ -324,7 +334,8 @@ function pair(code: number, value: string | number): string {
 }
 
 // The DXF file text for the laid-out parts: each outer boundary a closed POLYLINE on its part
-// kind's layer, each hole one on its hole kind's layer, each ID a TEXT on the LABELS layer.
+// kind's layer, each hole one on its hole kind's layer, each ID a TEXT on the LABELS layer. Each
+// sheet is a border on the SHEETS layer with its thickness as a TEXT on the SHEET_THICKNESS layer.
 export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): string {
   let out = ''
   out += pair(0, 'SECTION') + pair(2, 'HEADER') + pair(9, '$ACADVER') + pair(1, 'AC1009')
@@ -335,7 +346,7 @@ export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): strin
   out += pair(0, 'TABLE') + pair(2, 'LTYPE') + pair(70, 1)
   out += pair(0, 'LTYPE') + pair(2, 'CONTINUOUS') + pair(70, 0) + pair(3, 'Solid line') + pair(72, 65) + pair(73, 0) + pair(40, 0)
   out += pair(0, 'ENDTAB')
-  const layers = sheets.length ? [...DXF_LAYERS, { name: 'SHEETS', color: 5 }] : DXF_LAYERS
+  const layers = sheets.length ? [...DXF_LAYERS, { name: 'SHEETS', color: 5 }, { name: SHEET_THICKNESS_LAYER, color: 5 }] : DXF_LAYERS
   out += pair(0, 'TABLE') + pair(2, 'LAYER') + pair(70, layers.length)
   for (const layer of layers) {
     out += pair(0, 'LAYER') + pair(2, layer.name) + pair(70, 0) + pair(62, layer.color) + pair(6, 'CONTINUOUS')
@@ -350,6 +361,12 @@ export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): strin
     for (const [x, y] of [[sheet.x, sheet.y], [sheet.x + sheet.width, sheet.y], [sheet.x + sheet.width, sheet.y + sheet.height], [sheet.x, sheet.y + sheet.height]])
       out += pair(0, 'VERTEX') + pair(8, 'SHEETS') + pair(10, num(x)) + pair(20, num(y)) + pair(30, 0)
     out += pair(0, 'SEQEND') + pair(8, 'SHEETS')
+    // The sheet's thickness, left-aligned just above its top-left corner: outside the border, so it
+    // can never run into a part.
+    const textHeight = Math.min(sheet.width, sheet.height) / 40
+    out += pair(0, 'TEXT') + pair(8, SHEET_THICKNESS_LAYER)
+      + pair(10, num(sheet.x)) + pair(20, num(sheet.y + sheet.height + textHeight / 2)) + pair(30, 0)
+      + pair(40, num(textHeight)) + pair(1, sheetThicknessLabel(sheet.thickness))
   }
   for (const part of parts) {
     for (const loop of part.loops) {

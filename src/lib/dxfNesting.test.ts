@@ -4,7 +4,7 @@ import { DEFAULT_DXF_SHEET_SETTINGS, validateDxfSheetSettings } from './dxfSheet
 import { layoutDxfParts, writeDxf, type DxfPart } from './dxf'
 
 const settings = { ...DEFAULT_DXF_SHEET_SETTINGS, arrangeOnSheet: true, width: 100, height: 100, margin: 10, spacing: 5 }
-const rectangle = (name = '1', width = 20, height = 10): DxfPart => ({ name, kind: 'strut', loops: [{ closed: true,
+const rectangle = (name = '1', width = 20, height = 10): DxfPart => ({ name, kind: 'strut', thickness: 10, loops: [{ closed: true,
   vertices: [[0, 0], [width, 0], [width, height], [0, height]].map(([x, y]) => ({ x, y, bulge: 0 })) }] })
 const placement = (index = 0, sheet = 0, x = 0, y = 0, angle = 0) => ({ index, sheet, x: x * 1e6, y: y * 1e6, angle })
 const engine = (...placements: ReturnType<typeof placement>[]): NestingEngine => ({ pack: vi.fn(() => placements) })
@@ -47,7 +47,7 @@ describe('sheet layout', () => {
     part.labelAngleDeg = 15
     part.helpers = [{ text: '2', x: 2, y: 1, height: 3, angleDeg: 30 }]
     const result = nestDxfParts([part], { scale: 2, partIdLabelSize: 4 }, settings, engine(placement(0, 0, 20, 0, Math.PI / 2)))
-    expect(result.sheets).toEqual([{ x: 0, y: 0, width: 100, height: 100 }])
+    expect(result.sheets).toEqual([{ x: 0, y: 0, width: 100, height: 100, thickness: 20 }])
     expect(result.parts[0].loops[0].vertices[0]).toEqual({ x: 30, y: 10, bulge: 0 })
     expect(result.parts[0].loops[1].vertices[1].y).toBeCloseTo(14)
     expect(result.parts[0].label).toEqual({ x: 24, y: 20, height: 8, angleDeg: 105 })
@@ -55,7 +55,7 @@ describe('sheet layout', () => {
   })
 
   it('preserves arc bulges', () => {
-    const part: DxfPart = { name: 'circle', kind: 'flange', loops: [{ closed: true,
+    const part: DxfPart = { name: 'circle', kind: 'flange', thickness: 10, loops: [{ closed: true,
       vertices: [{ x: -5, y: 0, bulge: 1 }, { x: 5, y: 0, bulge: 1 }] }] }
     const result = nestDxfParts([part], { scale: 1 }, settings, engine(placement(0, 0, 10, 10, Math.PI / 2)))
     expect(result.parts[0].loops[0].vertices.map((v) => v.bulge)).toEqual([1, 1])
@@ -70,12 +70,31 @@ describe('sheet layout', () => {
 
   it('draws additional sheets side by side on their own DXF layer', () => {
     const result = nestDxfParts([rectangle('1'), rectangle('2')], { scale: 1 }, settings, engine(placement(), placement(1, 1)))
-    expect(result.sheets[1]).toEqual({ x: 120, y: 0, width: 100, height: 100 })
+    expect(result.sheets[1]).toEqual({ x: 120, y: 0, width: 100, height: 100, thickness: 10 })
     expect(result.parts[1].loops[0].vertices[0].x).toBe(130)
     const dxf = writeDxf(result.parts, result.sheets)
     expect(dxf.match(/0\nPOLYLINE\n8\nSHEETS\n/g)).toHaveLength(2)
     expect(dxf).toContain('2\nSHEETS\n70\n0\n62\n5\n')
     expect(writeDxf(layoutDxfParts([rectangle()], { scale: 1 }))).not.toContain('SHEETS')
+  })
+
+  it('packs each thickness on its own sheets, thinnest first, and labels every sheet with it', () => {
+    const parts = [{ ...rectangle('thick'), thickness: 12 }, { ...rectangle('thin-1'), thickness: 4.5 }, { ...rectangle('thin-2'), thickness: 4.5 }]
+    // The engine sees one thickness at a time, so both of its answers are in that group's own numbering.
+    const packer: NestingEngine = { pack: vi.fn((polygons: Point2[][]) => polygons.map((_, i) => placement(i, i))) }
+    const progress = vi.fn()
+    const result = nestDxfParts(parts, { scale: 2 }, settings, packer, progress)
+    expect(vi.mocked(packer.pack).mock.calls.map(([polygons]) => polygons.length)).toEqual([2, 1])
+    expect(result.sheets.map((sheet) => sheet.thickness)).toEqual([9, 9, 24])
+    expect(result.parts.map((part) => part.name)).toEqual(['thick', 'thin-1', 'thin-2'])
+    expect(result.parts.map((part) => part.loops[0].vertices[0].x)).toEqual([250, 10, 130])
+    vi.mocked(packer.pack).mock.calls[1][5](1, 1)
+    expect(progress).toHaveBeenLastCalledWith(3, 3)
+    const dxf = writeDxf(result.parts, result.sheets)
+    expect(dxf).toContain('2\nSHEET_THICKNESS\n70\n0\n62\n5\n')
+    expect(dxf).toContain('0\nTEXT\n8\nSHEET_THICKNESS\n10\n0\n20\n101.2500\n30\n0\n40\n2.5000\n1\n9 mm\n')
+    expect(dxf).toContain('0\nTEXT\n8\nSHEET_THICKNESS\n10\n240.0000\n20\n101.2500\n30\n0\n40\n2.5000\n1\n24 mm\n')
+    expect(writeDxf(layoutDxfParts(parts, { scale: 1 }))).not.toContain('SHEET_THICKNESS')
   })
 
   it('rejects overlaps, insufficient spacing, margins, and missing or duplicate parts', () => {

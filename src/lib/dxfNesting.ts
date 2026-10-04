@@ -140,20 +140,40 @@ export function nestDxfParts(parts: DxfPart[], options: DxfLayoutOptions, settin
     }
     return hull
   })
-  const placements = engine.pack(polygons, Math.floor(width * UNITS), Math.floor(height * UNITS), Math.ceil(settings.spacing * UNITS), rotations, progress)
-  if (placements.length !== parts.length) throw new Error('Packing failed: not every part was placed.')
+  // A sheet is one piece of stock, so it only takes parts of its own thickness: each thickness is
+  // packed on its own, thinnest first, onto its own run of sheets.
+  const groups = new Map<number, number[]>()
+  parts.forEach((part, i) => {
+    const thickness = Math.round(part.thickness * 1000) / 1000
+    groups.set(thickness, [...(groups.get(thickness) ?? []), i])
+  })
+  const placements: NestPlacement[] = []
+  const sheetThickness: number[] = []
+  let packedParts = 0
+  for (const [thickness, indices] of [...groups].sort((a, b) => a[0] - b[0])) {
+    const offset = packedParts
+    const packed = engine.pack(indices.map((i) => polygons[i]), Math.floor(width * UNITS), Math.floor(height * UNITS),
+      Math.ceil(settings.spacing * UNITS), rotations, (done) => progress(offset + done, parts.length))
+    if (packed.length !== indices.length) throw new Error('Packing failed: not every part was placed.')
+    if (packed.some(({ index, sheet }) => !Number.isInteger(index) || index < 0 || index >= indices.length
+      || !Number.isInteger(sheet) || sheet < 0 || sheet >= indices.length))
+      throw new Error('Packing failed: invalid part placement.')
+    const usedSheets = [...new Set(packed.map(({ sheet }) => sheet))].sort((a, b) => a - b)
+    for (const placement of packed)
+      placements.push({ ...placement, index: indices[placement.index], sheet: sheetThickness.length + usedSheets.indexOf(placement.sheet) })
+    for (let i = 0; i < usedSheets.length; i++) sheetThickness.push(thickness * options.scale)
+    packedParts += indices.length
+  }
+  placements.sort((a, b) => a.index - b.index)
   const seen = new Set<number>()
-  const usedSheets = new Set<number>()
   const placedEnvelopes: { polygon: Point2[]; bounds: ReturnType<typeof box>; sheet: number; name: string }[] = []
   for (const placement of placements) {
     const { index, sheet, x, y, angle } = placement
-    if (!Number.isInteger(index) || index < 0 || index >= parts.length || seen.has(index)
-      || !Number.isInteger(sheet) || sheet < 0 || sheet >= parts.length || ![x, y, angle].every(Number.isFinite))
+    if (seen.has(index) || ![x, y, angle].every(Number.isFinite))
       throw new Error('Packing failed: invalid part placement.')
     if (!rotations.some((allowed) => Math.abs(Math.sin((angle - allowed) / 2)) < 1e-9))
       throw new Error(`Packing failed: part ${parts[index].name} was turned by an angle that is not allowed.`)
     seen.add(index)
-    usedSheets.add(sheet)
     const polygon = polygons[index].map(([px, py]) => transform([px / UNITS, py / UNITS], angle, x / UNITS, y / UNITS))
     const bounds = box(polygon)
     if (bounds.minX < -EPSILON || bounds.minY < -EPSILON || bounds.maxX > width + EPSILON || bounds.maxY > height + EPSILON)
@@ -168,11 +188,10 @@ export function nestDxfParts(parts: DxfPart[], options: DxfLayoutOptions, settin
     }
     placedEnvelopes.push({ polygon, bounds, sheet, name: parts[index].name })
   }
-  const sheetIds = [...usedSheets].sort((a, b) => a - b)
   const sheetGap = Math.max(20, settings.spacing)
-  const sheets = sheetIds.map((_, i) => ({ x: i * (settings.width + sheetGap), y: 0, width: settings.width, height: settings.height }))
+  const sheets = sheetThickness.map((thickness, i) => ({ x: i * (settings.width + sheetGap), y: 0, width: settings.width, height: settings.height, thickness }))
   const placed = placements.map(({ index, sheet, x, y, angle }): PlacedDxfPart => {
-    const part = parts[index], sheetRect = sheets[sheetIds.indexOf(sheet)]
+    const part = parts[index], sheetRect = sheets[sheet]
     const dx = x / UNITS + settings.margin + sheetRect.x, dy = y / UNITS + settings.margin
     const point = (px: number, py: number) => transform([px * options.scale, py * options.scale], angle, dx, dy)
     const angleDeg = angle * 180 / Math.PI

@@ -389,19 +389,14 @@ function Help({ text }: { text: string }) {
     const cleanups = targets.map((target) => {
       const show = () => { anchor.current = target; setVisible(true) }
       const hide = () => { if (anchor.current === target) setVisible(false) }
-      const leave = () => { if (!target.contains(document.activeElement)) hide() }
       target.addEventListener('mouseenter', show)
-      target.addEventListener('mouseleave', leave)
-      target.addEventListener('focusin', show)
-      target.addEventListener('focusout', hide)
+      target.addEventListener('mouseleave', hide)
       const focusable = target.matches('input, button') ? [target] : Array.from(target.querySelectorAll<HTMLElement>('input, button'))
       const describedBy = focusable.map((item) => [item, item.getAttribute('aria-describedby')] as const)
       focusable.forEach((item) => item.setAttribute('aria-describedby', [item.getAttribute('aria-describedby'), id].filter(Boolean).join(' ')))
       return () => {
         target.removeEventListener('mouseenter', show)
-        target.removeEventListener('mouseleave', leave)
-        target.removeEventListener('focusin', show)
-        target.removeEventListener('focusout', hide)
+        target.removeEventListener('mouseleave', hide)
         describedBy.forEach(([item, value]) => value === null ? item.removeAttribute('aria-describedby') : item.setAttribute('aria-describedby', value))
       }
     })
@@ -1270,7 +1265,7 @@ export function Sidebar({
             <button onClick={onDownloadDxf} disabled={exportBusy}>{t('Download DXF')}</button>
           </div>
           <Help text={dxfSheetSettings.arrangeOnSheet
-            ? t('The DXF arranges all parts across as many sheets as needed. Blue borders are on the SHEETS layer. Red and green labels stay with their parts.')
+            ? t("The DXF arranges all parts across as many sheets as needed, one material thickness per sheet. Blue borders are on the SHEETS layer, and each sheet's thickness is written above its top-left corner on the SHEET_THICKNESS layer. Red and green labels stay with their parts.")
             : t('The DXF puts the flat outlines of all those parts on one sheet (same scale), each labeled with its numeric part ID in red. Green labels show matching numeric part IDs where parts connect.')} />
 
         </SidebarSection>

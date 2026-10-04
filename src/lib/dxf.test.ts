@@ -15,6 +15,7 @@ const rect = (w: number, h: number, x = 0, y = 0): DxfPolyline => ({
 const part = (name: string, kind: DxfPart['kind'], w: number, h: number, x = 100, y = -50): DxfPart => ({
   name,
   kind,
+  thickness: 10,
   loops: [rect(w, h, x, y)],
 })
 
@@ -75,13 +76,13 @@ describe('layoutDxfParts', () => {
   })
 
   it('drops parts with no geometry', () => {
-    expect(layoutDxfParts([{ name: 'x', kind: 'strut', loops: [] }], { scale: 1 })).toEqual([])
+    expect(layoutDxfParts([{ name: 'x', kind: 'strut', thickness: 10, loops: [] }], { scale: 1 })).toEqual([])
   })
 })
 
 describe('strut orientation before DXF layout', () => {
   const bowed: DxfPart = {
-    name: '1', kind: 'strut',
+    name: '1', kind: 'strut', thickness: 10,
     loops: [{ closed: true, vertices: [
       { x: 0, y: 0, bulge: 0.25 },
       { x: 0, y: 10, bulge: 0 },
@@ -131,7 +132,7 @@ describe('arcs', () => {
   // magnitude 1 = 180 degrees) from (10,0) back to (0,0) that reaches 5 away from the axis.
   const halfDisc: DxfPart = {
     name: 'arc',
-    kind: 'flange',
+    kind: 'flange', thickness: 10,
     loops: [
       {
         closed: true,
@@ -185,7 +186,7 @@ describe('hole layers', () => {
   })
   const plate: DxfPart = {
     name: 'F1',
-    kind: 'flange',
+    kind: 'flange', thickness: 10,
     // The outer boundary is deliberately not first: replicad's loop order is not relied on.
     loops: tagHoleLoops(
       [circle(50, 50, 4), rect(100, 100), rect(20, 6, 60, 47), circle(30, 20, 3), circle(80, 80, 2)],

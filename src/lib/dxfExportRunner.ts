@@ -169,6 +169,7 @@ export async function runDxfExport(
     parts.push({
       ...bracePartLabels(body, names, labelSettings),
       kind: 'brace',
+      thickness: body.thickness,
       loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
     })
     onProgress({ phase: 'braces', done: index + 1, total: bodies.length })

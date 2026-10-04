@@ -10,7 +10,7 @@ beforeAll(async () => {
   engine = await createNesting({ wasmBinary: await readFile(new URL('../vendor/libnest2d/nesting.wasm', import.meta.url)) })
 })
 
-const rectangle = (name: string, width: number, height: number): DxfPart => ({ name, kind: 'strut', loops: [{ closed: true,
+const rectangle = (name: string, width: number, height: number): DxfPart => ({ name, kind: 'strut', thickness: 10, loops: [{ closed: true,
   vertices: [[0, 0], [width, 0], [width, height], [0, height]].map(([x, y]) => ({ x, y, bulge: 0 })) }] })
 const settings = { ...DEFAULT_DXF_SHEET_SETTINGS, arrangeOnSheet: true, width: 110, height: 110, margin: 10, spacing: 5 }
 
@@ -22,6 +22,14 @@ describe('compiled libnest2d', () => {
     expect(result.parts).toHaveLength(5)
     expect(result.sheets).toHaveLength(2)
     expect(progress.at(-1)).toBe(5)
+  })
+
+  it('never shares a sheet between thicknesses, even when the parts would fit together', () => {
+    const parts = [3, 6, 3, 6].map((thickness, i) => ({ ...rectangle(String(i), 20, 20), thickness }))
+    const result = nestDxfParts(parts, { scale: 1 }, settings, engine)
+    expect(result.sheets.map((sheet) => sheet.thickness)).toEqual([3, 6])
+    const sheetOf = (i: number) => result.sheets.findIndex((sheet) => result.parts[i].loops[0].vertices[0].x < sheet.x + sheet.width)
+    expect([0, 1, 2, 3].map(sheetOf)).toEqual([0, 1, 0, 1])
   })
 
   it('rotates a part that can only fit after a quarter turn', () => {
@@ -44,7 +52,7 @@ describe('compiled libnest2d', () => {
   })
 
   it.each([60, 30, 10] as const)('packs with a %i degree step, turning parts only by its multiples', (rotationStep) => {
-    const triangle = (name: string): DxfPart => ({ name, kind: 'flange', loops: [{ closed: true,
+    const triangle = (name: string): DxfPart => ({ name, kind: 'flange', thickness: 10, loops: [{ closed: true,
       vertices: [[0, 0], [45, 0], [0, 30]].map(([x, y]) => ({ x, y, bulge: 0 })) }] })
     const parts = [...Array.from({ length: 4 }, (_, i) => triangle(`t${i}`)), rectangle('r1', 50, 12), rectangle('r2', 50, 12)]
     // nestDxfParts itself rejects overlaps, spacing violations and angles off the step.
@@ -64,9 +72,9 @@ describe('compiled libnest2d', () => {
   })
 
   it('packs curved and concave parts using conservative envelopes', () => {
-    const circle: DxfPart = { name: 'circle', kind: 'flange', loops: [{ closed: true,
+    const circle: DxfPart = { name: 'circle', kind: 'flange', thickness: 10, loops: [{ closed: true,
       vertices: [{ x: -10, y: 0, bulge: 1 }, { x: 10, y: 0, bulge: 1 }] }] }
-    const concave: DxfPart = { name: 'concave', kind: 'strut', loops: [{ closed: true,
+    const concave: DxfPart = { name: 'concave', kind: 'strut', thickness: 10, loops: [{ closed: true,
       vertices: [[0, 0], [40, 0], [40, 5], [10, 5], [10, 15], [40, 15], [40, 20], [0, 20]].map(([x, y]) => ({ x, y, bulge: 0 })) }] }
     const result = nestDxfParts([circle, concave, rectangle('rect', 20, 30)], { scale: 1 }, settings, engine)
     expect(result.parts).toHaveLength(3)

@@ -475,8 +475,7 @@ body,
   font-size: 12px;
   pointer-events: none;
 }
-.history-action:hover .history-action-tooltip,
-.history-action:focus-within .history-action-tooltip { display: block; }
+.history-action:hover .history-action-tooltip { display: block; }
 .transform-field { position: relative; }
 .transform-field input[type='number'] { flex-shrink: 0; width: 80px; }
 .field-help { display: none; }

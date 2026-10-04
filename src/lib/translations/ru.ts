@@ -231,5 +231,5 @@ export const ru: Dictionary = {
   "None": "Нет",
   "DXF export failed: {message}": "Ошибка экспорта DXF: {message}",
   "DXF: arranging parts — {done} / {total}": "DXF: размещение деталей — {done} / {total}",
-  "The DXF arranges all parts across as many sheets as needed. Blue borders are on the SHEETS layer. Red and green labels stay with their parts.": "DXF размещает все детали на необходимом количестве листов. Синие границы находятся на слое SHEETS. Красные и зелёные подписи перемещаются вместе с деталями.",
+  "The DXF arranges all parts across as many sheets as needed, one material thickness per sheet. Blue borders are on the SHEETS layer, and each sheet's thickness is written above its top-left corner on the SHEET_THICKNESS layer. Red and green labels stay with their parts.": "DXF размещает все детали на необходимом количестве листов, на каждом листе — детали одной толщины. Синие границы находятся на слое SHEETS, а толщина листа подписана над его левым верхним углом на слое SHEET_THICKNESS. Красные и зелёные подписи перемещаются вместе с деталями.",
 }

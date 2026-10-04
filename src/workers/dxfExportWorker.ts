@@ -104,6 +104,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           ...labels,
           kind: 'strut',
+          thickness: job.beamThickness,
           loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)), boundary.holes),
           strutPath: { endA, endB, middle: arcPoint2(endA, endB, domeCenter, 0.5) },
         })
@@ -129,6 +130,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)],
           kind: 'brace-plate',
+          thickness: brace.params.plateThickness,
           loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(plate)), holes),
           labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
         })
@@ -163,6 +165,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         parts.push({
           ...flangePartLabels(req, vertex, side, boundary),
           kind: 'flange',
+          thickness: req.grooveDepth,
           loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)), boundary.holes),
         })
       } catch (err) {
@@ -180,6 +183,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
           parts.push({
             ...footPartLabels(req, vertex.vertexId),
             kind: 'foot',
+            thickness: foot.thickness,
             loops: tagHoleLoops(timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)), boundary.holes),
           })
         }
