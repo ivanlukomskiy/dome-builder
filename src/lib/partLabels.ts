@@ -173,10 +173,10 @@ export function strutPartLabels(req: LabelContext, job: StrutGeometryEntry, boun
 }
 
 export function flangePartLabels(req: LabelContext, vertex: VertexEdgesInfo, side: FlangeSide, boundary: ReturnType<typeof computeFlangeBoundary2D>): PartLabels {
-  // Which strut goes into each rectangular hole, in green along the hole.
+  // Which strut goes into each rectangular hole, in green across the arm, centered on the strip of
+  // plate between the hole's far side and the arm's own end.
   const helpers: DxfHelperText[] = boundary.edgeMarks.map((mark) => {
-    const [dx, dy] = polar2(mark.angleDeg, req.connectedPartIdLabelSize * 0.9)
-    const [x, y] = add2(mark.farSideCenter, [dx, dy])
+    const [x, y] = linePoint2(mark.farSideCenter, mark.armEndCenter, 0.5)
     return {
       text: req.names.struts[mark.edgeId],
       x,
@@ -196,9 +196,11 @@ export function flangePartLabels(req: LabelContext, vertex: VertexEdgesInfo, sid
       height: Math.min(req.connectedPartIdLabelSize, vertex.foot.grooveLength * 0.7),
     })
   }
+  // The part ID sits just above the center hole - or right on the vertex when there is no hole.
+  const centerHoleDiameter = resolveFlangeParams(req.flangeParams, vertex.flangeOverrides).centerHoleDiameter
   return {
     name: req.names.flanges[flangeNameKey(vertex.vertexId, side)],
-    labelAnchor: { x: 0, y: resolveFlangeParams(req.flangeParams, vertex.flangeOverrides).centerHoleDiameter / 2 + req.partIdLabelSize },
+    labelAnchor: { x: 0, y: centerHoleDiameter > 0 ? centerHoleDiameter / 2 + req.partIdLabelSize : 0 },
     helpers,
   }
 }
