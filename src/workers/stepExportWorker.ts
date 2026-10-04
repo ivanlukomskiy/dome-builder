@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
+import { footPartPlane } from '../lib/footPartPlane'
+import { computeFootPartBoundary2D } from '../lib/footGeometry'
 import { buildFlatStepPart, ensureEngravingFont } from '../lib/stepPartSolid'
-import { strutPartLabels, flangePartLabels, bracePartLabels, angleDegOf, pointTuple, type PartLabels } from '../lib/partLabels'
+import { strutPartLabels, flangePartLabels, footPartLabels, bracePartLabels, angleDegOf, pointTuple, type PartLabels } from '../lib/partLabels'
 import { bracePlateNameKey, type PartNameMaps } from '../lib/partNames'
 import type { DxfLabelSettings } from '../lib/dxfLabelSettings'
 import * as THREE from 'three'
@@ -63,7 +65,7 @@ function toVector3(t: [number, number, number]): THREE.Vector3 {
   return new THREE.Vector3(t[0], t[1], t[2])
 }
 
-async function buildStepExports(
+export async function buildStepExports(
   req: StepExportRequest,
 ): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; assemblyBlob?: Blob; profile?: ExportWorkerProfile }> {
   const profiler = req.profile ? createExportStageProfiler() : null
@@ -210,6 +212,21 @@ async function buildStepExports(
     } catch (err) {
       if (mode === 'archive') throw err
       console.error(`Failed to export flange solid for vertex ${vertex.vertexId}`, err)
+    }
+
+    if (vertex.foot) {
+      try {
+        const foot = vertex.foot
+        const boundary = timed('footBoundary2D', () => computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth))
+        const plane = footPartPlane(vertex)
+        if (!boundary.main || !plane || !(foot.thickness > 0)) {
+          throw new Error(`Cannot construct foot at vertex ${vertex.vertexId}.`)
+        }
+        addStepShape(`foot-${vertex.vertexId}.step`, boundary.main, plane, foot.thickness,
+          labelContext ? footPartLabels(labelContext, vertex.vertexId) : undefined)
+      } catch (err) {
+        throw new Error(`Failed to export foot at vertex ${vertex.vertexId}: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   })
 

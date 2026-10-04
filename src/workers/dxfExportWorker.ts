@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
-import { strutPartLabels, flangePartLabels, arcPoint2, projectToPlane2D, angleDegOf, pointTuple } from '../lib/partLabels'
+import { strutPartLabels, flangePartLabels, footPartLabels, arcPoint2, projectToPlane2D, angleDegOf, pointTuple } from '../lib/partLabels'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
 import { computeFootPartBoundary2D } from '../lib/footGeometry'
@@ -11,7 +11,7 @@ import type { BracePoints } from '../lib/braceSolid'
 import { drawingToPolylines } from '../lib/dxfExport'
 import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/exportProfile'
 import type { DxfPart } from '../lib/dxf'
-import { bracePlateNameKey, flangeNameKey, type PartNameMaps } from '../lib/partNames'
+import { bracePlateNameKey, type PartNameMaps } from '../lib/partNames'
 
 // The DXF-export counterpart to stepExportWorker.ts: builds the same 2D drawings (strut outlines,
 // flange plates, brace plates) but, instead of extruding them, reads their outlines back as
@@ -50,10 +50,6 @@ export type DxfExportWorkerMessage =
 
 function toVector3(t: [number, number, number]): THREE.Vector3 { return new THREE.Vector3(...t) }
 
-function footTabOffset(strutWidth: number, flangeThickness: number): number {
-  const bodyHeight = Math.max(strutWidth - 2 * flangeThickness, 0)
-  return bodyHeight / 2 + flangeThickness / 2
-}
 
 async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile }> {
   const profiler = req.profile ? createExportStageProfiler() : null
@@ -181,27 +177,10 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         const boundary = timed('footBoundary2D', () => computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth))
         if (req.strict && !boundary.main) throw new Error('Cannot construct foot outline.')
         if (boundary.main) {
-          const tabOffset = footTabOffset(req.halfWidth * 2, req.grooveDepth)
           parts.push({
-            name: req.names.feet[vertex.vertexId],
+            ...footPartLabels(req, vertex.vertexId),
             kind: 'foot',
             loops: timed('outlineToPolylines', () => drawingToPolylines(boundary.main!)),
-            helpers: [
-              {
-                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'outer')],
-                x: 0,
-                y: tabOffset,
-                angleDeg: 0,
-                height: req.connectedPartIdLabelSize,
-              },
-              {
-                text: req.names.flanges[flangeNameKey(vertex.vertexId, 'inner')],
-                x: 0,
-                y: -tabOffset,
-                angleDeg: 0,
-                height: req.connectedPartIdLabelSize,
-              },
-            ],
           })
         }
       } catch (err) {

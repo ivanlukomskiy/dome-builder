@@ -234,3 +234,14 @@ export function bracePartLabels(body: BraceBody, names: PartNameMaps, labelSetti
   })
   return { name: names.braces[body.braceId], labelAngleDeg: (Math.atan2(unit[1], unit[0]) * 180) / Math.PI, helpers }
 }
+
+export function footPartLabels(req: LabelContext, vertexId: number): PartLabels {
+  const tabOffset = Math.max(req.halfWidth * 2 - 2 * req.grooveDepth, 0) / 2 + req.grooveDepth / 2
+  return {
+    name: req.names.feet[vertexId],
+    helpers: [
+      { text: req.names.flanges[flangeNameKey(vertexId, 'outer')], x: 0, y: tabOffset, angleDeg: 0, height: req.connectedPartIdLabelSize },
+      { text: req.names.flanges[flangeNameKey(vertexId, 'inner')], x: 0, y: -tabOffset, angleDeg: 0, height: req.connectedPartIdLabelSize },
+    ],
+  }
+}
