@@ -157,23 +157,19 @@ function runAssembly(
   })
 }
 
-// Builds a STEP file for every visible strut and flange plate (see stepExportWorker.ts) and zips
-// them into a single archive, reporting progress as it goes. Cancellation stops active workers
-// when a signal is provided and prevents subsequent batches from starting.
-export async function runStepExport(
+type PartsShared = Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'>
+
+// What every worker of a parts export (the whole archive, or one debug part) is told besides its
+// own jobs: the applied geometry params and, with labels on, what to engrave.
+function buildPartsShared(
   params: RunStepExportParams,
-  onProgress: (progress: StepExportProgress | null) => void,
-  isCancelled: () => boolean,
-  signal?: AbortSignal,
-): Promise<Blob | null> {
-  const startedAt = performance.now()
-  const profiling = exportProfilingEnabled()
-  const batchProfiles: ExportBatchProfile[] = []
-  const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
+  { strutEntries, vertices, halfWidth }: ReturnType<typeof computePreviewBuildInputs>,
+  profiling: boolean,
+): PartsShared {
   const settings = params.stepExportSettings ?? DEFAULT_STEP_EXPORT_SETTINGS
   if (settings.addLabels) validateStepLabelDepth(settings.depth)
 
-  const shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies'> = {
+  return {
     engraving: settings.addLabels ? {
       depth: settings.depth,
       partIdLabelSize: settings.partIdLabelSize,
@@ -191,6 +187,23 @@ export async function runStepExport(
     scale: params.scale,
     profile: profiling,
   }
+}
+
+// Builds a STEP file for every visible strut and flange plate (see stepExportWorker.ts) and zips
+// them into a single archive, reporting progress as it goes. Cancellation stops active workers
+// when a signal is provided and prevents subsequent batches from starting.
+export async function runStepExport(
+  params: RunStepExportParams,
+  onProgress: (progress: StepExportProgress | null) => void,
+  isCancelled: () => boolean,
+  signal?: AbortSignal,
+): Promise<Blob | null> {
+  const startedAt = performance.now()
+  const profiling = exportProfilingEnabled()
+  const batchProfiles: ExportBatchProfile[] = []
+  const inputs = computePreviewBuildInputs(params)
+  const { strutEntries, vertices } = inputs
+  const shared = buildPartsShared(params, inputs, profiling)
 
   const allPieces: StepExportPiece[] = []
   // Every strut's brace plate end points, across batches - a brace's two struts can land in
@@ -271,6 +284,76 @@ export async function runStepExport(
 
   if (profiling && !isCancelled()) publishExportProfile('stepArchive', startedAt, batchProfiles, { zip: performance.now() - zipStart })
   return isCancelled() ? null : zipBlob
+}
+
+export const STEP_DEBUG_PART_KINDS = ['strut', 'flange', 'foot', 'bracePlate', 'brace'] as const
+export type StepDebugPartKind = typeof STEP_DEBUG_PART_KINDS[number]
+
+function pickRandom<T>(items: T[]): T {
+  if (items.length === 0) throw new Error('The model has no parts of this type.')
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+// Builds the STEP file of one randomly picked part of the given kind, exactly as runStepExport
+// would build it for the archive (same worker, same params, same engraved labels) - for checking
+// export settings on a single part without waiting for the whole dome.
+export async function runStepDebugExport(
+  params: RunStepExportParams,
+  kind: StepDebugPartKind,
+  onProgress: (progress: StepExportProgress | null) => void,
+  isCancelled: () => boolean,
+  signal?: AbortSignal,
+): Promise<StepExportPiece | null> {
+  const inputs = computePreviewBuildInputs(params)
+  const { strutEntries, vertices } = inputs
+  const shared = buildPartsShared(params, inputs, false)
+
+  let name: string
+  let phase: StepExportWorkerPhase = 'struts'
+  let strutJobs: StrutGeometryEntry[] = []
+  let vertexJobs: VertexEdgesInfo[] = []
+  let braceBodies: BraceBody[] = []
+
+  if (kind === 'strut') {
+    const job = pickRandom(strutEntries)
+    name = `strut-${job.index}.step`
+    strutJobs = [job]
+  } else if (kind === 'flange' || kind === 'foot') {
+    phase = 'flanges'
+    const vertex = pickRandom(kind === 'foot' ? vertices.filter((v) => v.foot) : vertices)
+    name = kind === 'foot'
+      ? `foot-${vertex.vertexId}.step`
+      : `flange-${vertex.vertexId}-${pickRandom(['outer', 'inner'])}.step`
+    vertexJobs = [vertex]
+  } else {
+    // Only the first brace on each strut end gets a plate and a body - same as stepExportWorker.ts.
+    const plates = strutEntries.flatMap((job) => ([['A', job.braces.a[0]], ['B', job.braces.b[0]]] as const)
+      .flatMap(([end, brace]) => brace ? [{ job, end, brace }] : []))
+    if (kind === 'bracePlate') {
+      const plate = pickRandom(plates.filter(({ brace }) => brace.params.plateThickness > 0))
+      name = `brace-plate-${plate.brace.braceId}-strut-${plate.job.index}-${plate.end}.step`
+      strutJobs = [plate.job]
+    } else {
+      const braceId = pickRandom(plates).brace.braceId
+      name = `brace-${braceId}.step`
+      // The body spans the plates on the brace's two struts, so their end points come first.
+      const jobs = [...new Set(plates.filter(({ brace }) => brace.braceId === braceId).map(({ job }) => job))]
+      const points = await runBatch(jobs, [], [], { ...shared, onlyPiece: name }, 1,
+        (done) => onProgress({ phase: 'struts', done, total: jobs.length }), signal)
+      if (isCancelled()) return null
+      const body = pairBracePoints(points.bracePoints).find((b) => b.braceId === braceId)
+      if (!body) throw new Error(`Brace ${braceId} has no plate end points on both of its struts.`)
+      phase = 'braces'
+      braceBodies = [body]
+    }
+  }
+
+  const result = await runBatch(strutJobs, vertexJobs, braceBodies, { ...shared, onlyPiece: name }, 2,
+    (done) => onProgress({ phase, done, total: 1 }), signal)
+  if (isCancelled()) return null
+  const piece = result.pieces.find((p) => p.name === name)
+  if (!piece) throw new Error(`${name} produced no solid.`)
+  return piece
 }
 
 // Builds one STEP assembly containing every visible strut, flange plate, brace plate and brace in

@@ -29,6 +29,10 @@ export interface StepExportRequest {
   requestId: number
   profile?: boolean
   mode?: 'archive' | 'assembly'
+  // Archive mode only: build just the piece with this file name and skip every other one - see
+  // stepExportRunner.ts's runStepDebugExport. Brace plate end points are still reported for every
+  // strut job, so a brace body can be paired up without building its struts' solids.
+  onlyPiece?: string
   strutJobs: StrutGeometryEntry[]
   // Brace bodies to export (see braceSolid.ts's pairBracePoints) - a batch of these is all a
   // 'braces' worker does, and strutJobs/vertices are empty then.
@@ -86,8 +90,10 @@ export async function buildStepExports(
   const engraving = mode === 'archive' ? req.engraving : undefined
   const labelContext = engraving ? { ...req, ...engraving } : undefined
   if (engraving) await ensureEngravingFont()
+  const wanted = (name: string) => req.onlyPiece === undefined || name === req.onlyPiece
 
   const addStepShape = (name: string, drawing: Drawing, plane: StrutPlane, thickness: number, labels?: PartLabels) => {
+    if (!wanted(name)) return
     const solid = timed('solidFromDrawing', () => mode === 'assembly'
       ? buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale)
       : buildFlatStepPart(drawing, thickness, req.scale, engraving && labels ? {
@@ -196,6 +202,7 @@ export async function buildStepExports(
         { sign: -1, side: 'inner' },
       ]
       for (const { sign, side } of sides) {
+        if (!wanted(`flange-${vertex.vertexId}-${side}.step`)) continue
         const boundary = timed('flangeBoundary2D', () => computeFlangeBoundary2D(
           { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
           flangeParams,
@@ -214,7 +221,7 @@ export async function buildStepExports(
       console.error(`Failed to export flange solid for vertex ${vertex.vertexId}`, err)
     }
 
-    if (vertex.foot) {
+    if (vertex.foot && wanted(`foot-${vertex.vertexId}.step`)) {
       try {
         const foot = vertex.foot
         const boundary = timed('footBoundary2D', () => computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth))

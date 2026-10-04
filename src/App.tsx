@@ -58,7 +58,7 @@ import {
   type FlangeShapeParams,
   type FootParams,
 } from './lib/flangeGeometry'
-import { runStepAssemblyExport, runStepExport, type RunStepExportParams, type StepExportProgress } from './lib/stepExportRunner'
+import { runStepAssemblyExport, runStepDebugExport, runStepExport, type RunStepExportParams, type StepDebugPartKind, type StepExportProgress } from './lib/stepExportRunner'
 import { runDxfExport, type DxfExportProgress } from './lib/dxfExportRunner'
 import { useHistory } from './lib/useHistory'
 import {
@@ -981,6 +981,34 @@ function App() {
     }
   }
 
+  // One randomly picked part, built as the archive would build it. Unlike the full exports, a
+  // finished debug export just closes its dialog - it's meant to be clicked repeatedly.
+  const handleDownloadStepDebugPart = async (kind: StepDebugPartKind) => {
+    const controller = beginExport('step-debug')
+    if (!controller) return
+    try {
+      const piece = await runStepDebugExport(
+        { ...buildExportParams(), stepExportSettings },
+        kind,
+        (progress) => updateExportProgress(controller, progress),
+        () => controller.signal.aborted,
+        controller.signal,
+      )
+      if (piece && !controller.signal.aborted) {
+        downloadBlob(piece.blob, piece.name)
+        exportController.current = null
+        setExportSession(null)
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) finishExport(controller, err)
+    }
+  }
+  const stepDebugPartKinds = new Set<StepDebugPartKind>([
+    ...(sceneData.edges.size > 0 ? ['strut', 'flange'] as const : []),
+    ...(footVertices.size > 0 ? ['foot'] as const : []),
+    ...(sceneData.braces.size > 0 ? ['bracePlate', 'brace'] as const : []),
+  ])
+
   const handleDownloadStepAssembly = async () => {
     const controller = beginExport('step-assembly')
     if (!controller) return
@@ -1023,6 +1051,8 @@ function App() {
         onImportConfig={handleImportConfig}
         onDownloadSteps={handleDownloadSteps}
         onDownloadStepAssembly={handleDownloadStepAssembly}
+        onDownloadStepDebugPart={handleDownloadStepDebugPart}
+        stepDebugPartKinds={stepDebugPartKinds}
         onDownloadDxf={handleDownloadDxf}
         exportBusy={exportSession?.status === 'running'}
         stepExportSettings={stepExportSettings}

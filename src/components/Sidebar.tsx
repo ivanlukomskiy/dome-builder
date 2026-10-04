@@ -1,4 +1,5 @@
 import type { StepExportSettings } from '../lib/stepExportSettings'
+import type { StepDebugPartKind } from '../lib/stepExportRunner'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ChangeEvent, ReactNode, SyntheticEvent } from 'react'
@@ -51,6 +52,9 @@ interface SidebarProps {
   onImportConfig: (file: File) => void
   onDownloadSteps: () => void
   onDownloadStepAssembly: () => void
+  onDownloadStepDebugPart: (kind: StepDebugPartKind) => void
+  // The part types the model has at least one of - the rest of the debug buttons are disabled.
+  stepDebugPartKinds: ReadonlySet<StepDebugPartKind>
   onDownloadDxf: () => void
   exportBusy: boolean
   stepExportSettings: StepExportSettings
@@ -240,6 +244,51 @@ function sharedFlangeOverride(
   return { value: mixed ? null : (value ?? null), mixed, any }
 }
 
+// The label inputs of a STEP parts export - shown by both "STEP parts" and "STEP debug", which
+// share one set of settings.
+function StepLabelSettingsFields({ idPrefix, settings, disabled, onChange }: {
+  idPrefix: string
+  settings: StepExportSettings
+  disabled: boolean
+  onChange: (settings: StepExportSettings) => void
+}) {
+  const { t } = useI18n()
+  return <>
+    <label className="checkbox-field">
+      <input type="checkbox" checked={settings.addLabels} disabled={disabled}
+        onChange={(event) => onChange({ ...settings, addLabels: event.target.checked })} />
+      {t('Add labels')}
+    </label>
+    {settings.addLabels && <fieldset className="dxf-sheet-settings" disabled={disabled}>
+      <div className="transform-field">
+        <label><FieldLabel text={t('Part ID label size (mm)')} /></label>
+        <NumberField value={settings.partIdLabelSize} step={0.5} min={0.1}
+          onCommit={(partIdLabelSize) => onChange({ ...settings, partIdLabelSize })} />
+      </div>
+      <div className="transform-field">
+        <label><FieldLabel text={t('Connected part ID labels size (mm)')} /></label>
+        <NumberField value={settings.connectedPartIdLabelSize} step={0.5} min={0.1}
+          onCommit={(connectedPartIdLabelSize) => onChange({ ...settings, connectedPartIdLabelSize })} />
+      </div>
+      <div className="transform-field">
+        <label htmlFor={`${idPrefix}-label-depth`}><FieldLabel text={t('Depth (mm)')} /></label>
+        <input id={`${idPrefix}-label-depth`} type="number" min={0.01} step="any"
+          value={Number.isNaN(settings.depth) ? '' : settings.depth}
+          onChange={(event) => onChange({ ...settings, depth: event.target.valueAsNumber })} />
+      </div>
+      <Help text={t('Engraves bold part and connection labels. Depth is measured in exported millimeters.')} />
+    </fieldset>}
+  </>
+}
+
+const STEP_DEBUG_PART_BUTTONS: { kind: StepDebugPartKind; label: string }[] = [
+  { kind: 'strut', label: 'Strut' },
+  { kind: 'flange', label: 'Flange' },
+  { kind: 'foot', label: 'Foot' },
+  { kind: 'bracePlate', label: 'Brace plate' },
+  { kind: 'brace', label: 'Brace' },
+]
+
 export interface NumberFieldProps {
   value: number | null
   onCommit: (value: number) => void
@@ -380,6 +429,8 @@ export function Sidebar({
   onImportConfig,
   onDownloadSteps,
   onDownloadStepAssembly,
+  onDownloadStepDebugPart,
+  stepDebugPartKinds,
   onDownloadDxf,
   exportBusy,
   stepExportSettings,
@@ -1209,35 +1260,21 @@ export function Sidebar({
 
         </SidebarSection>
         <SidebarSection id="export-step-parts" title={t('STEP parts')} defaultOpen={false}>
-          <label className="checkbox-field">
-            <input type="checkbox" checked={stepExportSettings.addLabels} disabled={exportBusy}
-              onChange={(event) => onStepExportSettingsChange({ ...stepExportSettings, addLabels: event.target.checked })} />
-            {t('Add labels')}
-          </label>
-          {stepExportSettings.addLabels && <fieldset className="dxf-sheet-settings" disabled={exportBusy}>
-            <div className="transform-field">
-              <label><FieldLabel text={t('Part ID label size (mm)')} /></label>
-              <NumberField value={stepExportSettings.partIdLabelSize} step={0.5} min={0.1}
-                onCommit={(partIdLabelSize) => onStepExportSettingsChange({ ...stepExportSettings, partIdLabelSize })} />
-            </div>
-            <div className="transform-field">
-              <label><FieldLabel text={t('Connected part ID labels size (mm)')} /></label>
-              <NumberField value={stepExportSettings.connectedPartIdLabelSize} step={0.5} min={0.1}
-                onCommit={(connectedPartIdLabelSize) => onStepExportSettingsChange({ ...stepExportSettings, connectedPartIdLabelSize })} />
-            </div>
-            <div className="transform-field">
-              <label htmlFor="step-label-depth"><FieldLabel text={t('Depth (mm)')} /></label>
-              <input id="step-label-depth" type="number" min={0.01} step="any"
-                value={Number.isNaN(stepExportSettings.depth) ? '' : stepExportSettings.depth}
-                onChange={(event) => onStepExportSettingsChange({ ...stepExportSettings, depth: event.target.valueAsNumber })} />
-            </div>
-            <Help text={t('Engraves bold part and connection labels. Depth is measured in exported millimeters.')} />
-          </fieldset>}
+          <StepLabelSettingsFields idPrefix="step" settings={stepExportSettings} disabled={exportBusy} onChange={onStepExportSettingsChange} />
           <Help text={t('Parts lie flat with their bottom at Z = 0 and labels facing up.')} />
           <div className="button-row"><button onClick={onDownloadSteps} disabled={exportBusy}>{t('Download STEP Archive')}</button></div>
         </SidebarSection>
         <SidebarSection id="export-step-assembly" title={t('STEP assembly')} defaultOpen={false}>
           <div className="button-row"><button onClick={onDownloadStepAssembly} disabled={exportBusy}>{t('Download STEP Assembly')}</button></div>
+        </SidebarSection>
+        <SidebarSection id="export-step-debug" title={t('STEP debug')} defaultOpen={false}>
+          <StepLabelSettingsFields idPrefix="step-debug" settings={stepExportSettings} disabled={exportBusy} onChange={onStepExportSettingsChange} />
+          <Help text={t('Exports one randomly picked part of the chosen type, built exactly as in the STEP parts archive. Label settings are shared with STEP parts.')} />
+          <div className="button-row">
+            {STEP_DEBUG_PART_BUTTONS.map(({ kind, label }) => (
+              <button key={kind} onClick={() => onDownloadStepDebugPart(kind)} disabled={exportBusy || !stepDebugPartKinds.has(kind)}>{t(label)}</button>
+            ))}
+          </div>
         </SidebarSection>
       </SidebarSection>}
     </aside>

@@ -3,7 +3,7 @@ import { useI18n } from '../lib/i18n'
 import type { DxfExportProgress } from '../lib/dxfExportRunner'
 import type { StepExportProgress } from '../lib/stepExportRunner'
 
-export type ExportKind = 'dxf' | 'step-parts' | 'step-assembly'
+export type ExportKind = 'dxf' | 'step-parts' | 'step-assembly' | 'step-debug'
 export type ExportPhase = DxfExportProgress['phase'] | StepExportProgress['phase']
 export interface ExportSession {
   kind: ExportKind
@@ -26,6 +26,8 @@ export function ExportProgressModal({ session, onCancel, onClose }: Props) {
 
   const phases: ExportPhase[] = session.kind === 'dxf'
     ? ['struts', 'flanges', 'braces', ...(session.arrangeOnSheet ? ['packing' as const] : []), 'writing']
+    // A debug export builds one part, so it only ever shows the step that part is built in.
+    : session.kind === 'step-debug' ? [session.progress.phase]
     : ['struts', 'flanges', 'braces', session.kind === 'step-parts' ? 'zipping' : 'writing']
   const labels: Record<ExportPhase, string> = {
     struts: t('Build struts'),
@@ -35,7 +37,8 @@ export function ExportProgressModal({ session, onCancel, onClose }: Props) {
     writing: session.kind === 'dxf' ? t('Write DXF') : t('Write STEP'),
     zipping: t('Create ZIP archive'),
   }
-  const title = session.kind === 'dxf' ? t('DXF export') : session.kind === 'step-parts' ? t('STEP parts export') : t('STEP assembly export')
+  const title = session.kind === 'dxf' ? t('DXF export') : session.kind === 'step-parts' ? t('STEP parts export')
+    : session.kind === 'step-debug' ? t('STEP debug export') : t('STEP assembly export')
   const activeIndex = phases.indexOf(session.progress.phase)
 
   return <div className="export-modal-backdrop">
