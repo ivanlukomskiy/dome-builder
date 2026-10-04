@@ -134,7 +134,8 @@ export interface FootParams {
   // Distance (mm) along the axis from where the rectangular hole ends (before tolerance) to the
   // arm's flat tip.
   tipOffset: number;
-  // Diameter (mm) of the holes drilled at the separate foot part's rounded ends.
+  // Diameter (mm) of the holes drilled at the separate foot part's rounded ends. 0 means a foot
+  // with no bolt holes at all: none in the foot part, and no side holes on the flange's foot arm.
   holeDiameter: number;
   // Straight body length (mm) reserved for the separate foot part. The current foot part body width
   // comes from the strut width minus two flange grooves; this value is kept for the next layout pass.
@@ -974,7 +975,7 @@ export function computeFlangeBoundary2D(
   // bolt holes on its axis either side of it.
   const foot = vertex.foot;
   if (foot) {
-    if (sideHoleDiameter > 0) {
+    if (sideHoleDiameter > 0 && foot.holeDiameter > 0) {
       const { holeA, holeB } = computeFootSideHoles(foot, params, sideHoleDiameter);
       helpers.push({ drawing: holeA, color: HOLE_COLOR, name: "foot side hole (+)" });
       addNegative(holeA, "hole");

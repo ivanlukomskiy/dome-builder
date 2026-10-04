@@ -34,8 +34,10 @@ function mod360(deg: number): number {
 }
 
 // The foot's own dimensions (not its direction, which is folded in relative to the edges instead).
+// Its hole diameter only matters to the plate as on/off: 0 drops the foot arm's side holes.
 function footShapeKey(foot: FlangeFoot): string {
-  return [foot.length, foot.thickness, foot.grooveLength, foot.holeOffset, foot.tipOffset].map(num).join(',')
+  const dimensions = [foot.length, foot.thickness, foot.grooveLength, foot.holeOffset, foot.tipOffset].map(num)
+  return [...dimensions, foot.holeDiameter > 0 ? 1 : 0].join(',')
 }
 
 export interface FlangeSignature {
