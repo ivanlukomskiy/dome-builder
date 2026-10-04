@@ -32,6 +32,24 @@ function build(round: boolean, c = cases[0], braces: StrutBraces = NO_STRUT_BRAC
 }
 
 describe('single strut outline', () => {
+  it('reports milling cut failures without dropping the strut', () => {
+    const onCutError = vi.fn()
+    vi.spyOn(Drawing.prototype, 'cut').mockImplementation(() => { throw new Error('cut broke') })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = computeStrutBoundary2D(
+        [1000, 0], [500, Math.sqrt(3) * 500], [0, 0],
+        20, 30, 150, 180, 50, 15, 20, 20, 5, 6,
+        NO_STRUT_BRACES, true, onCutError,
+      )
+      expect(onCutError).toHaveBeenCalledTimes(12)
+      expect(onCutError).toHaveBeenCalledWith('A mp1', expect.objectContaining({ message: 'cut broke' }))
+      expect(area(result.main!)).toBeGreaterThan(0)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
   it.each([false, true])('preserves shape areas with roundBridge=%s', round => {
     for (const c of cases) {
       expect(area(build(round, c).main!), c.name).toBeCloseTo(c.areas[Number(round)], 5)

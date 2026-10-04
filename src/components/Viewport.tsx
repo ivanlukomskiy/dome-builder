@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Grid } from '@react-three/drei'
 import * as THREE from 'three'
@@ -13,6 +13,7 @@ import { Hud, type HudHubEdgeMetric } from './Hud'
 import { ModelCameraControls } from './ModelCameraControls'
 import { viewportFrame, viewportGridStep } from '../lib/viewportCamera'
 import { useI18n } from '../lib/i18n'
+import type { PreviewPartFailure } from '../workers/previewBuilder.worker'
 
 interface ViewportProps {
   mode: ViewMode
@@ -152,6 +153,14 @@ export function Viewport({
   // previewBuilder.worker.ts) - this just holds whatever progress it last reported, to surface in
   // the HUD rather than leaving the viewport looking stuck while it works.
   const [previewProgress, setPreviewProgress] = useState<PreviewProgress | null>(null)
+  const [previewFailures, setPreviewFailures] = useState<(PreviewPartFailure & { id: number })[]>([])
+  const nextFailureId = useRef(0)
+  const onPreviewFailure = useCallback((failure: PreviewPartFailure) => {
+    setPreviewFailures((current) => {
+      if (current.some((item) => item.part === failure.part && item.error === failure.error)) return current
+      return [...current, { ...failure, id: ++nextFailureId.current }]
+    })
+  }, [])
   const [fitRequest, setFitRequest] = useState(0)
   const frame = useMemo(
     () => viewportFrame(stats.bounds, diameter, Math.max(cornerLength, thickness, extrudeDistance, 1)),
@@ -179,6 +188,24 @@ export function Viewport({
       <button className="viewport-fit" type="button" onClick={() => setFitRequest((n) => n + 1)}>
         {t('Fit model')}
       </button>
+      {previewFailures.length > 0 && (
+        <div className="preview-failures" aria-label={t('Preview errors')}>
+          {previewFailures.map((failure) => (
+            <div className="preview-failure" role="alert" key={failure.id}>
+              <div className="preview-failure-header">
+                <strong>{t('Failed to build {part}', { part: failure.part })}</strong>
+                <button
+                  type="button"
+                  aria-label={t('Dismiss error')}
+                  title={t('Dismiss error')}
+                  onClick={() => setPreviewFailures((current) => current.filter((item) => item.id !== failure.id))}
+                >×</button>
+              </div>
+              <div className="preview-failure-message">{failure.error}</div>
+            </div>
+          ))}
+        </div>
+      )}
       <Canvas
         camera={{ fov: 45 }}
         onPointerMissed={onDeselectAll}
@@ -241,6 +268,7 @@ export function Viewport({
           onFaceClick={onFaceClick}
           onBraceClick={onBraceClick}
           onPreviewProgress={setPreviewProgress}
+          onPreviewFailure={onPreviewFailure}
         />
         <ModelCameraControls
           frame={frame}

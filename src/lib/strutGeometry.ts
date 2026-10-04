@@ -264,6 +264,7 @@ function computeStrutBoundaryUnguarded(
   // True keeps the existing sphere-centered curved bridge; false connects the tangent sections
   // with straight sides.
   roundBridge = true,
+  onCutError?: (cut: string, error: unknown) => void,
 ): StrutBoundaryResult {
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
@@ -292,6 +293,7 @@ function computeStrutBoundaryUnguarded(
     chamferLength,
     braces,
     roundBridge,
+    onCutError,
   );
 }
 
@@ -402,6 +404,7 @@ export function computeStrutBoundary(
   // True keeps the existing sphere-centered curved bridge; false connects the tangent sections
   // with straight sides.
   roundBridge = true,
+  onCutError?: (cut: string, error: unknown) => void,
 ): StrutBoundaryResult {
   try {
     return computeStrutBoundaryUnguarded(
@@ -420,6 +423,7 @@ export function computeStrutBoundary(
       chamferLength,
       braces,
       roundBridge,
+      onCutError,
     );
   } catch (err) {
     try {
@@ -807,6 +811,7 @@ export function computeStrutBoundary2D(
   // as a `braceCenter` helper point (see below), `shift` of the way along the A-B chord.
   braces: StrutBraces = NO_STRUT_BRACES,
   roundBridge = true,
+  onCutError?: (cut: string, error: unknown) => void,
 ): StrutBoundaryResult {
   const helpers: HelperDrawing[] = [];
 
@@ -846,6 +851,7 @@ export function computeStrutBoundary2D(
         main = main.cut(drawing.rotate(angle).translate(origin));
       } catch (err) {
         console.error(`computeStrutBoundary2D: cutting negative shape "${end} ${name}" failed`, { cause: err });
+        onCutError?.(`${end} ${name}`, err);
       }
     }
   }

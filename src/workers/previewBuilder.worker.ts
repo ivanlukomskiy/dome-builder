@@ -88,11 +88,21 @@ export interface PreviewStrutResult {
   index: number
   pieces: PreviewPiece[]
   bracePoints: BracePoints[]
+  failed: boolean
 }
 
 export interface PreviewFootResult {
   vertexId: number
   pieces: PreviewPiece[]
+  failed: boolean
+}
+
+export interface PreviewPartFailure {
+  part: string
+  error: string
+  // A grouped flange stands for several vertices; the main thread expands its label.
+  flangeKey?: string
+  flangeSide?: FlangeSide
 }
 
 export type PreviewBuildPhase = 'struts' | 'flanges' | 'foot'
@@ -106,6 +116,7 @@ export type PreviewWorkerMessage =
       struts: PreviewStrutResult[]
       feet: PreviewFootResult[]
       flangeMeshes: FlangeMeshResult[]
+      failures: PreviewPartFailure[]
       profile?: WorkerProfile
     }
   | { type: 'error'; requestId: number; message: string }
@@ -143,6 +154,7 @@ async function buildPreview(
   struts: PreviewStrutResult[]
   feet: PreviewFootResult[]
   flangeMeshes: FlangeMeshResult[]
+  failures: PreviewPartFailure[]
   profile?: WorkerProfile
 }> {
   const prof = req.profile ? createWorkerProfiler() : null
@@ -161,32 +173,41 @@ async function buildPreview(
   const center = new THREE.Vector3(0, 0, 0)
   const struts: PreviewStrutResult[] = []
   const feet: PreviewFootResult[] = []
+  const failures: PreviewPartFailure[] = []
+  const errorMessage = (err: unknown) => err instanceof Error ? err.message : String(err)
+  const fail = (part: string, err: unknown, flangeKey?: string, flangeSide?: FlangeSide) => {
+    const error = errorMessage(err)
+    console.error(`Failed to build ${part}`, err)
+    failures.push({ part, error, flangeKey, flangeSide })
+  }
   // Each strut's brace plate end points, in 3D - the main thread pairs them up per brace and builds
   // the brace solids (see braceSolid.ts).
   req.strutJobs.forEach((job, i) => {
     const pieces: PreviewPiece[] = []
     const bracePoints: BracePoints[] = []
+    let failed = false
     const posA = toVector3(job.posA)
     const posB = toVector3(job.posB)
-    const boundary = timed('strutBoundary2D', () =>
-      computeStrutBoundary(
-        posA,
-        posB,
-        center,
-        job.offsetA,
-        job.offsetB,
-        job.cornerLengthA,
-        job.cornerLengthB,
-        req.halfWidth,
-        req.endGrooveLengthPercent,
-        req.midGrooveLengthPercent,
-        req.grooveDepth,
-        req.millingDiameter,
-        req.chamferLength,
-        job.braces,
-        req.roundStrutBridge,
-      ),
-    )
+    let boundary: ReturnType<typeof computeStrutBoundary>
+    try {
+      boundary = timed('strutBoundary2D', () =>
+        computeStrutBoundary(
+          posA, posB, center, job.offsetA, job.offsetB,
+          job.cornerLengthA, job.cornerLengthB, req.halfWidth,
+          req.endGrooveLengthPercent, req.midGrooveLengthPercent,
+          req.grooveDepth, req.millingDiameter, req.chamferLength,
+          job.braces, req.roundStrutBridge,
+          (cut, err) => {
+            failed = true
+            fail(`Strut edge ${job.index} (${cut} cut)`, err)
+          },
+        ),
+      )
+    } catch (err) {
+      fail(`Strut edge ${job.index}`, err)
+      self.postMessage({ type: 'progress', requestId: req.requestId, phase: 'struts', done: i + 1, total: req.strutJobs.length } satisfies PreviewWorkerMessage)
+      return
+    }
     const strutBoundaryMs = lastMs()
     let strutSolidMs = 0
     self.postMessage({
@@ -207,10 +228,17 @@ async function buildPreview(
         strutSolidMs += lastMs()
         if (strut) {
           pieces.push({ positions: strut.positions, normals: strut.normals, indices: strut.indices, color: job.color, part: 'struts' })
+        } else {
+          failed = true
+          fail(`Strut edge ${job.index}`, 'The strut outline produced no solid')
         }
       } catch (err) {
-        console.error(`Failed to build strut solid for edge ${job.index}`, err)
+        failed = true
+        fail(`Strut edge ${job.index}`, err)
       }
+    } else {
+      failed = true
+      fail(`Strut edge ${job.index}`, 'No strut outline was produced')
     }
 
     // Each brace plate sits against the strut's side face, on the side its brace's other edge is
@@ -240,13 +268,17 @@ async function buildPreview(
         strutSolidMs += lastMs()
         if (mesh) {
           pieces.push({ positions: mesh.positions, normals: mesh.normals, indices: mesh.indices, color: BRACE_PLATE_COLOR, part: 'bracePlates' })
+        } else {
+          failed = true
+          fail(`Brace plate ${brace.braceId} on edge ${job.index}`, 'The plate outline produced no solid')
         }
       } catch (err) {
-        console.error(`Failed to build brace plate ${brace.braceId} for edge ${job.index}`, err)
+        failed = true
+        fail(`Brace plate ${brace.braceId} on edge ${job.index}`, err)
       }
     }
     prof?.items.push({ kind: 'strut', id: job.index, boundaryMs: strutBoundaryMs, solidMs: strutSolidMs })
-    struts.push({ index: job.index, pieces, bracePoints })
+    struts.push({ index: job.index, pieces, bracePoints, failed })
   })
 
   // Each flange is built once, in the canonical local frame, as a plate `grooveDepth` thick
@@ -264,13 +296,22 @@ async function buildPreview(
 
   req.flangeJobs.forEach((job, i) => {
     const { vertex } = job
-    const boundary = timed('flangeBoundary2D', () =>
-      computeFlangeBoundary2D(
-        { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
-        resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
-        job.side,
-      ),
-    )
+    const part = `Flange ${job.side} at vertex ${vertex.vertexId}`
+    let boundary: ReturnType<typeof computeFlangeBoundary2D>
+    try {
+      boundary = timed('flangeBoundary2D', () =>
+        computeFlangeBoundary2D(
+          { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
+          resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
+          job.side,
+        ),
+      )
+    } catch (err) {
+      fail(part, err, job.key, job.side)
+      self.postMessage({ type: 'progress', requestId: req.requestId, phase: 'flanges', done: i + 1, total: req.flangeJobs.length } satisfies PreviewWorkerMessage)
+      flangeMeshes.push({ key: job.key, mesh: null })
+      return
+    }
     const flangeBoundaryMs = lastMs()
     self.postMessage({
       type: 'progress',
@@ -294,8 +335,9 @@ async function buildPreview(
         buildStrutMeshFromDrawing(flangeDrawing, localPlane, req.grooveDepth),
       )
       flangeSolidMs = lastMs()
+      if (!mesh) fail(part, 'The flange outline produced no solid', job.key, job.side)
     } catch (err) {
-      console.error(`Failed to build flange solid for vertex ${vertex.vertexId}`, err)
+      fail(part, err, job.key, job.side)
     }
     flangeMeshes.push({ key: job.key, mesh })
     prof?.items.push({ kind: 'flange', id: vertex.vertexId, boundaryMs: flangeBoundaryMs, solidMs: flangeSolidMs })
@@ -307,9 +349,16 @@ async function buildPreview(
     if (!foot) return
     const pieces: PreviewPiece[] = []
 
-    const boundary = timed('footBoundary2D', () =>
-      computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth),
-    )
+    let boundary: ReturnType<typeof computeFootPartBoundary2D>
+    try {
+      boundary = timed('footBoundary2D', () =>
+        computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth),
+      )
+    } catch (err) {
+      fail(`Foot at vertex ${vertex.vertexId}`, err)
+      self.postMessage({ type: 'progress', requestId: req.requestId, phase: 'foot', done: i + 1, total: req.footJobs.length } satisfies PreviewWorkerMessage)
+      return
+    }
     self.postMessage({
       type: 'progress',
       requestId: req.requestId,
@@ -321,19 +370,25 @@ async function buildPreview(
     const drawing = boundary.main
     const plane = footPartPlane(vertex)
     if (!drawing || !plane || foot.thickness <= 0) {
-      feet.push({ vertexId: vertex.vertexId, pieces })
+      feet.push({ vertexId: vertex.vertexId, pieces, failed: false })
       return
     }
 
+    let failed = false
     try {
       const mesh = timed('footSolid (sketch+extrude+mesh)', () =>
         buildStrutMeshFromDrawing(drawing, plane, foot.thickness),
       )
       if (mesh) pieces.push({ ...mesh, color: FOOT_COLOR, part: 'foot' })
+      else {
+        failed = true
+        fail(`Foot at vertex ${vertex.vertexId}`, 'The foot outline produced no solid')
+      }
     } catch (err) {
-      console.error(`Failed to build foot solid for vertex ${vertex.vertexId}`, err)
+      failed = true
+      fail(`Foot at vertex ${vertex.vertexId}`, err)
     }
-    feet.push({ vertexId: vertex.vertexId, pieces })
+    feet.push({ vertexId: vertex.vertexId, pieces, failed })
   })
 
   const profile: WorkerProfile | undefined = prof
@@ -345,20 +400,20 @@ async function buildPreview(
         replicad: snapshotReplicadStats(),
       }
     : undefined
-  return { struts, feet, flangeMeshes, profile }
+  return { struts, feet, flangeMeshes, failures, profile }
 }
 
 self.onmessage = (event: MessageEvent<PreviewBuildRequest>) => {
   const req = event.data
   buildPreview(req).then(
-    ({ struts, feet, flangeMeshes, profile }) => {
+    ({ struts, feet, flangeMeshes, failures, profile }) => {
       const transfer: Transferable[] = []
       for (const result of struts) for (const p of result.pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
       for (const result of feet) for (const p of result.pieces) transfer.push(p.positions.buffer, p.normals.buffer, p.indices.buffer)
       for (const f of flangeMeshes) {
         if (f.mesh) transfer.push(f.mesh.positions.buffer, f.mesh.normals.buffer, f.mesh.indices.buffer)
       }
-      self.postMessage({ type: 'result', requestId: req.requestId, struts, feet, flangeMeshes, profile } satisfies PreviewWorkerMessage, {
+      self.postMessage({ type: 'result', requestId: req.requestId, struts, feet, flangeMeshes, failures, profile } satisfies PreviewWorkerMessage, {
         transfer,
       })
     },

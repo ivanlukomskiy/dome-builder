@@ -288,6 +288,52 @@ body,
   border-color: var(--accent);
 }
 
+.preview-failures {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100% - 32px));
+  max-height: min(60vh, 600px);
+  overflow-y: auto;
+}
+
+.preview-failure {
+  padding: 10px 12px;
+  border: 1px solid #9f5353;
+  border-radius: 6px;
+  background: #2d1c20;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: #ffe5e5;
+  font-size: 12px;
+}
+
+.preview-failure-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preview-failure-header button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.preview-failure-message {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .hud {
   position: absolute;
   top: 16px;

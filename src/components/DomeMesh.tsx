@@ -30,6 +30,7 @@ import type {
   PreviewBuildRequest,
   PreviewPiece,
   PreviewWorkerMessage,
+  PreviewPartFailure,
   StrutBuildJob,
 } from '../workers/previewBuilder.worker'
 
@@ -169,6 +170,7 @@ interface DomeMeshProps {
   onFaceClick: (id: number) => void
   onBraceClick: (id: number) => void
   onPreviewProgress: (progress: PreviewProgress | null) => void
+  onPreviewFailure: (failure: PreviewPartFailure) => void
 }
 
 export function DomeMesh({
@@ -211,6 +213,7 @@ export function DomeMesh({
   onFaceClick,
   onBraceClick,
   onPreviewProgress,
+  onPreviewFailure,
 }: DomeMeshProps) {
   const resolvePosition = useCallback((idx: number) => transformedVertices.get(idx)!, [transformedVertices])
 
@@ -289,27 +292,36 @@ export function DomeMesh({
 
     // Each edge's offsets and angular layout - all cheap, pure-JS work shared with the
     // "Download STEP Archive" export (see previewBuildInputs.ts).
-    const { strutEntries, vertices, halfWidth } = timedMain('computePreviewBuildInputs', () =>
-      computePreviewBuildInputs({
-        data,
-        transformedVertices,
-        edgeThickness,
-        thickness,
-        extrudeDistance,
-        cornerLength,
-        vertexCornerLength,
-        vertexFlangeParams,
-        footVertices,
-        footParams,
-        offsetModifier,
-        endGrooveLengthPercent,
-        midGrooveLengthPercent,
-        grooveDepth,
-        millingDiameter,
-        chamferLength,
-        roundStrutBridge,
-      }),
-    )
+    let inputs: ReturnType<typeof computePreviewBuildInputs>
+    try {
+      inputs = timedMain('computePreviewBuildInputs', () =>
+        computePreviewBuildInputs({
+          data,
+          transformedVertices,
+          edgeThickness,
+          thickness,
+          extrudeDistance,
+          cornerLength,
+          vertexCornerLength,
+          vertexFlangeParams,
+          footVertices,
+          footParams,
+          offsetModifier,
+          endGrooveLengthPercent,
+          midGrooveLengthPercent,
+          grooveDepth,
+          millingDiameter,
+          chamferLength,
+          roundStrutBridge,
+        }),
+      )
+    } catch (err) {
+      console.error('Failed to prepare preview parts', err)
+      onPreviewFailure({ part: 'Preview inputs', error: err instanceof Error ? err.message : String(err) })
+      onPreviewProgress(null)
+      return
+    }
+    const { strutEntries, vertices, halfWidth } = inputs
 
     // Colored the same way the clickable edge markers are in Edit mode, so a strut's color means
     // the same thing (thickness override, and by how much) in both places.
@@ -479,6 +491,20 @@ export function DomeMesh({
       })
 
     let cancelled = false
+    const reportFailure = (failure: PreviewPartFailure) => {
+      if (cancelled) return
+      const group = failure.flangeKey ? flangeGroupByMeshKey.get(failure.flangeKey) : null
+      const part = group
+        ? `Flange ${failure.flangeSide} at ${group.members.length === 1 ? 'vertex' : 'vertices'} ${group.members.map((member) => member.vertex.vertexId).join(', ')}`
+        : failure.part
+      onPreviewFailure({ part, error: failure.error })
+    }
+    const reportBatchFailure = (jobs: { strutJobs: StrutBuildJob[]; flangeJobs: FlangeBuildJob[]; footJobs: FootBuildJob[] }, err: unknown) => {
+      const error = err instanceof Error ? err.message : String(err)
+      jobs.strutJobs.forEach((job) => reportFailure({ part: `Strut edge ${job.index}`, error }))
+      jobs.flangeJobs.forEach((job) => reportFailure({ part: `Flange ${job.side} at vertex ${job.vertex.vertexId}`, flangeKey: job.key, flangeSide: job.side, error }))
+      jobs.footJobs.forEach((job) => reportFailure({ part: `Foot at vertex ${job.vertex.vertexId}`, error }))
+    }
     ;(async () => {
       const allPieces: PreviewPiece[] = []
       // Every strut's brace plate end points, across all batches - a brace's two struts can land
@@ -496,6 +522,7 @@ export function DomeMesh({
           try {
             const weights = jobs.map((job) => flangeGroupByMeshKey.get(job.key)?.members.length ?? 1)
             const result = await runBatch({ strutJobs: [], flangeJobs: jobs, footJobs: [] }, 'flanges', weights)
+            result.failures.forEach(reportFailure)
             for (const { key, mesh } of result.flangeMeshes) {
               const group = flangeGroupByMeshKey.get(key)
               if (!mesh || !group) continue
@@ -504,6 +531,7 @@ export function DomeMesh({
               flangeMeshCache.set(key, local)
             }
           } catch (err) {
+            reportBatchFailure({ strutJobs: [], flangeJobs: jobs, footJobs: [] }, err)
             console.error(
               `Failed to build flanges for vertices ${jobs.map((j) => j.vertex.vertexId).join(', ')}`,
               err,
@@ -520,28 +548,36 @@ export function DomeMesh({
               jobs.map(() => 1),
             )
             if (cancelled) return
+            result.failures.forEach(reportFailure)
             for (const item of result.feet) {
               const part: CachedPreviewPart = { pieces: item.pieces, bracePoints: [] }
               builtFeet.set(item.vertexId, part)
-              previewPartCache.set(footKeys.get(item.vertexId)!, part)
+              if (!item.failed) previewPartCache.set(footKeys.get(item.vertexId)!, part)
             }
           } catch (err) {
+            reportBatchFailure({ strutJobs: [], flangeJobs: [], footJobs: jobs }, err)
             console.error(`Failed to build foot parts for vertices ${jobs.map((j) => j.vertex.vertexId).join(', ')}`, err)
           }
         })
       })
       chunk(strutsToBuild, BATCH_SIZE).forEach((jobs) => {
         tasks.push(async () => {
-          const result = await runBatch(
-            { strutJobs: jobs, flangeJobs: [], footJobs: [] },
-            'struts',
-            jobs.map(() => 1),
-          )
-          if (cancelled) return
-          for (const item of result.struts) {
-            const part: CachedPreviewPart = { pieces: item.pieces, bracePoints: item.bracePoints }
-            builtStruts.set(item.index, part)
-            previewPartCache.set(strutKeys.get(item.index)!, part)
+          try {
+            const result = await runBatch(
+              { strutJobs: jobs, flangeJobs: [], footJobs: [] },
+              'struts',
+              jobs.map(() => 1),
+            )
+            if (cancelled) return
+            result.failures.forEach(reportFailure)
+            for (const item of result.struts) {
+              const part: CachedPreviewPart = { pieces: item.pieces, bracePoints: item.bracePoints }
+              builtStruts.set(item.index, part)
+              if (!item.failed) previewPartCache.set(strutKeys.get(item.index)!, part)
+            }
+          } catch (err) {
+            reportBatchFailure({ strutJobs: jobs, flangeJobs: [], footJobs: [] }, err)
+            console.error(`Failed to build struts for edges ${jobs.map((j) => j.index).join(', ')}`, err)
           }
         })
       })
@@ -603,10 +639,15 @@ export function DomeMesh({
             const key = bracePreviewKey(body)
             let part = previewPartCache.get(key)
             if (!part) {
-              const mesh = buildBraceSolidMesh(body.a, body.b, body.thickness)
-              if (!mesh) continue
-              part = { pieces: [{ ...mesh, color: BRACE_BODY_COLOR, part: 'braces' }], bracePoints: [] }
-              previewPartCache.set(key, part)
+              try {
+                const mesh = buildBraceSolidMesh(body.a, body.b, body.thickness)
+                if (!mesh) continue
+                part = { pieces: [{ ...mesh, color: BRACE_BODY_COLOR, part: 'braces' }], bracePoints: [] }
+                previewPartCache.set(key, part)
+              } catch (err) {
+                reportFailure({ part: `Brace ${body.braceId}`, error: err instanceof Error ? err.message : String(err) })
+                continue
+              }
             }
             allPieces.push(...part.pieces)
           }
@@ -642,6 +683,7 @@ export function DomeMesh({
         })
       } catch (err) {
         console.error('Failed to build preview', err)
+        reportFailure({ part: 'Preview assembly', error: err instanceof Error ? err.message : String(err) })
         // Batches still running would only build a preview nobody is waiting for.
         terminateWorkers()
       } finally {
@@ -682,6 +724,7 @@ export function DomeMesh({
     minSide,
     flangeMillingDiameter,
     onPreviewProgress,
+    onPreviewFailure,
   ])
 
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
