@@ -276,17 +276,40 @@ async function buildPreview(
   req.flangeJobs.forEach((job, i) => {
     const { vertex } = job
     const part = `Flange ${job.side} at vertex ${vertex.vertexId}`
+    const params = resolveFlangeParams(req.flangeParams, vertex.flangeOverrides)
+    const failFlange = (stage: 'outline' | 'solid', err: unknown) => {
+      fail(part, err, job.key, job.side)
+      // Log a string snapshot, not a live console object, so the complete input can be
+      // copied into a regression fixture even after this worker has been terminated.
+      console.error('Flange preview reproduction input:\n' + JSON.stringify({
+        stage,
+        error: errorMessage(err),
+        requestId: req.requestId,
+        key: job.key,
+        vertex,
+        params,
+        side: job.side,
+        baseFlangeParams: req.flangeParams,
+        halfWidth: req.halfWidth,
+        thicknessMm: req.grooveDepth,
+        plane: {
+          origin: localPlane.origin.toArray(),
+          normal: localPlane.normal.toArray(),
+          xDir: localPlane.xDir.toArray(),
+        },
+      }, (_key, value: unknown) => typeof value === 'number' && !Number.isFinite(value) ? String(value) : value, 2))
+    }
     let boundary: ReturnType<typeof computeFlangeBoundary2D>
     try {
       boundary = timed('flangeBoundary2D', () =>
         computeFlangeBoundary2D(
           { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
-          resolveFlangeParams(req.flangeParams, vertex.flangeOverrides),
+          params,
           job.side,
         ),
       )
     } catch (err) {
-      fail(part, err, job.key, job.side)
+      failFlange('outline', err)
       self.postMessage({ type: 'progress', requestId: req.requestId, phase: 'flanges', done: i + 1, total: req.flangeJobs.length } satisfies PreviewWorkerMessage)
       flangeMeshes.push({ key: job.key, mesh: null })
       return
@@ -302,6 +325,7 @@ async function buildPreview(
 
     const flangeDrawing = boundary.main
     if (!flangeDrawing) {
+      failFlange('outline', 'No flange outline was produced')
       flangeMeshes.push({ key: job.key, mesh: null })
       prof?.items.push({ kind: 'flange', id: vertex.vertexId, boundaryMs: flangeBoundaryMs, solidMs: 0 })
       return
@@ -314,9 +338,9 @@ async function buildPreview(
         buildStrutMeshFromDrawing(flangeDrawing, localPlane, req.grooveDepth),
       )
       flangeSolidMs = lastMs()
-      if (!mesh) fail(part, 'The flange outline produced no solid', job.key, job.side)
+      if (!mesh) failFlange('solid', 'The flange outline produced no solid')
     } catch (err) {
-      fail(part, err, job.key, job.side)
+      failFlange('solid', err)
     }
     flangeMeshes.push({ key: job.key, mesh })
     prof?.items.push({ kind: 'flange', id: vertex.vertexId, boundaryMs: flangeBoundaryMs, solidMs: flangeSolidMs })
