@@ -172,3 +172,100 @@ export function bracePlateHoleCenters(
 export function placeInPlateFrame(c: Pt, u: Pt, local: Pt[]): Pt[] {
   return local.map(([x, y]) => [c[0] + x * u[0] - y * u[1], c[1] + x * u[1] + y * u[0]]);
 }
+
+// The production bridge is a polygonal band (including rounded bridges). Use that
+// same boundary when fitting plates, so a plate cannot overhang an arc's chords.
+export interface PlateBand {
+  polygon: Pt[];
+  centerline: Pt[];
+}
+
+const cross = (a: Pt, b: Pt) => a[0] * b[1] - a[1] * b[0];
+export const interpolatePoint = (a: Pt, b: Pt, t: number): Pt =>
+  [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+function segmentParameter(a: Pt, b: Pt, c: Pt, d: Pt): number | null {
+  const ab = sub(b, a), cd = sub(d, c);
+  const denominator = cross(ab, cd);
+  if (Math.abs(denominator) < 1e-12) return null;
+  const t = cross(sub(c, a), cd) / denominator;
+  const s = cross(sub(c, a), ab) / denominator;
+  return t >= 0 && t <= 1 && s >= 0 && s <= 1 ? t : null;
+}
+
+function insidePolygon(p: Pt, polygon: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+    const ab = sub(b, a), ap = sub(p, a);
+    if (len(ab) < 1e-12) continue;
+    if (Math.abs(cross(ab, ap)) <= 1e-7 * Math.max(1, len(ab)) &&
+      ap[0] * ab[0] + ap[1] * ab[1] >= -1e-7 &&
+      ap[0] * ab[0] + ap[1] * ab[1] <= len(ab) ** 2 + 1e-7) return true;
+    if ((a[1] > p[1]) !== (b[1] > p[1]) &&
+      p[0] < a[0] + (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1])) inside = !inside;
+  }
+  return inside;
+}
+
+export function rectFitsPolygon(c: Pt, u: Pt, p: number, q: number, polygon: Pt[]): boolean {
+  const corners = rectCorners(c, u, p, q);
+  if (!corners.every((point) => insidePolygon(point, polygon))) return false;
+  // Check every portion of each rectangle edge, including concave parts of the band.
+  for (let i = 0; i < 4; i++) {
+    const a = corners[i], b = corners[(i + 1) % 4];
+    const cuts = [0, 1];
+    for (let j = 0; j < polygon.length; j++) {
+      const t = segmentParameter(a, b, polygon[j], polygon[(j + 1) % polygon.length]);
+      if (t !== null) cuts.push(t);
+    }
+    cuts.sort((x, y) => x - y);
+    for (let j = 1; j < cuts.length; j++) {
+      if (!insidePolygon(interpolatePoint(a, b, (cuts[j - 1] + cuts[j]) / 2), polygon)) return false;
+    }
+  }
+  return true;
+}
+
+// All intervals along the centerline where a minimum-size plate fits. Containment
+// can change only when a moving rectangle corner hits a band edge or vice versa.
+// Splitting at those events avoids missing narrow feasible intervals by sampling.
+export function plateCenterSegments(band: PlateBand, axis: Pt, halfAlong: number, halfAcross: number): [Pt, Pt][] {
+  const result: [Pt, Pt][] = [];
+  const offsets = rectCorners([0, 0], axis, halfAlong, halfAcross);
+  for (let i = 1; i < band.centerline.length; i++) {
+    const a = band.centerline[i - 1], b = band.centerline[i];
+    const movement = sub(b, a);
+    const corners = offsets.map((p): Pt => [a[0] + p[0], a[1] + p[1]]);
+    const cuts = [0, 1];
+    for (let j = 0; j < band.polygon.length; j++) {
+      const p = band.polygon[j], q = band.polygon[(j + 1) % band.polygon.length];
+      for (let k = 0; k < 4; k++) {
+        const corner = corners[k];
+        const t = segmentParameter(corner, [corner[0] + movement[0], corner[1] + movement[1]], p, q);
+        if (t !== null) cuts.push(t);
+        const s = segmentParameter(p, sub(p, movement), corner, corners[(k + 1) % 4]);
+        if (s !== null) cuts.push(s);
+      }
+    }
+    cuts.sort((x, y) => x - y);
+    for (let j = 1; j < cuts.length; j++) {
+      const lo = cuts[j - 1], hi = cuts[j];
+      if (hi - lo < 1e-12) continue;
+      if (rectFitsPolygon(interpolatePoint(a, b, (lo + hi) / 2), axis, halfAlong, halfAcross, band.polygon)) {
+        result.push([interpolatePoint(a, b, lo), interpolatePoint(a, b, hi)]);
+      }
+    }
+  }
+  return result;
+}
+
+export function plateHalfAcross(c: Pt, axis: Pt, halfAlong: number, minimum: number, maximum: number, polygon: Pt[]): number {
+  let lo = minimum, hi = maximum;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (rectFitsPolygon(c, axis, halfAlong, mid, polygon)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}

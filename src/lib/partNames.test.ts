@@ -8,7 +8,7 @@ describe('createPartNameMaps', () => {
     }))
     const names = createPartNameMaps({
       struts: items, feet: items, braces: items,
-      flanges: items.map(({ id, center }) => ({ vertexId: id, side: 'inner', center })),
+      flanges: items,
       bracePlates: items.map(({ id, center }) => ({ id: String(id), center })),
     })
     for (const map of [names.struts, names.feet, names.braces, names.bracePlates]) {
@@ -17,8 +17,8 @@ describe('createPartNameMaps', () => {
         expect(map[id]).toBe(String(id))
       }
     }
-    expect(names.flanges[flangeNameKey(69, 'inner')]).toBe('69.')
-    expect(names.flanges[flangeNameKey(96, 'inner')]).toBe('96.')
+    expect(names.flanges[flangeNameKey(35, 'outer')]).toBe('69.')
+    expect(names.flanges[flangeNameKey(48, 'inner')]).toBe('96.')
   })
 
   it('numbers parts continuously from top to bottom and clockwise within each elevation', () => {
@@ -30,10 +30,9 @@ describe('createPartNameMaps', () => {
           { id: 12, center: [-1, 50, 0] },
         ],
         flanges: [
-          { vertexId: 1, side: 'inner', center: [1, 20, 0] },
-          { vertexId: 2, side: 'inner', center: [0, 20, -1] },
-          { vertexId: 1, side: 'outer', center: [1, 10, 0] },
-          { vertexId: 2, side: 'outer', center: [0, 10, -1] },
+          { id: 2, center: [0, 20, -1] },
+          { id: 3, center: [1, 10, 0] },
+          { id: 1, center: [1, 20, 0] },
         ],
         feet: [],
         bracePlates: [],
@@ -44,10 +43,12 @@ describe('createPartNameMaps', () => {
     expect(names.struts[11]).toBe('1')
     expect(names.struts[10]).toBe('2')
     expect(names.struts[12]).toBe('3')
-    expect(names.flanges[flangeNameKey(1, 'inner')]).toBe('1')
-    expect(names.flanges[flangeNameKey(2, 'inner')]).toBe('2')
-    expect(names.flanges[flangeNameKey(1, 'outer')]).toBe('3')
-    expect(names.flanges[flangeNameKey(2, 'outer')]).toBe('4')
+    expect(names.flanges[flangeNameKey(1, 'inner')]).toBe('2')
+    expect(names.flanges[flangeNameKey(2, 'inner')]).toBe('4')
+    expect(names.flanges[flangeNameKey(1, 'outer')]).toBe('1')
+    expect(names.flanges[flangeNameKey(2, 'outer')]).toBe('3')
+    expect(names.flanges[flangeNameKey(3, 'outer')]).toBe('5')
+    expect(names.flanges[flangeNameKey(3, 'inner')]).toBe('6.')
   })
 
   it('uses independent numeric sequences for feet, brace plates, and braces', () => {
@@ -86,11 +87,18 @@ describe('createPartNameMaps', () => {
         { id: 2, center: [1, 100, 0] as [number, number, number] },
         { id: 1, center: [1, 50, 0] as [number, number, number] },
       ],
-      flanges: [], feet: [], bracePlates: [], braces: [],
+      flanges: [] as { id: number; center: [number, number, number] }[], feet: [], bracePlates: [], braces: [],
     }
+    input.flanges = input.struts
     const names = createPartNameMaps(input)
+    expect(names.flanges).toEqual({
+      '2:outer': '1', '2:inner': '2',
+      '10:outer': '3', '10:inner': '4',
+      '20:outer': '5', '20:inner': '6.',
+      '1:outer': '7', '1:inner': '8',
+    })
     expect(names.struts).toEqual({ 2: '1', 10: '2', 20: '3', 1: '4' })
-    expect(createPartNameMaps({ ...input, struts: [...input.struts].reverse() })).toEqual(names)
+    expect(createPartNameMaps({ ...input, struts: [...input.struts].reverse(), flanges: [...input.flanges].reverse() })).toEqual(names)
     expect(names.feet).toEqual({})
   })
 })

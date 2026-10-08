@@ -675,7 +675,7 @@ function calculateArcPoints(
   });
 }
 
-function arcEndpoints(
+export function arcEndpoints(
   a: Point2D,
   b: Point2D,
   center: Point2D,
@@ -690,6 +690,14 @@ function arcEndpoints(
     innB: arcStart(b, tangentB, -1, bMeasurements),
     extA: arcStart(a, tangentA, -1, aMeasurements),
     extB: arcStart(b, tangentB, 1, bMeasurements),
+  };
+}
+
+// Shared with brace fitting: rounded bridges use these exact polygon segments.
+export function strutBridgeSides(ends: ArcEndpoints, center: Point2D, roundBridge: boolean): { inner: Point2D[]; outer: Point2D[] } {
+  return {
+    inner: roundBridge ? calculateArcPoints(ends.innA, ends.innB, center, 20) : [ends.innA, ends.innB],
+    outer: roundBridge ? calculateArcPoints(ends.extA, ends.extB, center, 20) : [ends.extA, ends.extB],
   };
 }
 
@@ -710,12 +718,7 @@ function strutOutlinePoints(
     points.map(([x, y]) => add2(origin, add2(scale2(axis, x), scale2(rotate90(axis, sign), y))));
   const axisA = tangentDirection2D(a, b, center);
   const axisB = tangentDirection2D(b, a, center);
-  const innerBridge = roundBridge
-    ? calculateArcPoints(ends.innA, ends.innB, center, 20)
-    : [ends.innA, ends.innB];
-  const outerBridge = roundBridge
-    ? calculateArcPoints(ends.extA, ends.extB, center, 20)
-    : [ends.extA, ends.extB];
+  const { inner: innerBridge, outer: outerBridge } = strutBridgeSides(ends, center, roundBridge);
   const points = [
     ...placeSide(sideA, a, axisA, 1),
     ...innerBridge,
@@ -909,7 +912,21 @@ export function computeStrutBoundary2D(
       let endAxis: Point2D | null = null;
       let rect: BraceRect | null = null;
 
-      if (roundBridge) {
+      if (brace.placement === null) {
+        const message = `Brace ${brace.braceId} has no flange-parallel placement where both plates fit`;
+        if (onCutError) onCutError(message, new Error(message));
+        else throw new Error(message);
+        continue;
+      }
+      if (brace.placement) {
+        braceCenter = brace.placement.center;
+        endAxis = tangentDirection2D(origin, end === "A" ? b : a, center);
+        rect = {
+          halfAlong: brace.params.width / 2,
+          halfAcross: brace.placement.halfAcross,
+          corners: rectCorners(braceCenter, endAxis, brace.params.width / 2, brace.placement.halfAcross),
+        };
+      } else if (roundBridge) {
         // braceInn / braceExt: where the ray from the center through braceCenterNoRounding
         // crosses the strut body's inn / ext arc (see arcPointAtAngle). Missing when that point
         // lies angularly outside the arc, e.g. within a shoulder.
@@ -953,7 +970,7 @@ export function computeStrutBoundary2D(
           const braceInn = lerp2(arcEnds.innA, arcEnds.innB, clampedT);
           const braceExt = lerp2(arcEnds.extA, arcEnds.extB, clampedT);
           braceCenter = scale2(add2(braceInn, braceExt), 0.5);
-          endAxis = end === "A" ? straightCenterline.axis : scale2(straightCenterline.axis, -1);
+          endAxis = tangentDirection2D(origin, end === "A" ? b : a, center);
           rect = braceRectInStraightBand(
             braceCenter,
             endAxis,

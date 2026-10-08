@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   arcPointAtAngle,
+  rectFitsPolygon,
+  plateCenterSegments,
+  plateHalfAcross,
   isInsideArcBand,
   braceRectInArcBand,
   bracePlateHoleCenters,
@@ -144,3 +147,28 @@ describe("placeInPlateFrame", () => {
   });
 });
 
+
+
+describe('production polygon plate fitting', () => {
+  it('finds a narrow feasible interval without relying on sampling', () => {
+    const band = {
+      polygon: [[0, -2], [10.001, -2], [10.001, 2], [0, 2]] as Pt[],
+      centerline: [[0, 0], [10.001, 0]] as Pt[],
+    }
+    const segments = plateCenterSegments(band, [1, 0], 5, 1)
+    expect(segments).toHaveLength(1)
+    expect(segments[0][0][0]).toBeCloseTo(5, 9)
+    expect(segments[0][1][0]).toBeCloseTo(5.001, 9)
+    expect(plateHalfAcross([5, 0], [1, 0], 5, 1, 10, band.polygon)).toBeCloseTo(2, 5)
+  })
+
+  it('rejects edges crossing a concavity even if every rectangle corner fits', () => {
+    const polygon: Pt[] = [[0, 0], [10, 0], [10, 10], [6, 10], [5, 4], [4, 10], [0, 10]]
+    expect(rectFitsPolygon([5, 5], [1, 0], 4, 4, polygon)).toBe(false)
+  })
+
+  it('does not treat duplicate polygon vertices as containing every point', () => {
+    const polygon: Pt[] = [[0, 0], [0, 0], [10, 0], [10, 10], [0, 10]]
+    expect(rectFitsPolygon([20, 20], [1, 0], 1, 1, polygon)).toBe(false)
+  })
+})

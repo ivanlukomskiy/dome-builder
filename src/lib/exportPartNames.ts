@@ -46,16 +46,8 @@ export function buildExportPartNames(
   params: RunStepExportParams,
   strutEntries: StrutGeometryEntry[],
   vertices: VertexEdgesInfo[],
-  halfWidth: number,
 ): PartNameMaps {
-  const flangeSpan = halfWidth - params.grooveDepth / 2
-  const flanges = vertices.flatMap((vertex) => {
-    const normal = normalize(vertex.tangentPlane.normal)
-    return [
-      { vertexId: vertex.vertexId, side: 'outer' as const, center: add(vertex.position, scale(normal, flangeSpan)) },
-      { vertexId: vertex.vertexId, side: 'inner' as const, center: add(vertex.position, scale(normal, -flangeSpan)) },
-    ]
-  })
+  const flanges = vertices.map((vertex) => ({ id: vertex.vertexId, center: vertex.position }))
 
   const feet = vertices.flatMap((vertex) => {
     const center = footPartCenter(vertex)

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { resolveBracePlacements } from './bracePlacement'
 import type { SceneData } from './polyhedra'
 import { computeEdgeEndOffsets } from './strutGeometry'
 import { computeEdgesInfo, type VertexEdgesInfo } from './edgesInfo'
@@ -118,6 +119,8 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
       ),
     }
   })
+
+  resolveBracePlacements(strutEntries, params)
 
   const edgesInfo = computeEdgesInfo({
     data,

@@ -20,6 +20,7 @@ interface Params {
   offset2: number
   width: number
   cornerLength: number
+  roundBridge: boolean
   radius: number
   angleDeg: number
   endGrooveLengthPercent: number
@@ -43,6 +44,7 @@ const DEFAULT_PARAMS: Params = {
   offset2: 100,
   width: 120,
   cornerLength: 375,
+  roundBridge: true,
   radius: 2500,
   angleDeg: 60,
   endGrooveLengthPercent: 25,
@@ -205,6 +207,7 @@ export function StrutShapeDebug() {
             offset1,
             offset2,
             cornerLength,
+            roundBridge,
             width,
             endGrooveLengthPercent,
             midGrooveLengthPercent,
@@ -237,6 +240,7 @@ export function StrutShapeDebug() {
             cornerLengthA: cornerLength,
             cornerLengthB: cornerLength,
             halfWidth: width / 2,
+            roundBridge,
             endGrooveLengthPercent,
             midGrooveLengthPercent,
             grooveDepth,
@@ -265,6 +269,7 @@ export function StrutShapeDebug() {
           call.millingDiameter,
           call.chamferLength,
           call.braces,
+          call.roundBridge,
         )
         if (cancelled) return
 
@@ -408,6 +413,14 @@ export function StrutShapeDebug() {
             <label>Corner length (mm)</label>
             <NumberField value={params.cornerLength} step={5} min={0} onCommit={setParam('cornerLength')} />
           </div>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={params.roundBridge}
+              onChange={(e) => setFlag('roundBridge')(e.target.checked)}
+            />
+            Round bridge
+          </label>
         </section>
 
         <section className="control-group">

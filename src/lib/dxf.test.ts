@@ -263,8 +263,7 @@ describe('numeric part labels', () => {
     const names = createPartNameMaps({
       struts: [{ id: 42, center: [1, 20, 0] }],
       flanges: [
-        { vertexId: 7, side: 'outer', center: [1, 30, 0] },
-        { vertexId: 7, side: 'inner', center: [1, 10, 0] },
+        { id: 7, center: [1, 20, 0] },
       ],
       feet: [], bracePlates: [], braces: [],
     })

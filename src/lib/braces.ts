@@ -6,7 +6,9 @@ import type { Edge, SceneData } from './polyhedra'
 // vertex. Tunable properties live under `params` so new ones can be added there without touching
 // the brace's topology (`vertexId`, `edgeIds`).
 export interface BraceParams {
-  // Fraction of each edge's length, measured from the brace's vertex: 0 < shift < 1.
+  // Preferred fraction of each edge's length from the brace's vertex: 0 < shift < 1.
+  // Solid layout adjusts the two positions together to the nearest feasible
+  // flange-parallel plane; the edit-mode guide still shows the nominal positions.
   shift: number
   // Brace width, mm: the plate's length along the strut, at the brace.
   width: number
@@ -223,6 +225,9 @@ export interface StrutBraceEnd {
   params: BraceParams
   // shift * the strut's (chord) length, in mm, measured from this end's vertex.
   distanceFromVertex: number
+  // Shared flange-parallel layout, in this strut's 2D frame. Null means the
+  // two plates cannot fit together; absent supports standalone sketch inputs.
+  placement?: { center: [number, number]; halfAcross: number } | null
   // The other edge the brace runs to.
   otherEdgeId: number
   // Unit vector, in the model's 3D space, from this end's vertex along that other edge - which way

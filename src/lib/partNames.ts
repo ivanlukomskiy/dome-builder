@@ -7,15 +7,10 @@ export interface NamedCenter<Id extends string | number> {
   center: Vec3
 }
 
-export interface FlangeNameInput {
-  vertexId: number
-  side: FlangeNameSide
-  center: Vec3
-}
-
 export interface PartNameInput {
   struts: NamedCenter<number>[]
-  flanges: FlangeNameInput[]
+  // One center per vertex; each vertex contributes an outer/inner flange pair.
+  flanges: NamedCenter<number>[]
   feet: NamedCenter<number>[]
   bracePlates: NamedCenter<string>[]
   braces: NamedCenter<number>[]
@@ -62,24 +57,21 @@ function compareClockwise<T extends NamedCenter<string | number>>(a: T, b: T): n
   return String(a.id).localeCompare(String(b.id), 'en', { numeric: true })
 }
 
-function assignNumericNames<Id extends string | number>(
+function sortCenters<Id extends string | number>(
   items: NamedCenter<Id>[],
-): Record<Id, string> {
+): NamedCenter<Id>[] {
   const sorted = [...items].sort((a, b) => {
     const elevationDelta = elevationOf(b.center) - elevationOf(a.center)
     if (Math.abs(elevationDelta) > ELEVATION_EPSILON) return elevationDelta
     return compareClockwise(a, b)
   })
-  const result = {} as Record<Id, string>
-  let nextId = 1
+  const result: NamedCenter<Id>[] = []
   let groupElevation = Infinity
   let inGroup: NamedCenter<Id>[] = []
 
   const flush = () => {
     if (inGroup.length === 0) return
-    inGroup.sort(compareClockwise).forEach((item) => {
-      result[item.id] = formatPartId(nextId++)
-    })
+    result.push(...inGroup.sort(compareClockwise))
   }
 
   for (const item of sorted) {
@@ -96,14 +88,28 @@ function assignNumericNames<Id extends string | number>(
   return result
 }
 
+function assignNumericNames<Id extends string | number>(items: NamedCenter<Id>[]): Record<Id, string> {
+  const result = {} as Record<Id, string>
+  sortCenters(items).forEach((item, index) => {
+    result[item.id] = formatPartId(index + 1)
+  })
+  return result
+}
+
+function assignFlangeNames(vertices: NamedCenter<number>[]): Record<string, string> {
+  const result: Record<string, string> = {}
+  sortCenters(vertices).forEach((vertex, index) => {
+    result[flangeNameKey(vertex.id, 'outer')] = formatPartId(2 * index + 1)
+    result[flangeNameKey(vertex.id, 'inner')] = formatPartId(2 * index + 2)
+  })
+  return result
+}
+
 // Every physical part kind has its own continuous sequence, highest elevation first.
 export function createPartNameMaps(input: PartNameInput): PartNameMaps {
   return {
     struts: assignNumericNames(input.struts),
-    flanges: assignNumericNames(input.flanges.map((flange) => ({
-      id: flangeNameKey(flange.vertexId, flange.side),
-      center: flange.center,
-    }))),
+    flanges: assignFlangeNames(input.flanges),
     feet: assignNumericNames(input.feet),
     bracePlates: assignNumericNames(input.bracePlates),
     braces: assignNumericNames(input.braces),

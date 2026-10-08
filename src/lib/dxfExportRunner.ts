@@ -87,7 +87,7 @@ export async function runDxfExport(
   const profiling = exportProfilingEnabled()
   const batchProfiles: ExportBatchProfile[] = []
   const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
-  const names = buildExportPartNames(params, strutEntries, vertices, halfWidth)
+  const names = buildExportPartNames(params, strutEntries, vertices)
 
   const shared: Shared = {
     ...labelSettings,

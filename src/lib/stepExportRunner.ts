@@ -205,7 +205,7 @@ export async function runStepExport(
   const batchProfiles: ExportBatchProfile[] = []
   const inputs = computePreviewBuildInputs(params)
   const { strutEntries, vertices } = inputs
-  const names = buildExportPartNames(params, strutEntries, vertices, inputs.halfWidth)
+  const names = buildExportPartNames(params, strutEntries, vertices)
   const shared = buildPartsShared(params, inputs, names, profiling)
 
   const allPieces: StepExportPiece[] = []
@@ -311,7 +311,7 @@ export async function runStepDebugExport(
 ): Promise<StepExportPiece | null> {
   const inputs = computePreviewBuildInputs(params)
   const { strutEntries, vertices } = inputs
-  const names = buildExportPartNames(params, strutEntries, vertices, inputs.halfWidth)
+  const names = buildExportPartNames(params, strutEntries, vertices)
   const shared = buildPartsShared(params, inputs, names, false)
 
   let name: string
