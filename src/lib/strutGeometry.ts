@@ -845,6 +845,24 @@ export function computeStrutBoundary2D(
     halfWidth,
   );
   const arcEnds = arcEndpoints(a, b, center, endA, endB);
+  // Keep construction markers in the same projected coordinates as the outline.
+  const helperRadius = Math.max(length2(sub2(b, a)) * 0.004, 1);
+  const addHelperPoint = (point: Point2D, name: string, color: string) => {
+    helpers.push({ drawing: drawCircle(helperRadius).translate(point), name, color });
+  };
+  addHelperPoint(center, "center", "#f472b6");
+  addHelperPoint(a, "strut end A", "#fb923c");
+  addHelperPoint(b, "strut end B", "#a78bfa");
+  if (!roundBridge) {
+    // Use the supporting lines: the bridge stops at the tangent sections, so its
+    // intersections with the end radii can lie beyond the bridge segments.
+    for (const [end, vertex] of [["A", a], ["B", b]] as const) {
+      const point = lineIntersection2D(center, sub2(vertex, center), arcEnds.extA, sub2(arcEnds.extB, arcEnds.extA));
+      if (point && point.every(Number.isFinite)) {
+        addHelperPoint(point, `outer bridge × radius ${end}`, "#4ade80");
+      }
+    }
+  }
   const points = strutOutlinePoints(a, b, center, endA, endB, arcEnds, roundBridge);
   let outline = draw(points[0]);
   for (const point of points.slice(1)) outline = outline.lineTo(point);
