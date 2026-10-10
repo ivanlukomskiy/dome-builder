@@ -40,6 +40,9 @@ describe('preview part cache keys', () => {
     expect(strutPreviewKey({ ...strut, offsetA: 11 }, settings)).not.toBe(key)
     expect(strutPreviewKey({ ...strut, color: [0.2, 0.2, 0.3] }, settings)).not.toBe(key)
     expect(strutPreviewKey(strut, { ...settings, grooveDepth: 6 })).not.toBe(key)
+    expect(strutPreviewKey({ ...strut, addedThicknessA: 2.5 }, settings)).not.toBe(key)
+    expect(strutPreviewKey({ ...strut, addedThicknessB: 3 }, settings)).not.toBe(key)
+    expect(strutPreviewKey({ ...strut, shellEdgeOffset: 4 }, settings)).not.toBe(key)
     const part = { pieces: [], bracePoints: [] }
     previewPartCache.set(key, part)
     expect(previewPartCache.get(key)).toBe(part)

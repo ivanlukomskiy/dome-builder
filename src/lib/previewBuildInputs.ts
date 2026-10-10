@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { prepareShellStruts } from './shellPreparation'
 import { resolveBracePlacements } from './bracePlacement'
 import type { SceneData } from './polyhedra'
 import { computeEdgeEndOffsets } from './strutGeometry'
@@ -25,6 +26,9 @@ export interface StrutGeometryEntry {
   // Corner length at each end - its vertex's override, or the global one.
   cornerLengthA: number
   cornerLengthB: number
+  addedThicknessA?: number
+  addedThicknessB?: number
+  shellEdgeOffset?: number
   beamThickness: number
   // This edge's own thickness override, if any - undefined means "uses the model default". Not
   // needed to build the solid itself; DomeMesh uses it to pick the strut's preview color.
@@ -35,6 +39,7 @@ export interface StrutGeometryEntry {
 }
 
 export interface PreviewBuildInputs {
+  shellVertices: ReadonlyMap<number, THREE.Vector3>
   strutEntries: StrutGeometryEntry[]
   vertices: VertexEdgesInfo[]
   halfWidth: number
@@ -60,6 +65,7 @@ export interface PreviewBuildInputParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellEnabled?: boolean
   roundStrutBridge: boolean
 }
 
@@ -120,6 +126,7 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     }
   })
 
+  const { shellVertices } = prepareShellStruts(strutEntries, params)
   resolveBracePlacements(strutEntries, params)
 
   const edgesInfo = computeEdgesInfo({
@@ -140,5 +147,5 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     chamferLength,
   })
 
-  return { strutEntries, vertices: edgesInfo.vertices, halfWidth }
+  return { strutEntries, vertices: edgesInfo.vertices, halfWidth, shellVertices }
 }

@@ -6,7 +6,7 @@ import type { DxfHoleKind, DxfHoleMark, DxfPolyline, DxfVertex } from './dxfExpo
 // only, no handles or subclass markers - which every CAD/CAM package still opens).
 // Pure math and string building: no replicad, so it runs anywhere and is unit-tested.
 
-export type DxfPartKind = 'strut' | 'flange' | 'foot' | 'brace-plate' | 'brace'
+export type DxfPartKind = 'strut' | 'flange' | 'foot' | 'brace-plate' | 'brace' | 'shell'
 
 // One flat part: its outlines (outer boundary and holes) in its own 2D coordinates, and the ID
 // it is labeled with.
@@ -32,6 +32,7 @@ export interface DxfPart {
 // A short text centered on (x, y), written along `angleDeg` and `height` mm tall (both before the
 // sheet scale is applied).
 export interface DxfHelperText {
+  isPartLabel?: boolean
   text: string
   x: number
   y: number
@@ -92,6 +93,7 @@ export const DXF_LAYERS: { name: string; color: number }[] = [
   { name: 'FOOT', color: 7 },
   { name: 'BRACE_PLATES', color: 7 },
   { name: 'BRACES', color: 7 },
+  { name: 'SHELL', color: 7 },
   ...(Object.keys(LAYER_OF_HOLE) as DxfHoleKind[]).map((kind) => ({ name: LAYER_OF_HOLE[kind], color: COLOR_OF_HOLE[kind] })),
   { name: 'LABELS', color: 1 },
   { name: 'HELPERS', color: 3 },
@@ -103,10 +105,11 @@ const LAYER_OF_KIND: Record<DxfPartKind, string> = {
   foot: 'FOOT',
   'brace-plate': 'BRACE_PLATES',
   brace: 'BRACES',
+  shell: 'SHELL',
 }
 
 // Order the kinds appear on the sheet in (each kind starts a fresh row).
-const KIND_ORDER: DxfPartKind[] = ['flange', 'strut', 'foot', 'brace-plate', 'brace']
+const KIND_ORDER: DxfPartKind[] = ['flange', 'strut', 'foot', 'brace-plate', 'brace', 'shell']
 
 export interface DxfLayoutOptions {
   // Uniform scale applied to every part (and to the label size and gaps, so the sheet stays
@@ -399,7 +402,7 @@ export function writeDxf(parts: PlacedDxfPart[], sheets: DxfSheet[] = []): strin
       const angle = readableAngle(h.angleDeg)
       out +=
         pair(0, 'TEXT') +
-        pair(8, 'HELPERS') +
+        pair(8, h.isPartLabel ? 'LABELS' : 'HELPERS') +
         pair(10, num(h.x)) +
         pair(20, num(h.y)) +
         pair(30, 0) +

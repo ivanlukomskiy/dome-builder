@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { Drawing, measureArea, setOC, type Face } from 'replicad'
 import initOpenCascade from 'replicad-opencascadejs'
-import { computeStrutBoundary2D } from './strutGeometry'
+import { arcEndpoints, computeStrutBoundary2D, precalculateStrutEnd } from './strutGeometry'
 import { DEFAULT_BRACE_PARAMS, NO_STRUT_BRACES, type StrutBraces } from './braces'
 
 beforeAll(async () => {
@@ -32,6 +32,56 @@ function build(round: boolean, c = cases[0], braces: StrutBraces = NO_STRUT_BRAC
 }
 
 describe('single strut outline', () => {
+  it.each([0, 10.5, -7.25])('offsets shell vertices perpendicularly by %s mm', offset => {
+    const a: [number, number] = [1000, 0]
+    const b: [number, number] = [500, Math.sqrt(3) * 500]
+    const result = computeStrutBoundary2D(a, b, [0, 0],
+      20, 30, 150, 180, 50, 15, 20, 20, 5, 6, NO_STRUT_BRACES, false, undefined, 12.5, 3.25, offset)
+    const endA = precalculateStrutEnd(20, 150, 15, 20, 6, 5, 20, 50, 12.5)
+    const endB = precalculateStrutEnd(30, 180, 15, 20, 6, 5, 20, 50, 3.25)
+    const ends = arcEndpoints(a, b, [0, 0], endA, endB)
+    const dx = ends.extB[0] - ends.extA[0]
+    const dy = ends.extB[1] - ends.extA[1]
+    const length = Math.hypot(dx, dy)
+    // For this fixture the outward unit normal is (dy, -dx) / length.
+    for (const [end, radius] of [['A', a], ['B', b]] as const) {
+      for (const [name, expectedDistance] of [[`shell vertex w/o offset ${end}`, 0], [`shell vertex ${end}`, offset]] as const) {
+        const point = result.helpers.find(h => h.name === name)!.drawing.boundingBox.center
+        expect(point[0] * radius[1] - point[1] * radius[0]).toBeCloseTo(0, 5)
+        expect(((point[0] - ends.extA[0]) * dy - (point[1] - ends.extA[1]) * dx) / length)
+          .toBeCloseTo(expectedDistance, 5)
+      }
+    }
+    expect(area(result.main!)).toBeCloseTo(area(computeStrutBoundary2D(a, b, [0, 0],
+      20, 30, 150, 180, 50, 15, 20, 20, 5, 6, NO_STRUT_BRACES, false, undefined, 12.5, 3.25).main!), 5)
+  })
+
+  it('extends only the outer bridge endpoints by independent fractional thicknesses', () => {
+    const end = (added = 0) => precalculateStrutEnd(20, 150, 15, 20, 6, 5, 20, 50, added)
+    const a: [number, number] = [1000, 0]
+    const b: [number, number] = [500, Math.sqrt(3) * 500]
+    const base = arcEndpoints(a, b, [0, 0], end(), end())
+    const extended = arcEndpoints(a, b, [0, 0], end(12.5), end(3.25))
+    expect(extended.innA).toEqual(base.innA)
+    expect(extended.innB).toEqual(base.innB)
+    expect(extended.extA[0] - base.extA[0]).toBeCloseTo(12.5)
+    expect(extended.extA[1]).toBeCloseTo(base.extA[1])
+    expect(extended.extB[0] - base.extB[0]).toBeCloseTo(3.25 * 0.5)
+    expect(extended.extB[1] - base.extB[1]).toBeCloseTo(3.25 * Math.sqrt(3) / 2)
+  })
+
+  it.each([false, true])('builds thicker outer shoulders with roundBridge=%s', round => {
+    const result = computeStrutBoundary2D([1000, 0], [500, Math.sqrt(3) * 500], [0, 0],
+      20, 30, 150, 180, 50, 15, 20, 20, 5, 6, NO_STRUT_BRACES, round, undefined, 12.5, 3.25)
+    expect(area(result.main!)).toBeGreaterThan(area(build(round).main!))
+    const solid = result.main!.sketchOnPlane().extrude(10)
+    try { expect(solid.mesh().triangles.length).toBeGreaterThan(0) } finally { solid.delete() }
+  })
+
+  it.each([-1, NaN, Infinity])('rejects invalid added thickness %s', added => {
+    expect(() => precalculateStrutEnd(20, 150, 15, 20, 6, 5, 20, 50, added)).toThrow('nonnegative')
+  })
+
   it('reports milling cut failures without dropping the strut', () => {
     const onCutError = vi.fn()
     vi.spyOn(Drawing.prototype, 'cut').mockImplementation(() => { throw new Error('cut broke') })

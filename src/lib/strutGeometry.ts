@@ -271,6 +271,9 @@ function computeStrutBoundaryUnguarded(
   // with straight sides.
   roundBridge = true,
   onCutError?: (cut: string, error: unknown) => void,
+  addedThicknessA = 0,
+  addedThicknessB = 0,
+  shellEdgeOffset = 0,
 ): StrutBoundaryResult {
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
@@ -300,6 +303,9 @@ function computeStrutBoundaryUnguarded(
     braces,
     roundBridge,
     onCutError,
+    addedThicknessA,
+    addedThicknessB,
+    shellEdgeOffset,
   );
 }
 
@@ -322,6 +328,10 @@ export interface StrutBoundaryInput {
   chamferLength: number;
   braces: StrutBraces;
   roundBridge?: boolean;
+  // Radial extension of the outer mid-groove's bridge-side wall, per end (mm).
+  addedThicknessA?: number;
+  addedThicknessB?: number;
+  shellEdgeOffset?: number;
 }
 
 const NON_FINITE_NUMBERS = new Set(["NaN", "Infinity", "-Infinity"]);
@@ -379,8 +389,20 @@ export function strutBoundaryInputFromJson(json: string): StrutBoundaryInput {
   ] as const) {
     if (typeof input[key] !== "number") throw new Error(`"${key}" must be a number`);
   }
+  for (const key of ["addedThicknessA", "addedThicknessB"] as const) {
+    const value = input[key] ?? 0;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(`"${key}" must be a finite nonnegative number`);
+    }
+    input[key] = value;
+  }
+  if (input.shellEdgeOffset !== undefined &&
+      (typeof input.shellEdgeOffset !== "number" || !Number.isFinite(input.shellEdgeOffset))) {
+    throw new Error('"shellEdgeOffset" must be a finite number');
+  }
   return {
     ...(input as StrutBoundaryInput),
+    shellEdgeOffset: input.shellEdgeOffset ?? 0,
     braces: input.braces ?? NO_STRUT_BRACES,
     roundBridge: input.roundBridge ?? true,
   };
@@ -411,6 +433,9 @@ export function computeStrutBoundary(
   // with straight sides.
   roundBridge = true,
   onCutError?: (cut: string, error: unknown) => void,
+  addedThicknessA = 0,
+  addedThicknessB = 0,
+  shellEdgeOffset = 0,
 ): StrutBoundaryResult {
   try {
     return computeStrutBoundaryUnguarded(
@@ -430,6 +455,9 @@ export function computeStrutBoundary(
       braces,
       roundBridge,
       onCutError,
+      addedThicknessA,
+      addedThicknessB,
+      shellEdgeOffset,
     );
   } catch (err) {
     try {
@@ -450,6 +478,9 @@ export function computeStrutBoundary(
           chamferLength,
           braces,
           roundBridge,
+          addedThicknessA,
+          addedThicknessB,
+          shellEdgeOffset,
         },
         { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) },
       );
@@ -526,6 +557,7 @@ export interface StrutEndMeasurements {
   halfWidth: number;
   grooveDepth: number;
   connectionHalfWidth: number;
+  addedThickness: number;
 }
 
 const TINY_DISTANCE = 0.01;
@@ -539,7 +571,11 @@ export function precalculateStrutEnd(
   millingDiameter: number,
   grooveDepth: number,
   halfWidth: number,
+  addedThickness = 0,
 ): StrutEndMeasurements {
+  if (!Number.isFinite(addedThickness) || addedThickness < 0) {
+    throw new Error("Added thickness must be a finite nonnegative number");
+  }
   const workableLength = cornerLength - offset;
   const tenonWidth =
     (workableLength * (100 - endGrooveLengthPercent - midGrooveLengthPercent)) /
@@ -572,6 +608,7 @@ export function precalculateStrutEnd(
   }
   return {
     offset,
+    addedThickness,
     cornerLength,
     tenonStart: offset + (workableLength * endGrooveLengthPercent) / 100,
     tenonEnd: cornerLength - (workableLength * midGrooveLengthPercent) / 100,
@@ -587,7 +624,9 @@ export function precalculateStrutEnd(
 
 // One side of an end, from its tip to the bridge, in the end's local frame.
 // Chamfers are explicit boundary vertices, just like the groove shoulders.
-function strutEndSidePoints(p: StrutEndMeasurements): Point2D[] {
+function strutEndSidePoints(p: StrutEndMeasurements, outer = false): Point2D[] {
+  // Only the shoulder beyond the mid groove grows; its floor and tenon stay put.
+  const shoulderY = p.halfWidth + (outer ? p.addedThickness : 0);
   const grooveY = p.halfWidth - p.grooveDepth;
   const points: Point2D[] = [
     [p.offset, grooveY],
@@ -606,15 +645,15 @@ function strutEndSidePoints(p: StrutEndMeasurements): Point2D[] {
   points.push([p.tenonEnd, grooveY], [p.cornerLength, grooveY]);
   if (p.chamferLength > 0) {
     points.push(
-      [p.cornerLength, p.halfWidth - p.chamferLength],
-      [p.cornerLength + p.chamferLength, p.halfWidth],
+      [p.cornerLength, shoulderY - p.chamferLength],
+      [p.cornerLength + p.chamferLength, shoulderY],
     );
   } else if (p.effectiveCornerLength > p.cornerLength) {
-    points.push([p.cornerLength, p.halfWidth]);
+    points.push([p.cornerLength, shoulderY]);
   }
   // With no chamfer or relief the end is narrower here. The bridge's full-width
   // cap supplies the short step from the groove floor to this final point.
-  points.push([p.effectiveCornerLength, p.halfWidth]);
+  points.push([p.effectiveCornerLength, shoulderY]);
   return points;
 }
 
@@ -640,12 +679,13 @@ function arcStart(
   tangent: Point2D,
   sign: 1 | -1,
   measurements: StrutEndMeasurements,
+  outer = false,
 ): Point2D {
   let innA = add2(
     midPoint,
     scale2(tangent, measurements.effectiveCornerLength),
   );
-  innA = add2(innA, scale2(rotate90(tangent, sign), measurements.halfWidth));
+  innA = add2(innA, scale2(rotate90(tangent, sign), measurements.halfWidth + (outer ? measurements.addedThickness : 0)));
   return innA;
 }
 
@@ -688,8 +728,8 @@ export function arcEndpoints(
   return {
     innA: arcStart(a, tangentA, 1, aMeasurements),
     innB: arcStart(b, tangentB, -1, bMeasurements),
-    extA: arcStart(a, tangentA, -1, aMeasurements),
-    extB: arcStart(b, tangentB, 1, bMeasurements),
+    extA: arcStart(a, tangentA, -1, aMeasurements, true),
+    extB: arcStart(b, tangentB, 1, bMeasurements, true),
   };
 }
 
@@ -723,9 +763,9 @@ function strutOutlinePoints(
     ...placeSide(sideA, a, axisA, 1),
     ...innerBridge,
     ...placeSide(sideB, b, axisB, -1).reverse(),
-    ...placeSide(sideB, b, axisB, 1),
+    ...placeSide(strutEndSidePoints(endB, true), b, axisB, 1),
     ...outerBridge.reverse(),
-    ...placeSide(sideA, a, axisA, -1).reverse(),
+    ...placeSide(strutEndSidePoints(endA, true), a, axisA, -1).reverse(),
   ];
   // Shared bridge endpoints and disabled grooves/chamfers can repeat vertices.
   // Remove zero-length edges before handing the wire to the CAD kernel.
@@ -821,7 +861,11 @@ export function computeStrutBoundary2D(
   braces: StrutBraces = NO_STRUT_BRACES,
   roundBridge = true,
   onCutError?: (cut: string, error: unknown) => void,
+  addedThicknessA = 0,
+  addedThicknessB = 0,
+  shellEdgeOffset = 0,
 ): StrutBoundaryResult {
+  if (!Number.isFinite(shellEdgeOffset)) throw new Error("Shell edge offset must be a finite number");
   const helpers: HelperDrawing[] = [];
 
   const endA = precalculateStrutEnd(
@@ -833,6 +877,7 @@ export function computeStrutBoundary2D(
     millingDiameter,
     grooveDepth,
     halfWidth,
+    addedThicknessA,
   );
   const endB = precalculateStrutEnd(
     offsetB,
@@ -843,8 +888,37 @@ export function computeStrutBoundary2D(
     millingDiameter,
     grooveDepth,
     halfWidth,
+    addedThicknessB,
   );
   const arcEnds = arcEndpoints(a, b, center, endA, endB);
+  // Keep construction markers in the same projected coordinates as the outline.
+  const helperRadius = Math.max(length2(sub2(b, a)) * 0.004, 1);
+  const addHelperPoint = (point: Point2D, name: string, color: string) => {
+    helpers.push({ drawing: drawCircle(helperRadius).translate(point), name, color });
+  };
+  addHelperPoint(center, "center", "#f472b6");
+  addHelperPoint(a, "strut end A", "#fb923c");
+  addHelperPoint(b, "strut end B", "#a78bfa");
+  if (!roundBridge) {
+    // Use the supporting lines: the bridge stops at the tangent sections, so its
+    // intersections with the end radii can lie beyond the bridge segments.
+    const bridgeDirection = sub2(arcEnds.extB, arcEnds.extA);
+    const normal = rotate90(normalize2(bridgeDirection), 1);
+    const midpoint = scale2(add2(arcEnds.extA, arcEnds.extB), 0.5);
+    const outward = dot2(normal, sub2(midpoint, center)) < 0 ? scale2(normal, -1) : normal;
+    const shiftedBridgeStart = add2(arcEnds.extA, scale2(outward, shellEdgeOffset));
+    for (const [end, vertex] of [["A", a], ["B", b]] as const) {
+      const radius = sub2(vertex, center);
+      const point = lineIntersection2D(center, radius, arcEnds.extA, bridgeDirection);
+      if (point && point.every(Number.isFinite)) {
+        addHelperPoint(point, `shell vertex w/o offset ${end}`, "#4ade80");
+      }
+      const shiftedPoint = lineIntersection2D(center, radius, shiftedBridgeStart, bridgeDirection);
+      if (shiftedPoint && shiftedPoint.every(Number.isFinite)) {
+        addHelperPoint(shiftedPoint, `shell vertex ${end}`, "#facc15");
+      }
+    }
+  }
   const points = strutOutlinePoints(a, b, center, endA, endB, arcEnds, roundBridge);
   let outline = draw(points[0]);
   for (const point of points.slice(1)) outline = outline.lineTo(point);

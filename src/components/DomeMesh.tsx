@@ -6,6 +6,7 @@ import type { EditTarget, ViewMode } from '../App'
 import type { SceneData } from '../lib/polyhedra'
 import { computeBraceEndpoints } from '../lib/braces'
 import { buildBraceSolidMesh, pairBracePoints, type BracePoints } from '../lib/braceSolid'
+import { buildShellGeometry } from '../lib/shellMesh'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
 import { bracePreviewKey, footPreviewKey, previewPartCache, strutPreviewKey, type CachedPreviewPart } from '../lib/previewPartCache'
 import {
@@ -153,6 +154,8 @@ interface DomeMeshProps {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellThickness: number
+  shellEnabled: boolean
   roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
@@ -197,6 +200,8 @@ export function DomeMesh({
   grooveDepth,
   millingDiameter,
   chamferLength,
+  shellThickness,
+  shellEnabled,
   roundStrutBridge,
   toleranceLongitudinal,
   toleranceTransverse,
@@ -267,6 +272,8 @@ export function DomeMesh({
   const [previewGeometries, setPreviewGeometries] = useState<
     Partial<Record<PreviewPartKind, THREE.BufferGeometry>>
   >({})
+  const [shellGeometry, setShellGeometry] = useState<THREE.BufferGeometry | null>(null)
+  useEffect(() => () => { shellGeometry?.dispose() }, [shellGeometry])
   const workersRef = useRef<Set<Worker>>(new Set())
   const nextRequestIdRef = useRef(0)
 
@@ -277,6 +284,7 @@ export function DomeMesh({
     }
 
     if (mode !== 'preview') {
+      setShellGeometry(null)
       terminateWorkers()
       onPreviewProgress(null)
       return
@@ -313,6 +321,7 @@ export function DomeMesh({
           millingDiameter,
           chamferLength,
           roundStrutBridge,
+          shellEnabled,
         }),
       )
     } catch (err) {
@@ -652,6 +661,7 @@ export function DomeMesh({
             allPieces.push(...part.pieces)
           }
         })
+        const nextShellGeometry = buildShellGeometry(data.faces, inputs.shellVertices, shellThickness)
         const merged = timedMain('buildColoredGeometry + mergeGeometries', () => {
           const result: Partial<Record<PreviewPartKind, THREE.BufferGeometry>> = {}
           for (const { kind } of PREVIEW_PART_KINDS) {
@@ -668,6 +678,7 @@ export function DomeMesh({
           Object.values(prev).forEach((g) => g.dispose())
           return merged
         })
+        setShellGeometry(nextShellGeometry)
         profiler?.finish({
           struts: strutJobs.length,
           strutsBuilt: strutsToBuild.length,
@@ -714,6 +725,8 @@ export function DomeMesh({
     millingDiameter,
     chamferLength,
     roundStrutBridge,
+    shellEnabled,
+    shellThickness,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -790,6 +803,11 @@ export function DomeMesh({
         <lineSegments geometry={edgeGeometry}>
           <lineBasicMaterial color="#1b3a57" />
         </lineSegments>
+      )}
+      {mode === 'preview' && shellGeometry && (
+        <mesh geometry={shellGeometry} visible={partVisibility.shell}>
+          <meshStandardMaterial color="#c5d4df" side={THREE.DoubleSide} roughness={0.65} />
+        </mesh>
       )}
       {mode === 'preview' &&
         PREVIEW_PART_KINDS.map(({ kind }) => {

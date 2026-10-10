@@ -38,6 +38,7 @@ import {
 const EDIT_OR_PREVIEW_OPTIONS: { value: EditOrPreviewMode; label: string }[] = [
   { value: 'edit', label: 'Edit' },
   { value: 'preview', label: 'Preview' },
+  { value: 'shell', label: 'Shell' },
 ]
 
 const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
@@ -48,6 +49,8 @@ const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
 ]
 
 interface SidebarProps {
+  onDecoupleAllShellPanels: () => void
+  onAutoStitchShellPanels: () => void
   onExportConfig: () => void
   onImportConfig: (file: File) => void
   onDownloadSteps: () => void
@@ -143,6 +146,10 @@ interface SidebarProps {
   onMillingDiameterChange: (value: number) => void
   chamferLength: number
   onChamferLengthChange: (value: number) => void
+  shellThickness: number
+  onShellThicknessChange: (value: number) => void
+  shellEnabled: boolean
+  onShellEnabledChange: (value: boolean) => void
   roundStrutBridge: boolean
   onRoundStrutBridgeChange: (value: boolean) => void
   toleranceLongitudinal: number
@@ -420,6 +427,8 @@ function Help({ text }: { text: string }) {
 }
 
 export function Sidebar({
+  onDecoupleAllShellPanels,
+  onAutoStitchShellPanels,
   onExportConfig,
   onImportConfig,
   onDownloadSteps,
@@ -511,6 +520,10 @@ export function Sidebar({
   onMillingDiameterChange,
   chamferLength,
   onChamferLengthChange,
+  shellThickness,
+  onShellThicknessChange,
+  shellEnabled,
+  onShellEnabledChange,
   roundStrutBridge,
   onRoundStrutBridgeChange,
   toleranceLongitudinal,
@@ -1007,6 +1020,14 @@ export function Sidebar({
         )}
 
       </SidebarSection>}
+      {mode === 'shell' && <SidebarSection id="shell-workspace" title={t('Shell layout')}>
+        <div className="button-row">
+          <button onClick={onDecoupleAllShellPanels} disabled={!shellEnabled || roundStrutBridge}>{t('Decouple all')}</button>
+        </div>
+        <div className="button-row">
+          <button onClick={onAutoStitchShellPanels} disabled={!shellEnabled || roundStrutBridge}>{t('Stitch automatically')}</button>
+        </div>
+      </SidebarSection>}
       {mode === 'preview' && <SidebarSection id="preview" title={t('Preview')}>
         <div className="button-row">
           <button onClick={onApplyPreview} disabled={!previewParamsDirty}>{t('Redraw')}</button>
@@ -1040,7 +1061,7 @@ export function Sidebar({
         </SidebarSection>
         <>
           <SidebarSection id="geometry-struts" title={t('Struts')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 <div className="transform-field">
                   <label><FieldLabel text={t('Corner length (D, mm)')} /> <Help text={t(
@@ -1076,7 +1097,7 @@ export function Sidebar({
                 </div>
               </section>
             )}
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 <div className="transform-field">
                   <label><FieldLabel text={t('End groove length (%)')} /> <Help text={t(
@@ -1114,7 +1135,7 @@ export function Sidebar({
             )}
           </SidebarSection>
           <SidebarSection id="geometry-flanges" title={t('Flanges')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 <div className="transform-field">
                   <label><FieldLabel text={t('Center hole diameter (mm)')} /> <Help text={t(
@@ -1175,7 +1196,7 @@ export function Sidebar({
             )}
           </SidebarSection>
           <SidebarSection id="geometry-foot" title={t('Foot')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 {FOOT_PARAM_FIELDS.map(({ key, label }) => (
                   <div className="transform-field" key={key}>
@@ -1195,8 +1216,22 @@ export function Sidebar({
               </section>
             )}
           </SidebarSection>
+          <SidebarSection id="geometry-shell" title={t('Shell')} defaultOpen={false}>
+            <label className="checkbox-field">
+              <input type="checkbox" checked={shellEnabled} disabled={roundStrutBridge} onChange={(e) => onShellEnabledChange(e.target.checked)} />
+              {t('Enabled')}
+            </label>
+            {shellEnabled && !roundStrutBridge && (
+              <div className="transform-field">
+                <label>{t('Shell thickness (mm)')}</label>
+                <NumberField value={shellThickness} step={0.5} min={0}
+                  clamp={(n) => Number.isFinite(n) ? Math.max(0, n) : 0} onCommit={onShellThicknessChange} />
+              </div>
+            )}
+            {roundStrutBridge && <p className="hint">{t('Disable Round bridge to generate the shell.')}</p>}
+          </SidebarSection>
           <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
                   <div className="transform-field" key={key}>
@@ -1220,6 +1255,12 @@ export function Sidebar({
       </SidebarSection>}
       {mode !== 'new' && <SidebarSection id="export" title={t('Export')}>
         <SidebarSection id="export-dxf" title={t('DXF')} defaultOpen={false}>
+          {PREVIEW_PART_KINDS.map(({ kind, label }) => <label className="checkbox-field" key={kind}>
+            <input type="checkbox" checked={dxfSheetSettings.parts[kind]} disabled={exportBusy}
+              onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, parts: { ...dxfSheetSettings.parts, [kind]: event.target.checked } })} />
+            {t(label)}
+          </label>)}
+
           <div className="transform-field">
             <label><FieldLabel text={t('Part ID label size (mm)')} /></label>
             <NumberField value={partIdLabelSize} step={0.5} min={0.1} onCommit={onPartIdLabelSizeChange} />
@@ -1262,7 +1303,7 @@ export function Sidebar({
             <Help text={t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may be turned by multiples of the rotation step; a finer step packs tighter but takes longer.')} />
           </fieldset>}
           <div className="button-row">
-            <button onClick={onDownloadDxf} disabled={exportBusy}>{t('Download DXF')}</button>
+            <button onClick={onDownloadDxf} disabled={exportBusy || !Object.values(dxfSheetSettings.parts).some(Boolean)}>{t('Download DXF')}</button>
           </div>
           <Help text={dxfSheetSettings.arrangeOnSheet
             ? t("The DXF arranges all parts across as many sheets as needed, one material thickness per sheet. Blue borders are on the SHEETS layer, and each sheet's thickness is written above its top-left corner on the SHEET_THICKNESS layer. Red and green labels stay with their parts.")

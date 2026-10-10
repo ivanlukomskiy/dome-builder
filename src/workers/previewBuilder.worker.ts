@@ -180,6 +180,7 @@ async function buildPreview(
             failed = true
             fail(`Strut edge ${job.index} (${cut} cut)`, err)
           },
+          job.addedThicknessA, job.addedThicknessB, job.shellEdgeOffset,
         ),
       )
     } catch (err) {

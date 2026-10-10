@@ -1,6 +1,7 @@
+import type { ShellPanelPose } from './shellLayout'
 import { DEFAULT_STEP_EXPORT_SETTINGS, type StepExportSettings } from './stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
-import { DEFAULT_DXF_SHEET_SETTINGS, type DxfSheetSettings } from './dxfSheetSettings'
+import { restoreDxfSheetSettings, type SavedDxfSheetSettings, type DxfSheetSettings } from './dxfSheetSettings'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
 import { DEFAULT_FOOT_PARAMS, type FlangeShapeParams, type FootParams } from './flangeGeometry'
@@ -16,7 +17,7 @@ export interface DomeConfig {
   partIdLabelSize?: number
   connectedPartIdLabelSize?: number
   stepExportSettings?: StepExportSettings
-  dxfSheetSettings?: DxfSheetSettings
+  dxfSheetSettings?: SavedDxfSheetSettings
   // The dome's sphere diameter in mm (SceneData.diameter).
   diameter: number
   // Polar coordinates about the origin: [r (mm), azimuth (rad), elevation (rad)] - see PolarCoord.
@@ -45,6 +46,11 @@ export interface DomeConfig {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  // Informational shell measurements; absent in older configs means disabled.
+  shellEnabled?: boolean
+  shellThickness?: number
+  shellStitches?: number[]
+  shellLayout?: [number, ShellPanelPose][]
   // Whether the bridge between the two tangent end sections of each strut is rounded to follow
   // the sphere. Missing in older configs means true.
   roundStrutBridge?: boolean
@@ -109,6 +115,10 @@ export interface DomeState {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellEnabled: boolean
+  shellThickness: number
+  shellStitches: ReadonlySet<number>
+  shellLayout: ReadonlyMap<number, ShellPanelPose>
   roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
@@ -156,6 +166,10 @@ export function serializeConfig(state: DomeState): DomeConfig {
     grooveDepth: state.grooveDepth,
     millingDiameter: state.millingDiameter,
     chamferLength: state.chamferLength,
+    shellEnabled: state.shellEnabled,
+    shellThickness: state.shellThickness,
+    shellStitches: [...state.shellStitches],
+    shellLayout: [...state.shellLayout],
     roundStrutBridge: state.roundStrutBridge,
     toleranceLongitudinal: state.toleranceLongitudinal,
     toleranceTransverse: state.toleranceTransverse,
@@ -218,7 +232,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     },
     partIdLabelSize: config.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize,
     stepExportSettings: { ...DEFAULT_STEP_EXPORT_SETTINGS, ...config.stepExportSettings },
-    dxfSheetSettings: { ...DEFAULT_DXF_SHEET_SETTINGS, ...config.dxfSheetSettings },
+    dxfSheetSettings: restoreDxfSheetSettings(config.dxfSheetSettings),
     connectedPartIdLabelSize: config.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize,
     selectionMode: config.selectionMode,
     extrudeDistance: config.extrudeDistance,
@@ -230,6 +244,11 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     grooveDepth: config.grooveDepth,
     millingDiameter: config.millingDiameter,
     chamferLength: config.chamferLength,
+    shellEnabled: config.shellEnabled ?? false,
+    shellStitches: new Set((config.shellStitches ?? []).filter(Number.isInteger)),
+    shellLayout: new Map((config.shellLayout ?? []).filter(([id, pose]) =>
+      Number.isInteger(id) && pose && [pose.x, pose.y, pose.rotation].every(Number.isFinite))),
+    shellThickness: typeof config.shellThickness === 'number' && Number.isFinite(config.shellThickness) ? Math.max(0, config.shellThickness) : 2,
     roundStrutBridge: config.roundStrutBridge ?? true,
     toleranceLongitudinal: config.toleranceLongitudinal,
     toleranceTransverse: config.toleranceTransverse,

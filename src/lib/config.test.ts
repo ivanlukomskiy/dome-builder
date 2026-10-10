@@ -41,12 +41,34 @@ const legacyConfig: LoadableConfig = {
 }
 
 describe('config migration', () => {
+  it('round-trips shell panel positions and rotations without losing face IDs', () => {
+    const shellLayout = new Map([[7, { x: 123.5, y: -200, rotation: 37.25 }], [11, { x: -50, y: 100, rotation: -90 }]])
+    const config = serializeConfig({ ...deserializeConfig(legacyConfig), shellLayout, shellStitches: new Set([20]) })
+    const restored = deserializeConfig(JSON.parse(JSON.stringify(config)))
+    expect(restored.shellLayout).toEqual(shellLayout)
+    expect(restored.shellStitches).toEqual(new Set([20]))
+    expect(deserializeConfig(legacyConfig).shellStitches.size).toBe(0)
+    expect(deserializeConfig(legacyConfig).shellLayout.size).toBe(0)
+  })
+
+  it.each([0, 2.5])('preserves shell thickness %s through save and load', thickness => {
+    const state = { ...deserializeConfig(legacyConfig), shellThickness: thickness }
+    expect(deserializeConfig(serializeConfig(state)).shellThickness).toBe(thickness)
+  })
+
+  it('preserves shell enablement through save and load', () => {
+    const state = { ...deserializeConfig(legacyConfig), shellEnabled: true }
+    expect(deserializeConfig(serializeConfig(state)).shellEnabled).toBe(true)
+  })
+
   it('copies the legacy flange side-hole diameter to outer and inner fields', () => {
     const state = deserializeConfig(legacyConfig)
 
     expect(state.sideHoleDiameterOuter).toBe(7)
     expect(state.sideHoleDiameterInner).toBe(7)
     expect(state.roundStrutBridge).toBe(true)
+    expect(state.shellEnabled).toBe(false)
+    expect(state.shellThickness).toBe(2)
     expect(state.vertexFlangeParams.get(42)).toEqual({
       sideHoleDiameterOuter: 9,
       sideHoleDiameterInner: 9,
@@ -74,9 +96,18 @@ describe('DXF label settings', () => {
   it('defaults old configs to unpacked DXF and preserves sheet settings', () => {
     const state = deserializeConfig(legacyConfig)
     expect(state.dxfSheetSettings.arrangeOnSheet).toBe(false)
+    expect(state.dxfSheetSettings.parts.struts).toBe(true)
+    expect(state.dxfSheetSettings.parts.shell).toBe(true)
     expect(state.dxfSheetSettings.rotationStep).toBe(90)
-    const settings = { arrangeOnSheet: true, width: 2000, height: 1000, margin: 12, spacing: 3, rotationStep: 30 as const }
+    const settings = { parts: { ...state.dxfSheetSettings.parts, struts: false, flanges: false }, arrangeOnSheet: true, width: 2000, height: 1000, margin: 12, spacing: 3, rotationStep: 30 as const }
     expect(deserializeConfig(serializeConfig({ ...state, dxfSheetSettings: settings })).dxfSheetSettings).toEqual(settings)
+  })
+  it('migrates frame/shell category choices to individual parts', () => {
+    const state = deserializeConfig({ ...legacyConfig, dxfSheetSettings: { includeFrameParts: false, includeShellParts: true } })
+    expect(state.dxfSheetSettings.parts).toEqual({ flanges: false, struts: false, braces: false, bracePlates: false, foot: false, shell: true })
+    const partial = deserializeConfig({ ...legacyConfig, dxfSheetSettings: { parts: { foot: false } } })
+    expect(partial.dxfSheetSettings.parts.foot).toBe(false)
+    expect(partial.dxfSheetSettings.parts.struts).toBe(true)
   })
   it('defaults old configs to the original text sizes and preserves custom sizes', () => {
     const state = deserializeConfig(legacyConfig)

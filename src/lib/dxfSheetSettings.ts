@@ -1,9 +1,12 @@
+import { DEFAULT_PART_VISIBILITY, type PartVisibility } from './previewParts'
+
 // The angle steps (degrees) a part may be turned by when arranged on a sheet; 0 keeps every part
 // as it is. Finer steps try more orientations per part: tighter sheets, slower packing.
 export const DXF_ROTATION_STEPS = [0, 90, 60, 30, 10] as const
 export type DxfRotationStep = (typeof DXF_ROTATION_STEPS)[number]
 
 export interface DxfSheetSettings {
+  parts: PartVisibility
   arrangeOnSheet: boolean
   width: number
   height: number
@@ -13,6 +16,7 @@ export interface DxfSheetSettings {
 }
 
 export const DEFAULT_DXF_SHEET_SETTINGS: DxfSheetSettings = {
+  parts: { ...DEFAULT_PART_VISIBILITY },
   arrangeOnSheet: false,
   width: 2440,
   height: 1220,
@@ -35,4 +39,19 @@ export function validateDxfSheetSettings(settings: DxfSheetSettings): void {
   if (2 * margin >= Math.min(width, height)) throw new Error('Sheet margin leaves no usable area.')
   if (!DXF_ROTATION_STEPS.includes(settings.rotationStep)) throw new Error('Rotation step must be one of 0, 90, 60, 30 or 10 degrees.')
   if (Math.max(width, height, spacing) > 1_000_000) throw new Error('Sheet dimensions and spacing cannot exceed 1,000,000 mm.')
+}
+
+
+export type SavedDxfSheetSettings = Partial<Omit<DxfSheetSettings, 'parts'>> & {
+  parts?: Partial<PartVisibility>
+  includeFrameParts?: boolean
+  includeShellParts?: boolean
+}
+
+export function restoreDxfSheetSettings(saved: SavedDxfSheetSettings = {}): DxfSheetSettings {
+  const { parts, includeFrameParts = true, includeShellParts = true, ...sheet } = saved
+  return { ...DEFAULT_DXF_SHEET_SETTINGS, ...sheet, parts: {
+    flanges: includeFrameParts, struts: includeFrameParts, braces: includeFrameParts,
+    bracePlates: includeFrameParts, foot: includeFrameParts, shell: includeShellParts, ...parts,
+  } }
 }

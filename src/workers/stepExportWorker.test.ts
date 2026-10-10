@@ -100,6 +100,22 @@ it('does not add a foot for a vertex that is not marked as a foot', async () => 
   expect((await build(req)).pieces.some(part => part.name.startsWith('foot-'))).toBe(false)
 })
 
+it('constructs exported struts with the prepared shell thicknesses', async () => {
+  const req = request('archive')
+  req.vertices = []
+  req.strutJobs = [{
+    index: 1, vertexA: 0, vertexB: 1, posA: [1000, 0, 0], posB: [500, Math.sqrt(3) * 500, 0],
+    offsetA: 20, offsetB: 30, cornerLengthA: 150, cornerLengthB: 180,
+    beamThickness: 30, thicknessOverride: undefined, braces: { a: [], b: [] },
+  }]
+  captured.parts = []
+  await build(req)
+  const plainVolume = captured.parts.at(-1)!.volume
+  Object.assign(req.strutJobs[0], { addedThicknessA: 12.5, addedThicknessB: 3.25, shellEdgeOffset: 4 })
+  await build(req)
+  expect(captured.parts.at(-1)!.volume).toBeGreaterThan(plainVolume)
+})
+
 it('writes the supplied dome configuration as a STEP assembly', async () => {
   const { deserializeConfig } = await import('../lib/config')
   const { applyVertexTransforms } = await import('../lib/polyhedra')

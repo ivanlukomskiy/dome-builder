@@ -30,11 +30,11 @@ function plateSite(entry: StrutGeometryEntry, end: 'a' | 'b', brace: StrutBraceE
   const radial = normalize2(origin)
   const toward = sub2(other, origin)
   const axis = normalize2(sub2(toward, scale2(radial, dot2(toward, radial))))
-  const measurements = (offset: number, corner: number) => precalculateStrutEnd(
+  const measurements = (offset: number, corner: number, added = 0) => precalculateStrutEnd(
     offset, corner, params.endGrooveLengthPercent, params.midGrooveLengthPercent,
-    params.chamferLength, params.millingDiameter, params.grooveDepth, params.extrudeDistance / 2,
+    params.chamferLength, params.millingDiameter, params.grooveDepth, params.extrudeDistance / 2, added,
   )
-  const ends = arcEndpoints(a, b, [0, 0], measurements(entry.offsetA, entry.cornerLengthA), measurements(entry.offsetB, entry.cornerLengthB))
+  const ends = arcEndpoints(a, b, [0, 0], measurements(entry.offsetA, entry.cornerLengthA, entry.addedThicknessA), measurements(entry.offsetB, entry.cornerLengthB, entry.addedThicknessB))
   const { inner, outer } = strutBridgeSides(ends, [0, 0], params.roundStrutBridge)
   const band: PlateBand = {
     polygon: [...inner, ...outer.slice().reverse()],
