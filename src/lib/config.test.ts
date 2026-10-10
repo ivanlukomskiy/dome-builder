@@ -41,12 +41,18 @@ const legacyConfig: LoadableConfig = {
 }
 
 describe('config migration', () => {
+  it('preserves shell enablement through save and load', () => {
+    const state = { ...deserializeConfig(legacyConfig), shellEnabled: true }
+    expect(deserializeConfig(serializeConfig(state)).shellEnabled).toBe(true)
+  })
+
   it('copies the legacy flange side-hole diameter to outer and inner fields', () => {
     const state = deserializeConfig(legacyConfig)
 
     expect(state.sideHoleDiameterOuter).toBe(7)
     expect(state.sideHoleDiameterInner).toBe(7)
     expect(state.roundStrutBridge).toBe(true)
+    expect(state.shellEnabled).toBe(false)
     expect(state.vertexFlangeParams.get(42)).toEqual({
       sideHoleDiameterOuter: 9,
       sideHoleDiameterInner: 9,

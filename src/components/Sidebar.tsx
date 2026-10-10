@@ -143,6 +143,8 @@ interface SidebarProps {
   onMillingDiameterChange: (value: number) => void
   chamferLength: number
   onChamferLengthChange: (value: number) => void
+  shellEnabled: boolean
+  onShellEnabledChange: (value: boolean) => void
   roundStrutBridge: boolean
   onRoundStrutBridgeChange: (value: boolean) => void
   toleranceLongitudinal: number
@@ -511,6 +513,8 @@ export function Sidebar({
   onMillingDiameterChange,
   chamferLength,
   onChamferLengthChange,
+  shellEnabled,
+  onShellEnabledChange,
   roundStrutBridge,
   onRoundStrutBridgeChange,
   toleranceLongitudinal,
@@ -1194,6 +1198,12 @@ export function Sidebar({
                 )} />
               </section>
             )}
+          </SidebarSection>
+          <SidebarSection id="geometry-shell" title={t('Shell')} defaultOpen={false}>
+            <label className="checkbox-field">
+              <input type="checkbox" checked={shellEnabled} onChange={(e) => onShellEnabledChange(e.target.checked)} />
+              {t('Enabled')}
+            </label>
           </SidebarSection>
           <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit') && (

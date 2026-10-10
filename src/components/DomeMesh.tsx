@@ -6,6 +6,7 @@ import type { EditTarget, ViewMode } from '../App'
 import type { SceneData } from '../lib/polyhedra'
 import { computeBraceEndpoints } from '../lib/braces'
 import { buildBraceSolidMesh, pairBracePoints, type BracePoints } from '../lib/braceSolid'
+import { computeShellEdgeOffsets } from '../lib/shellGeometry'
 import { computePreviewBuildInputs } from '../lib/previewBuildInputs'
 import { bracePreviewKey, footPreviewKey, previewPartCache, strutPreviewKey, type CachedPreviewPart } from '../lib/previewPartCache'
 import {
@@ -153,6 +154,7 @@ interface DomeMeshProps {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellEnabled: boolean
   roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
@@ -197,6 +199,7 @@ export function DomeMesh({
   grooveDepth,
   millingDiameter,
   chamferLength,
+  shellEnabled,
   roundStrutBridge,
   toleranceLongitudinal,
   toleranceTransverse,
@@ -215,6 +218,16 @@ export function DomeMesh({
   onPreviewProgress,
   onPreviewFailure,
 }: DomeMeshProps) {
+  useEffect(() => {
+    if (!shellEnabled) return
+    const measurements = computeShellEdgeOffsets(data, transformedVertices, id => edgeThickness.get(id) ?? thickness)
+    for (const measurement of measurements) {
+      for (const triangle of measurement.triangles) {
+        if (triangle.error) console.error(`[shell] edge ${measurement.edgeId}, triangle ${triangle.faceId}: ${triangle.error}`)
+      }
+    }
+  }, [shellEnabled, data, transformedVertices, edgeThickness, thickness])
+
   const resolvePosition = useCallback((idx: number) => transformedVertices.get(idx)!, [transformedVertices])
 
   // Vertex/center/edge marker sizes, in mm - purely visual, scaled to the dome's own diameter so

@@ -85,6 +85,7 @@ export interface PreviewShapeParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellEnabled: boolean
   roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
@@ -150,14 +151,14 @@ type DomeDocument = Omit<DomeState, 'selectionMode'> & {
 function previewParamsFrom(state: Omit<DomeState, 'selectionMode'>): PreviewShapeParams {
   const {
     extrudeDistance, thickness, cornerLength, offsetModifier, endGrooveLengthPercent,
-    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge,
+    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge, shellEnabled,
     toleranceLongitudinal, toleranceTransverse, centerHoleDiameter, sideHoleDiameterOuter,
     sideHoleDiameterInner, sideHoleDiameterOffset, overshoot, minSide,
     flangeMillingDiameter, footParams,
   } = state
   return {
     extrudeDistance, thickness, cornerLength, offsetModifier, endGrooveLengthPercent,
-    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge,
+    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge, shellEnabled,
     toleranceLongitudinal, toleranceTransverse, centerHoleDiameter, sideHoleDiameterOuter,
     sideHoleDiameterInner, sideHoleDiameterOffset, overshoot, minSide,
     flangeMillingDiameter, footParams,
@@ -180,6 +181,7 @@ function createDocument(initial: DomeState | null, sceneData = initial?.sceneDat
     grooveDepth: initial?.grooveDepth ?? DEFAULT_GROOVE_DEPTH,
     millingDiameter: initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
     chamferLength: initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH,
+    shellEnabled: initial?.shellEnabled ?? false,
     roundStrutBridge: initial?.roundStrutBridge ?? DEFAULT_ROUND_STRUT_BRIDGE,
     toleranceLongitudinal: initial?.toleranceLongitudinal ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
     toleranceTransverse: initial?.toleranceTransverse ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
@@ -288,6 +290,7 @@ function App() {
     millingDiameter,
     chamferLength,
     roundStrutBridge,
+    shellEnabled,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -331,6 +334,7 @@ function App() {
   const setGrooveDepth = (value: DomeDocument['grooveDepth'] | ((previous: DomeDocument['grooveDepth']) => DomeDocument['grooveDepth'])) => setDocumentField('grooveDepth', value)
   const setMillingDiameter = (value: DomeDocument['millingDiameter'] | ((previous: DomeDocument['millingDiameter']) => DomeDocument['millingDiameter'])) => setDocumentField('millingDiameter', value)
   const setChamferLength = (value: DomeDocument['chamferLength'] | ((previous: DomeDocument['chamferLength']) => DomeDocument['chamferLength'])) => setDocumentField('chamferLength', value)
+  const setShellEnabled = (value: boolean) => setDocumentField('shellEnabled', value)
   const setRoundStrutBridge = (value: DomeDocument['roundStrutBridge'] | ((previous: DomeDocument['roundStrutBridge']) => DomeDocument['roundStrutBridge'])) => setDocumentField('roundStrutBridge', value)
   const setToleranceLongitudinal = (value: DomeDocument['toleranceLongitudinal'] | ((previous: DomeDocument['toleranceLongitudinal']) => DomeDocument['toleranceLongitudinal'])) => setDocumentField('toleranceLongitudinal', value)
   const setToleranceTransverse = (value: DomeDocument['toleranceTransverse'] | ((previous: DomeDocument['toleranceTransverse']) => DomeDocument['toleranceTransverse'])) => setDocumentField('toleranceTransverse', value)
@@ -832,6 +836,7 @@ function App() {
       millingDiameter,
       chamferLength,
       roundStrutBridge,
+      shellEnabled,
       toleranceLongitudinal,
       toleranceTransverse,
       centerHoleDiameter,
@@ -869,6 +874,7 @@ function App() {
     millingDiameter,
     chamferLength,
     roundStrutBridge,
+    shellEnabled,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -1138,6 +1144,8 @@ function App() {
         onMillingDiameterChange={setMillingDiameter}
         chamferLength={chamferLength}
         onChamferLengthChange={setChamferLength}
+        shellEnabled={shellEnabled}
+        onShellEnabledChange={setShellEnabled}
         roundStrutBridge={roundStrutBridge}
         onRoundStrutBridgeChange={setRoundStrutBridge}
         toleranceLongitudinal={toleranceLongitudinal}
@@ -1196,6 +1204,7 @@ function App() {
         grooveDepth={appliedPreviewParams.grooveDepth}
         millingDiameter={appliedPreviewParams.millingDiameter}
         chamferLength={appliedPreviewParams.chamferLength}
+        shellEnabled={appliedPreviewParams.shellEnabled}
         roundStrutBridge={appliedPreviewParams.roundStrutBridge}
         toleranceLongitudinal={appliedPreviewParams.toleranceLongitudinal}
         toleranceTransverse={appliedPreviewParams.toleranceTransverse}
