@@ -1,10 +1,12 @@
 import * as THREE from 'three'
 import type { SceneData } from './polyhedra'
+import { assignNumericNames } from './partNames'
 
 export interface ShellPanelPose { x: number; y: number; rotation: number }
 export type ShellLayout = ReadonlyMap<number, ShellPanelPose>
 export interface ShellPanel {
   faceId: number
+  label: string
   points: [number, number][]
   edges: (number | null)[]
 }
@@ -12,7 +14,7 @@ const edgeKey = (a: number, b: number) => a < b ? `${a}:${b}` : `${b}:${a}`
 
 export function flattenShellPanels(data: Pick<SceneData, 'faces' | 'edges'>, vertices: ReadonlyMap<number, THREE.Vector3>): ShellPanel[] {
   const edgeIds = new Map([...data.edges].map(([id, [a, b]]) => [edgeKey(a, b), id]))
-  const panels: ShellPanel[] = []
+  const panels: Omit<ShellPanel, 'label'>[] = []
   for (const [faceId, face] of [...data.faces].sort(([a], [b]) => a - b)) {
     if (face.length !== 3 || face.some(id => !vertices.has(id))) continue
     const ids = [...face]
@@ -34,7 +36,12 @@ export function flattenShellPanels(data: Pick<SceneData, 'faces' | 'edges'>, ver
     const points: [number, number][] = [[-cx, -cy], [length - cx, -cy], [x - cx, -height - cy]]
     panels.push({ faceId, points, edges: ids.map((id, i) => edgeIds.get(edgeKey(id, ids[(i + 1) % 3])) ?? null) })
   }
-  return panels
+  const names = assignNumericNames(panels.map(panel => ({
+    id: panel.faceId,
+    center: data.faces.get(panel.faceId)!.reduce((sum, id) => sum.add(vertices.get(id)!), new THREE.Vector3())
+      .divideScalar(3).toArray(),
+  })))
+  return panels.map(panel => ({ ...panel, label: names[panel.faceId] }))
 }
 
 export function placePanelPoint(point: readonly [number, number], pose: ShellPanelPose): [number, number] {

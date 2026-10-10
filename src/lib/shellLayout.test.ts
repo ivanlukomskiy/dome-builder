@@ -13,6 +13,37 @@ const vertices = new Map([
 ])
 
 describe('shell fabric layout', () => {
+  it('labels panels top to bottom and clockwise within each elevation using export conventions', () => {
+    const centers: [number, number, number][] = [
+      [1, 200, 0], [0, 100, 1], [-1, 100, 0], [0, 100, -1], [1, 100, 0],
+      [0, 0, 1], [-1, 0, 0], [0, 0, -1], [1, 0, 0],
+    ]
+    const points = new Map<number, THREE.Vector3>()
+    const faces = new Map<number, number[]>()
+    centers.forEach((center, i) => {
+      const ids = [i * 3, i * 3 + 1, i * 3 + 2]
+      const offsets = [[-0.1, -0.1, 0], [0.1, -0.1, 0], [0, 0.2, 0]] as const
+      ids.forEach((id, j) => points.set(id, new THREE.Vector3(...center).add(new THREE.Vector3(...offsets[j]))))
+      faces.set(100 + i, ids)
+    })
+    const panels = flattenShellPanels({ faces, edges: new Map() }, points)
+    const labels = new Map(panels.map(panel => [panel.faceId, panel.label]))
+    expect([100, 104, 103, 102, 101, 108, 107, 106, 105].map(id => labels.get(id)))
+      .toEqual(['1', '2', '3', '4', '5', '6.', '7', '8', '9.'])
+  })
+
+  it('keeps saved layouts keyed by face IDs when geometry changes the labels', () => {
+    const saved = new Map([[7, { x: 300, y: -100, rotation: 45 }], [11, { x: 700, y: 400, rotation: -30 }]])
+    const before = flattenShellPanels(data, vertices)
+    expect(before.find(p => p.faceId === 11)!.label).toBe('1')
+    const changed = new Map(vertices)
+    changed.set(0, vertices.get(0)!.clone().add(new THREE.Vector3(0, 100, 0)))
+    const after = flattenShellPanels(data, changed)
+    expect(after.find(p => p.faceId === 7)!.label).toBe('1')
+    expect(resolveShellLayout(before, saved)).toEqual(saved)
+    expect(resolveShellLayout(after, saved)).toEqual(saved)
+  })
+
   it('flattens each face without changing side lengths and centers the panels', () => {
     const panels = flattenShellPanels(data, vertices)
     expect(panels.map(p => p.faceId)).toEqual([7, 11])

@@ -6,6 +6,7 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  "Panel": "Панель",
   "Shell layout": "Раскладка оболочки",
   "panels": "панелей",
   "Fit panels": "Показать все панели",

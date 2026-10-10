@@ -88,7 +88,7 @@ function sortCenters<Id extends string | number>(
   return result
 }
 
-function assignNumericNames<Id extends string | number>(items: NamedCenter<Id>[]): Record<Id, string> {
+export function assignNumericNames<Id extends string | number>(items: NamedCenter<Id>[]): Record<Id, string> {
   const result = {} as Record<Id, string>
   sortCenters(items).forEach((item, index) => {
     result[item.id] = formatPartId(index + 1)

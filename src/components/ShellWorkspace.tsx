@@ -41,6 +41,7 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
     }
   }, [params])
   const { panels, error } = computed
+  const labels = new Map(panels.map(panel => [panel.faceId, panel.label]))
   const resolved = useMemo(() => resolveShellLayout(panels, layout), [panels, layout])
   const poses = new Map(resolved)
   if (draft && poses.has(draft.id)) poses.set(draft.id, draft.pose)
@@ -160,15 +161,15 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
         <g pointerEvents="none" className="shell-connections">
           {connections.map(({ edgeId, a, b }) => {
             const p = placePanelPoint(a.midpoint, poses.get(a.faceId)!), q = placePanelPoint(b.midpoint, poses.get(b.faceId)!)
-            return <line key={edgeId} x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]} vectorEffect="non-scaling-stroke"><title>{t('Edge')} {edgeId}: {a.faceId} ↔ {b.faceId}</title></line>
+            return <line key={edgeId} x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]} vectorEffect="non-scaling-stroke"><title>{t('Edge')} {edgeId}: {labels.get(a.faceId)} ↔ {labels.get(b.faceId)}</title></line>
           })}
         </g>
         {panels.map(panel => {
           const pose = poses.get(panel.faceId)!
           return <g key={panel.faceId} transform={`translate(${pose.x} ${pose.y}) rotate(${pose.rotation})`} onPointerDown={e => begin(e, 'move', panel.faceId)} className="shell-panel">
             <polygon points={panel.points.map(p => p.join(',')).join(' ')} className={selected === panel.faceId ? 'selected' : ''} vectorEffect="non-scaling-stroke" />
-            <text textAnchor="middle" dominantBaseline="central" fontSize={labelSize} pointerEvents="none">{panel.faceId}</text>
-            <title>{t('Face')} {panel.faceId}</title>
+            <text textAnchor="middle" dominantBaseline="central" fontSize={labelSize} pointerEvents="none">{panel.label}</text>
+            <title>{t('Panel')} {panel.label} ({t('Face')} {panel.faceId})</title>
           </g>
         })}
         {selectedPanel && selectedPose && (() => {
