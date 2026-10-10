@@ -49,6 +49,7 @@ export interface DomeConfig {
   // Informational shell measurements; absent in older configs means disabled.
   shellEnabled?: boolean
   shellThickness?: number
+  shellStitches?: number[]
   shellLayout?: [number, ShellPanelPose][]
   // Whether the bridge between the two tangent end sections of each strut is rounded to follow
   // the sphere. Missing in older configs means true.
@@ -116,6 +117,7 @@ export interface DomeState {
   chamferLength: number
   shellEnabled: boolean
   shellThickness: number
+  shellStitches: ReadonlySet<number>
   shellLayout: ReadonlyMap<number, ShellPanelPose>
   roundStrutBridge: boolean
   toleranceLongitudinal: number
@@ -166,6 +168,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
     chamferLength: state.chamferLength,
     shellEnabled: state.shellEnabled,
     shellThickness: state.shellThickness,
+    shellStitches: [...state.shellStitches],
     shellLayout: [...state.shellLayout],
     roundStrutBridge: state.roundStrutBridge,
     toleranceLongitudinal: state.toleranceLongitudinal,
@@ -242,6 +245,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     millingDiameter: config.millingDiameter,
     chamferLength: config.chamferLength,
     shellEnabled: config.shellEnabled ?? false,
+    shellStitches: new Set((config.shellStitches ?? []).filter(Number.isInteger)),
     shellLayout: new Map((config.shellLayout ?? []).filter(([id, pose]) =>
       Number.isInteger(id) && pose && [pose.x, pose.y, pose.rotation].every(Number.isFinite))),
     shellThickness: typeof config.shellThickness === 'number' && Number.isFinite(config.shellThickness) ? Math.max(0, config.shellThickness) : 2,

@@ -6,6 +6,11 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  'Decouple seam': 'Разъединить шов',
+  'Stitch matching panel': 'Сшить с соседней панелью',
+  'Click blue edges to stitch matching panels; click green seams to decouple. Orange edges have no matching panel. Stitched panels move and rotate together.': 'Нажмите на синее ребро, чтобы сшить панели, или на зелёный шов, чтобы разъединить. Оранжевые рёбра не имеют соседней панели. Сшитые панели перемещаются и вращаются вместе.',
+  'These panels already belong to the same assembly. Decouple a seam before joining these edges.': 'Эти панели уже соединены. Разъедините один из швов, прежде чем соединять эти рёбра.',
+
   "Panel": "Панель",
   "Shell layout": "Раскладка оболочки",
   "panels": "панелей",

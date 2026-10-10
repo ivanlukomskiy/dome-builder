@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { computePreviewBuildInputs, type PreviewBuildInputParams } from '../lib/previewBuildInputs'
-import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, type ShellLayout, type ShellPanelPose } from '../lib/shellLayout'
+import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, shellPanelGroup, transformShellGroup, toggleShellStitch, type ShellLayout, type ShellPanelPose } from '../lib/shellLayout'
 import { useI18n } from '../lib/i18n'
 
 interface Frame { x: number; y: number; width: number; height: number }
@@ -14,12 +14,15 @@ interface Gesture {
   faceId?: number
   initial?: ShellPanelPose
   pose?: ShellPanelPose
+  layout: ShellLayout
+  group: ReadonlySet<number>
 }
 
-export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDirty, onApplyPreview, onEndHistoryGroup }: {
+export function ShellWorkspace({ params, layout, stitches, onLayoutChange, previewParamsDirty, onApplyPreview, onEndHistoryGroup }: {
   params: PreviewBuildInputParams
   layout: ShellLayout
-  onLayoutChange: (layout: ShellLayout) => void
+  stitches: ReadonlySet<number>
+  onLayoutChange: (layout: ShellLayout, stitches: ReadonlySet<number>) => void
   previewParamsDirty: boolean
   onApplyPreview: () => void
   onEndHistoryGroup: () => void
@@ -27,7 +30,9 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
   const { t } = useI18n()
   const svgRef = useRef<SVGSVGElement>(null)
   const gesture = useRef<Gesture | null>(null)
-  const [draft, setDraft] = useState<{ id: number; pose: ShellPanelPose } | null>(null)
+  const [draft, setDraft] = useState<ShellLayout | null>(null)
+  const [hoveredEdge, setHoveredEdge] = useState<number | null>(null)
+  const [stitchError, setStitchError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [view, setView] = useState<Frame | null>(null)
   const [size, setSize] = useState({ width: 1000, height: 800 })
@@ -43,8 +48,7 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
   const { panels, error } = computed
   const labels = new Map(panels.map(panel => [panel.faceId, panel.label]))
   const resolved = useMemo(() => resolveShellLayout(panels, layout), [panels, layout])
-  const poses = new Map(resolved)
-  if (draft && poses.has(draft.id)) poses.set(draft.id, draft.pose)
+  const poses = draft ?? resolved
   const connections = useMemo(() => shellPanelConnections(panels), [panels])
   const fit = useMemo(() => {
     const points = panels.flatMap(p => p.points.map(pt => placePanelPoint(pt, resolved.get(p.faceId)!)))
@@ -107,7 +111,7 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
     onEndHistoryGroup()
     svgRef.current!.focus()
     const initial = faceId === undefined ? undefined : poses.get(faceId)
-    gesture.current = { pointerId: e.pointerId, kind, faceId, start: worldPoint(e.clientX, e.clientY), clientStart: [e.clientX, e.clientY], frame, initial, pose: initial }
+    gesture.current = { pointerId: e.pointerId, kind, faceId, start: worldPoint(e.clientX, e.clientY), clientStart: [e.clientX, e.clientY], frame, initial, pose: initial, layout: poses, group: faceId === undefined ? new Set<number>() : shellPanelGroup(panels, stitches, faceId) }
     setView(frame)
     setSelected(faceId ?? null)
     svgRef.current!.setPointerCapture(e.pointerId)
@@ -134,7 +138,7 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
       pose = { ...initial, rotation: e.shiftKey ? Math.round(rotation / 15) * 15 : rotation }
     }
     active.pose = pose
-    setDraft({ id: active.faceId!, pose })
+    setDraft(transformShellGroup(active.layout, active.group, initial, pose))
   }
   const finish = (e: ReactPointerEvent, commit: boolean) => {
     const active = gesture.current
@@ -142,13 +146,26 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
     gesture.current = null
     if (commit && active.faceId !== undefined && active.pose && active.initial &&
       (Math.abs(active.pose.x - active.initial.x) > 1e-6 || Math.abs(active.pose.y - active.initial.y) > 1e-6 || Math.abs(active.pose.rotation - active.initial.rotation) > 1e-6)) {
-      const next = new Map(resolved)
-      next.set(active.faceId, active.pose)
-      onLayoutChange(next)
+      onLayoutChange(transformShellGroup(active.layout, active.group, active.initial, active.pose), stitches)
     }
     setDraft(null)
     if (svgRef.current?.hasPointerCapture(e.pointerId)) svgRef.current.releasePointerCapture(e.pointerId)
   }
+  const toggleStitch = (edgeId: number, faceId: number) => {
+    if (gesture.current) return
+    onEndHistoryGroup()
+    setView(frame)
+    try {
+      const next = toggleShellStitch(panels, resolved, stitches, edgeId, faceId)
+      onLayoutChange(next.layout, next.stitches)
+      setSelected(faceId)
+      setStitchError(null)
+    } catch (error) {
+      setStitchError(error instanceof Error ? error.message : String(error))
+    }
+  }
+  const sharedEdges = new Set(connections.map(c => c.edgeId))
+  const selectedGroup = selected === null ? new Set<number>() : shellPanelGroup(panels, stitches, selected)
   return (
     <div className="viewport shell-workspace">
       <div className="viewport-actions">
@@ -159,7 +176,7 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
         onPointerDown={e => begin(e, 'pan')} onPointerMove={move} onPointerUp={e => finish(e, true)}
         onPointerCancel={e => finish(e, false)} onLostPointerCapture={e => finish(e, false)}>
         <g pointerEvents="none" className="shell-connections">
-          {connections.map(({ edgeId, a, b }) => {
+          {connections.filter(c => !stitches.has(c.edgeId)).map(({ edgeId, a, b }) => {
             const p = placePanelPoint(a.midpoint, poses.get(a.faceId)!), q = placePanelPoint(b.midpoint, poses.get(b.faceId)!)
             return <line key={edgeId} x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]} vectorEffect="non-scaling-stroke"><title>{t('Edge')} {edgeId}: {labels.get(a.faceId)} ↔ {labels.get(b.faceId)}</title></line>
           })}
@@ -167,7 +184,25 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
         {panels.map(panel => {
           const pose = poses.get(panel.faceId)!
           return <g key={panel.faceId} transform={`translate(${pose.x} ${pose.y}) rotate(${pose.rotation})`} onPointerDown={e => begin(e, 'move', panel.faceId)} className="shell-panel">
-            <polygon points={panel.points.map(p => p.join(',')).join(' ')} className={selected === panel.faceId ? 'selected' : ''} vectorEffect="non-scaling-stroke" />
+            <polygon points={panel.points.map(p => p.join(',')).join(' ')} className={selectedGroup.has(panel.faceId) ? 'selected' : ''} vectorEffect="non-scaling-stroke" />
+            {panel.edges.map((edgeId, i) => {
+              const a = panel.points[i], b = panel.points[(i + 1) % 3]
+              const shared = edgeId !== null && sharedEdges.has(edgeId)
+              const coupled = shared && stitches.has(edgeId!)
+              const action = coupled ? t('Decouple seam') : t('Stitch matching panel')
+              return <g key={i}>
+                <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={shared ? coupled ? '#4ade80' : '#60a5fa' : '#fb923c'}
+                  strokeWidth={shared && hoveredEdge === edgeId ? 4 : 2} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                {shared && <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="transparent" strokeWidth={14}
+                  vectorEffect="non-scaling-stroke" pointerEvents="stroke" className="shell-seam" role="button" tabIndex={0}
+                  aria-label={`${action}: ${t('Edge')} ${edgeId}`} aria-pressed={coupled}
+                  onPointerEnter={() => setHoveredEdge(edgeId)} onPointerLeave={() => setHoveredEdge(null)}
+                  onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); toggleStitch(edgeId!, panel.faceId) }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleStitch(edgeId!, panel.faceId) } }}>
+                  <title>{action}</title>
+                </line>}
+              </g>
+            })}
             <text textAnchor="middle" dominantBaseline="central" fontSize={labelSize} pointerEvents="none">{panel.label}</text>
             <title>{t('Panel')} {panel.label} ({t('Face')} {panel.faceId})</title>
           </g>
@@ -182,6 +217,7 @@ export function ShellWorkspace({ params, layout, onLayoutChange, previewParamsDi
           </g>
         })()}
       </svg>
+      {stitchError && <div className="shell-stitch-error" role="status" onClick={() => setStitchError(null)}>{t(stitchError)}</div>}
       {(!params.shellEnabled || params.roundStrutBridge || error || !panels.length) && <div className="shell-message" role="status">
         {error ?? (params.roundStrutBridge ? t('Disable Round bridge to generate the shell.') : !params.shellEnabled ? t('Enable Shell in Dome geometry to arrange panels.') : t('No triangular shell faces to arrange.'))}
       </div>}

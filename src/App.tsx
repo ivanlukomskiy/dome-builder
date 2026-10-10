@@ -185,6 +185,7 @@ function createDocument(initial: DomeState | null, sceneData = initial?.sceneDat
     chamferLength: initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH,
     shellEnabled: initial?.shellEnabled ?? false,
     shellThickness: initial?.shellThickness ?? 2,
+    shellStitches: new Set(initial?.shellStitches ?? []),
     shellLayout: new Map(initial?.shellLayout ?? []),
     roundStrutBridge: initial?.roundStrutBridge ?? DEFAULT_ROUND_STRUT_BRIDGE,
     toleranceLongitudinal: initial?.toleranceLongitudinal ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
@@ -297,6 +298,7 @@ function App() {
     shellEnabled,
     shellThickness,
     shellLayout,
+    shellStitches,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -846,6 +848,7 @@ function App() {
       shellEnabled,
       shellThickness,
       shellLayout,
+      shellStitches,
       toleranceLongitudinal,
       toleranceTransverse,
       centerHoleDiameter,
@@ -886,6 +889,7 @@ function App() {
     shellEnabled,
     shellThickness,
     shellLayout,
+    shellStitches,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -1195,8 +1199,8 @@ function App() {
       />
       {exportSession && <ExportProgressModal session={exportSession} onCancel={cancelExport} onClose={() => setExportSession(null)} />}
       {mode === 'shell' ? (
-        <ShellWorkspace params={buildExportParams()} layout={shellLayout}
-          onLayoutChange={(layout) => setDocumentField('shellLayout', layout)}
+        <ShellWorkspace params={buildExportParams()} layout={shellLayout} stitches={shellStitches}
+          onLayoutChange={(layout, stitches) => documentHistory.commit(prev => ({ ...prev, shellLayout: layout, shellStitches: stitches }))}
           previewParamsDirty={previewParamsDirty || bracePlateDirty || previewDiameterDirty}
           onApplyPreview={handleApplyPreview} onEndHistoryGroup={documentHistory.endGroup} />
       ) : <Viewport

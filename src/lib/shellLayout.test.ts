@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections } from './shellLayout'
+import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, shellPanelGroup, transformShellGroup, toggleShellStitch } from './shellLayout'
 import { initialHistory, commitHistory, undoHistory, redoHistory } from './useHistory'
 
 const data = {
@@ -96,5 +96,66 @@ describe('shell fabric layout', () => {
   it('ignores non-triangular faces and missing shell vertices', () => {
     expect(flattenShellPanels({ ...data, faces: new Map([[7, [0, 1, 2, 3]]]) }, vertices)).toEqual([])
     expect(flattenShellPanels(data, new Map())).toEqual([])
+  })
+})
+
+
+describe('shell stitching', () => {
+  const panels = flattenShellPanels(data, vertices)
+  const layout = resolveShellLayout(panels, new Map([[7, { x: 30, y: 50, rotation: 37 }]]))
+  it('aligns corresponding vertices and keeps panels on opposite sides of the seam', () => {
+    const joined = toggleShellStitch(panels, layout, new Set(), 20, 7)
+    expect(joined.layout.get(7)).toEqual(layout.get(7))
+    const a = panels[0], b = panels[1]
+    for (const id of [1, 2]) {
+      const p = placePanelPoint(a.points[a.vertices.indexOf(id)], joined.layout.get(7)!)
+      const q = placePanelPoint(b.points[b.vertices.indexOf(id)], joined.layout.get(11)!)
+      expect(p[0]).toBeCloseTo(q[0], 10)
+      expect(p[1]).toBeCloseTo(q[1], 10)
+    }
+    const p = placePanelPoint(a.points[a.vertices.indexOf(1)], joined.layout.get(7)!)
+    const q = placePanelPoint(a.points[a.vertices.indexOf(2)], joined.layout.get(7)!)
+    const side = (id: number) => { const pose = joined.layout.get(id)!; return (q[0]-p[0])*(pose.y-p[1])-(q[1]-p[1])*(pose.x-p[0]) }
+    expect(side(7) * side(11)).toBeLessThan(0)
+  })
+  it('moves and rotates the entire assembly, then splits it without moving panels', () => {
+    const joined = toggleShellStitch(panels, layout, new Set(), 20, 11)
+    const group = shellPanelGroup(panels, joined.stitches, 7)
+    expect(group).toEqual(new Set([7, 11]))
+    const from = joined.layout.get(7)!, to = { x: -150, y: 200, rotation: from.rotation + 90 }
+    const moved = transformShellGroup(joined.layout, group, from, to)
+    const distance = (poses: typeof moved) => Math.hypot(poses.get(7)!.x-poses.get(11)!.x, poses.get(7)!.y-poses.get(11)!.y)
+    expect(distance(moved)).toBeCloseTo(distance(joined.layout), 10)
+    expect(moved.get(11)!.rotation).toBeCloseTo(joined.layout.get(11)!.rotation + 90)
+    const split = toggleShellStitch(panels, moved, joined.stitches, 20, 7)
+    expect(split.layout).toEqual(moved)
+    expect(shellPanelGroup(panels, split.stitches, 7)).toEqual(new Set([7]))
+  })
+  it('undoes and redoes stitching and alignment as a single operation', () => {
+    const original = { layout, stitches: new Set<number>() }
+    const joined = toggleShellStitch(panels, layout, original.stitches, 20, 7)
+    const history = commitHistory(initialHistory(original), joined, 50)
+    expect(undoHistory(history).present).toEqual(original)
+    expect(redoHistory(undoHistory(history)).present).toEqual(joined)
+  })
+  it('attaches an existing assembly rigidly and rejects a curved loop that cannot close flat', () => {
+    const mesh = { faces: new Map([...data.faces, [12, [0, 2, 3]]]), edges: new Map([...data.edges, [60, [3, 0] as [number, number]]]) }
+    const three = flattenShellPanels(mesh, vertices)
+    const initial = resolveShellLayout(three, new Map())
+    const pair = toggleShellStitch(three, initial, new Set(), 20, 7)
+    // Clicking the third panel brings both previously stitched panels to it.
+    const joined = toggleShellStitch(three, pair.layout, pair.stitches, 50, 12)
+    expect(joined.layout.get(12)).toEqual(initial.get(12))
+    expect(shellPanelGroup(three, joined.stitches, 12)).toEqual(new Set([12, 11, 7]))
+    const distance = (poses: typeof initial) => Math.hypot(poses.get(7)!.x-poses.get(11)!.x, poses.get(7)!.y-poses.get(11)!.y)
+    expect(distance(joined.layout)).toBeCloseTo(distance(pair.layout), 10)
+    expect(() => toggleShellStitch(three, joined.layout, joined.stitches, 30, 7)).toThrow('same assembly')
+    const split = toggleShellStitch(three, joined.layout, joined.stitches, 20, 7)
+    expect(shellPanelGroup(three, split.stitches, 7)).toEqual(new Set([7]))
+    expect(shellPanelGroup(three, split.stitches, 11)).toEqual(new Set([11, 12]))
+  })
+
+  it('rejects orphan edges', () => {
+    expect(() => toggleShellStitch(panels, layout, new Set(), 10, 7)).toThrow('no matching panel')
   })
 })

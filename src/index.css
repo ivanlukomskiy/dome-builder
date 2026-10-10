@@ -561,3 +561,7 @@ body,
 .shell-connections line { stroke: #8194ae; stroke-width: 1; stroke-dasharray: 6 6; opacity: .55; }
 .shell-rotate-handle { cursor: crosshair; }
 .shell-message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 500px; padding: 20px; border: 1px solid #343b4c; border-radius: 8px; background: #1b202b; text-align: center; }
+
+.shell-seam { cursor: pointer; }
+.shell-seam:focus { outline: none; stroke: #ffffff55; }
+.shell-stitch-error { position: absolute; bottom: 20px; left: 20px; right: 20px; padding: 12px; background: #30251b; color: #ffcf99; border-radius: 6px; cursor: pointer; }

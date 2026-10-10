@@ -43,9 +43,11 @@ const legacyConfig: LoadableConfig = {
 describe('config migration', () => {
   it('round-trips shell panel positions and rotations without losing face IDs', () => {
     const shellLayout = new Map([[7, { x: 123.5, y: -200, rotation: 37.25 }], [11, { x: -50, y: 100, rotation: -90 }]])
-    const config = serializeConfig({ ...deserializeConfig(legacyConfig), shellLayout })
+    const config = serializeConfig({ ...deserializeConfig(legacyConfig), shellLayout, shellStitches: new Set([20]) })
     const restored = deserializeConfig(JSON.parse(JSON.stringify(config)))
     expect(restored.shellLayout).toEqual(shellLayout)
+    expect(restored.shellStitches).toEqual(new Set([20]))
+    expect(deserializeConfig(legacyConfig).shellStitches.size).toBe(0)
     expect(deserializeConfig(legacyConfig).shellLayout.size).toBe(0)
   })
 
