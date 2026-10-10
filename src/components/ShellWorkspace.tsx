@@ -1,5 +1,3 @@
-import { shellEdgeLabels } from '../lib/shellDxf'
-import { buildExportPartNames } from '../lib/exportPartNames'
 import type { RunStepExportParams } from '../lib/stepExportRunner'
 import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Ref, PointerEvent as ReactPointerEvent } from 'react'
@@ -43,15 +41,15 @@ export function ShellWorkspace({ params, layout, stitches, actionsRef, onLayoutC
   const [view, setView] = useState<Frame | null>(null)
   const [size, setSize] = useState({ width: 1000, height: 800 })
   const computed = useMemo(() => {
-    if (!params.shellEnabled || params.roundStrutBridge) return { panels: [], strutNames: {}, error: null }
+    if (!params.shellEnabled || params.roundStrutBridge) return { panels: [], error: null }
     try {
-      const { shellVertices, strutEntries, vertices } = computePreviewBuildInputs(params)
-      return { panels: flattenShellPanels(params.data, shellVertices), strutNames: buildExportPartNames(params, strutEntries, vertices).struts, error: null }
+      const { shellVertices } = computePreviewBuildInputs(params)
+      return { panels: flattenShellPanels(params.data, shellVertices), error: null }
     } catch (error) {
-      return { panels: [], strutNames: {}, error: error instanceof Error ? error.message : String(error) }
+      return { panels: [], error: error instanceof Error ? error.message : String(error) }
     }
   }, [params])
-  const { panels, strutNames, error } = computed
+  const { panels, error } = computed
   const labels = new Map(panels.map(panel => [panel.faceId, panel.label]))
   const resolved = useMemo(() => resolveShellLayout(panels, layout), [panels, layout])
   const poses = draft ?? resolved
@@ -217,13 +215,6 @@ export function ShellWorkspace({ params, layout, stitches, actionsRef, onLayoutC
                   <title>{action}</title>
                 </line>}
               </g>
-            })}
-            {shellEdgeLabels(panel, strutNames, labelSize * 0.75).map((label, i) => {
-              let angle = label.angleDeg
-              const worldAngle = ((angle + pose.rotation) % 360 + 360) % 360
-              if (worldAngle > 90 && worldAngle < 270) angle += 180
-              return <text key={i} x={label.x} y={label.y} textAnchor="middle" dominantBaseline="central"
-                fontSize={label.height} transform={`rotate(${angle} ${label.x} ${label.y})`} pointerEvents="none">{label.text}</text>
             })}
             <text textAnchor="middle" dominantBaseline="central" fontSize={labelSize} pointerEvents="none">{panel.label}</text>
             <title>{t('Panel')} {panel.label} ({t('Face')} {panel.faceId})</title>
