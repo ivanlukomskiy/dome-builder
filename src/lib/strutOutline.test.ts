@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { Drawing, measureArea, setOC, type Face } from 'replicad'
 import initOpenCascade from 'replicad-opencascadejs'
-import { computeStrutBoundary2D } from './strutGeometry'
+import { arcEndpoints, computeStrutBoundary2D, precalculateStrutEnd } from './strutGeometry'
 import { DEFAULT_BRACE_PARAMS, NO_STRUT_BRACES, type StrutBraces } from './braces'
 
 beforeAll(async () => {
@@ -32,6 +32,32 @@ function build(round: boolean, c = cases[0], braces: StrutBraces = NO_STRUT_BRAC
 }
 
 describe('single strut outline', () => {
+  it('extends only the outer bridge endpoints by independent fractional thicknesses', () => {
+    const end = (added = 0) => precalculateStrutEnd(20, 150, 15, 20, 6, 5, 20, 50, added)
+    const a: [number, number] = [1000, 0]
+    const b: [number, number] = [500, Math.sqrt(3) * 500]
+    const base = arcEndpoints(a, b, [0, 0], end(), end())
+    const extended = arcEndpoints(a, b, [0, 0], end(12.5), end(3.25))
+    expect(extended.innA).toEqual(base.innA)
+    expect(extended.innB).toEqual(base.innB)
+    expect(extended.extA[0] - base.extA[0]).toBeCloseTo(12.5)
+    expect(extended.extA[1]).toBeCloseTo(base.extA[1])
+    expect(extended.extB[0] - base.extB[0]).toBeCloseTo(3.25 * 0.5)
+    expect(extended.extB[1] - base.extB[1]).toBeCloseTo(3.25 * Math.sqrt(3) / 2)
+  })
+
+  it.each([false, true])('builds thicker outer shoulders with roundBridge=%s', round => {
+    const result = computeStrutBoundary2D([1000, 0], [500, Math.sqrt(3) * 500], [0, 0],
+      20, 30, 150, 180, 50, 15, 20, 20, 5, 6, NO_STRUT_BRACES, round, undefined, 12.5, 3.25)
+    expect(area(result.main!)).toBeGreaterThan(area(build(round).main!))
+    const solid = result.main!.sketchOnPlane().extrude(10)
+    try { expect(solid.mesh().triangles.length).toBeGreaterThan(0) } finally { solid.delete() }
+  })
+
+  it.each([-1, NaN, Infinity])('rejects invalid added thickness %s', added => {
+    expect(() => precalculateStrutEnd(20, 150, 15, 20, 6, 5, 20, 50, added)).toThrow('nonnegative')
+  })
+
   it('reports milling cut failures without dropping the strut', () => {
     const onCutError = vi.fn()
     vi.spyOn(Drawing.prototype, 'cut').mockImplementation(() => { throw new Error('cut broke') })

@@ -20,6 +20,7 @@ const STRUT_END = {
   halfWidth: 62.5,
   grooveDepth: 3,
   connectionHalfWidth: 40,
+  addedThickness: 0,
 }
 
 function edge(id: number, thicknessMm: number, projectedAngleDeg: number, angleToNextEdgeDeg: number): EdgeInfo {

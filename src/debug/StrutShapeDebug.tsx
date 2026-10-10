@@ -20,6 +20,8 @@ interface Params {
   offset2: number
   width: number
   cornerLength: number
+  addedThicknessA: number
+  addedThicknessB: number
   roundBridge: boolean
   radius: number
   angleDeg: number
@@ -44,6 +46,8 @@ const DEFAULT_PARAMS: Params = {
   offset2: 100,
   width: 120,
   cornerLength: 375,
+  addedThicknessA: 0,
+  addedThicknessB: 0,
   roundBridge: true,
   radius: 2500,
   angleDeg: 60,
@@ -208,6 +212,8 @@ export function StrutShapeDebug() {
             offset2,
             cornerLength,
             roundBridge,
+            addedThicknessA,
+            addedThicknessB,
             width,
             endGrooveLengthPercent,
             midGrooveLengthPercent,
@@ -241,6 +247,8 @@ export function StrutShapeDebug() {
             cornerLengthB: cornerLength,
             halfWidth: width / 2,
             roundBridge,
+            addedThicknessA,
+            addedThicknessB,
             endGrooveLengthPercent,
             midGrooveLengthPercent,
             grooveDepth,
@@ -270,6 +278,9 @@ export function StrutShapeDebug() {
           call.chamferLength,
           call.braces,
           call.roundBridge,
+          undefined,
+          call.addedThicknessA,
+          call.addedThicknessB,
         )
         if (cancelled) return
 
@@ -405,6 +416,16 @@ export function StrutShapeDebug() {
 
         <section className="control-group">
           <h2>Strut Shape</h2>
+          {(['A', 'B'] as const).map((end) => {
+            const field = end === 'A' ? 'addedThicknessA' : 'addedThicknessB'
+            return (
+              <div className="transform-field" key={field}>
+                <label>Added thickness {end} (mm)</label>
+                <NumberField value={params[field]} step={0.5} min={0}
+                  clamp={(n) => Number.isFinite(n) ? Math.max(0, n) : 0} onCommit={setParam(field)} />
+              </div>
+            )
+          })}
           <div className="transform-field">
             <label>Width (mm)</label>
             <NumberField value={params.width} step={5} min={0} onCommit={setParam('width')} />
