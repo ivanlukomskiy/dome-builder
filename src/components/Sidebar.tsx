@@ -1201,9 +1201,10 @@ export function Sidebar({
           </SidebarSection>
           <SidebarSection id="geometry-shell" title={t('Shell')} defaultOpen={false}>
             <label className="checkbox-field">
-              <input type="checkbox" checked={shellEnabled} onChange={(e) => onShellEnabledChange(e.target.checked)} />
+              <input type="checkbox" checked={shellEnabled} disabled={roundStrutBridge} onChange={(e) => onShellEnabledChange(e.target.checked)} />
               {t('Enabled')}
             </label>
+            {roundStrutBridge && <p className="hint">{t('Disable Round bridge to generate the shell.')}</p>}
           </SidebarSection>
           <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit') && (

@@ -953,6 +953,7 @@ function App() {
       millingDiameter: appliedPreviewParams.millingDiameter,
       chamferLength: appliedPreviewParams.chamferLength,
       roundStrutBridge: appliedPreviewParams.roundStrutBridge,
+      shellEnabled: appliedPreviewParams.shellEnabled,
       flangeParams: {
         toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
         toleranceTransverse: appliedPreviewParams.toleranceTransverse,

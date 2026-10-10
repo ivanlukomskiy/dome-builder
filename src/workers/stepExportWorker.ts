@@ -143,6 +143,7 @@ export async function buildStepExports(
         req.chamferLength,
         job.braces,
         req.roundStrutBridge,
+        undefined, job.addedThicknessA, job.addedThicknessB, job.shellEdgeOffset,
       ))
       self.postMessage({
         type: 'progress',

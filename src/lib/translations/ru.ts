@@ -6,6 +6,7 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  "Disable Round bridge to generate the shell.": "Отключите скругление перемычки для построения оболочки.",
   "Shell": "Оболочка",
   "Enabled": "Включено",
   "Add labels": "Добавить подписи",

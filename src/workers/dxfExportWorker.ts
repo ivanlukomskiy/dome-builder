@@ -84,6 +84,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       req.chamferLength,
       job.braces,
       req.roundStrutBridge,
+      undefined, job.addedThicknessA, job.addedThicknessB, job.shellEdgeOffset,
     ))
     self.postMessage({
       type: 'progress',
