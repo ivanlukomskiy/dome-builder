@@ -273,6 +273,7 @@ function computeStrutBoundaryUnguarded(
   onCutError?: (cut: string, error: unknown) => void,
   addedThicknessA = 0,
   addedThicknessB = 0,
+  shellEdgeOffset = 0,
 ): StrutBoundaryResult {
   const plane = computeStrutPlane(a, b, center);
   const yDir = plane.normal.clone().cross(plane.xDir).normalize();
@@ -304,6 +305,7 @@ function computeStrutBoundaryUnguarded(
     onCutError,
     addedThicknessA,
     addedThicknessB,
+    shellEdgeOffset,
   );
 }
 
@@ -329,6 +331,7 @@ export interface StrutBoundaryInput {
   // Radial extension of the outer mid-groove's bridge-side wall, per end (mm).
   addedThicknessA?: number;
   addedThicknessB?: number;
+  shellEdgeOffset?: number;
 }
 
 const NON_FINITE_NUMBERS = new Set(["NaN", "Infinity", "-Infinity"]);
@@ -393,8 +396,13 @@ export function strutBoundaryInputFromJson(json: string): StrutBoundaryInput {
     }
     input[key] = value;
   }
+  if (input.shellEdgeOffset !== undefined &&
+      (typeof input.shellEdgeOffset !== "number" || !Number.isFinite(input.shellEdgeOffset))) {
+    throw new Error('"shellEdgeOffset" must be a finite number');
+  }
   return {
     ...(input as StrutBoundaryInput),
+    shellEdgeOffset: input.shellEdgeOffset ?? 0,
     braces: input.braces ?? NO_STRUT_BRACES,
     roundBridge: input.roundBridge ?? true,
   };
@@ -427,6 +435,7 @@ export function computeStrutBoundary(
   onCutError?: (cut: string, error: unknown) => void,
   addedThicknessA = 0,
   addedThicknessB = 0,
+  shellEdgeOffset = 0,
 ): StrutBoundaryResult {
   try {
     return computeStrutBoundaryUnguarded(
@@ -448,6 +457,7 @@ export function computeStrutBoundary(
       onCutError,
       addedThicknessA,
       addedThicknessB,
+      shellEdgeOffset,
     );
   } catch (err) {
     try {
@@ -470,6 +480,7 @@ export function computeStrutBoundary(
           roundBridge,
           addedThicknessA,
           addedThicknessB,
+          shellEdgeOffset,
         },
         { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) },
       );
@@ -852,7 +863,9 @@ export function computeStrutBoundary2D(
   onCutError?: (cut: string, error: unknown) => void,
   addedThicknessA = 0,
   addedThicknessB = 0,
+  shellEdgeOffset = 0,
 ): StrutBoundaryResult {
+  if (!Number.isFinite(shellEdgeOffset)) throw new Error("Shell edge offset must be a finite number");
   const helpers: HelperDrawing[] = [];
 
   const endA = precalculateStrutEnd(
@@ -889,10 +902,20 @@ export function computeStrutBoundary2D(
   if (!roundBridge) {
     // Use the supporting lines: the bridge stops at the tangent sections, so its
     // intersections with the end radii can lie beyond the bridge segments.
+    const bridgeDirection = sub2(arcEnds.extB, arcEnds.extA);
+    const normal = rotate90(normalize2(bridgeDirection), 1);
+    const midpoint = scale2(add2(arcEnds.extA, arcEnds.extB), 0.5);
+    const outward = dot2(normal, sub2(midpoint, center)) < 0 ? scale2(normal, -1) : normal;
+    const shiftedBridgeStart = add2(arcEnds.extA, scale2(outward, shellEdgeOffset));
     for (const [end, vertex] of [["A", a], ["B", b]] as const) {
-      const point = lineIntersection2D(center, sub2(vertex, center), arcEnds.extA, sub2(arcEnds.extB, arcEnds.extA));
+      const radius = sub2(vertex, center);
+      const point = lineIntersection2D(center, radius, arcEnds.extA, bridgeDirection);
       if (point && point.every(Number.isFinite)) {
-        addHelperPoint(point, `shell vertex ${end}`, "#4ade80");
+        addHelperPoint(point, `shell vertex w/o offset ${end}`, "#4ade80");
+      }
+      const shiftedPoint = lineIntersection2D(center, radius, shiftedBridgeStart, bridgeDirection);
+      if (shiftedPoint && shiftedPoint.every(Number.isFinite)) {
+        addHelperPoint(shiftedPoint, `shell vertex ${end}`, "#facc15");
       }
     }
   }

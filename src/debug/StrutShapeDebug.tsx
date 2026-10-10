@@ -22,6 +22,7 @@ interface Params {
   cornerLength: number
   addedThicknessA: number
   addedThicknessB: number
+  shellEdgeOffset: number
   roundBridge: boolean
   radius: number
   angleDeg: number
@@ -48,6 +49,7 @@ const DEFAULT_PARAMS: Params = {
   cornerLength: 375,
   addedThicknessA: 0,
   addedThicknessB: 0,
+  shellEdgeOffset: 0,
   roundBridge: true,
   radius: 2500,
   angleDeg: 60,
@@ -214,6 +216,7 @@ export function StrutShapeDebug() {
             roundBridge,
             addedThicknessA,
             addedThicknessB,
+            shellEdgeOffset,
             width,
             endGrooveLengthPercent,
             midGrooveLengthPercent,
@@ -249,6 +252,7 @@ export function StrutShapeDebug() {
             roundBridge,
             addedThicknessA,
             addedThicknessB,
+            shellEdgeOffset,
             endGrooveLengthPercent,
             midGrooveLengthPercent,
             grooveDepth,
@@ -281,6 +285,7 @@ export function StrutShapeDebug() {
           undefined,
           call.addedThicknessA,
           call.addedThicknessB,
+          call.shellEdgeOffset,
         )
         if (cancelled) return
 
@@ -416,6 +421,11 @@ export function StrutShapeDebug() {
 
         <section className="control-group">
           <h2>Strut Shape</h2>
+          <div className="transform-field">
+            <label>Shell edge offset (mm)</label>
+            <NumberField value={params.shellEdgeOffset} step={0.5}
+              clamp={(n) => Number.isFinite(n) ? n : 0} onCommit={setParam('shellEdgeOffset')} />
+          </div>
           {(['A', 'B'] as const).map((end) => {
             const field = end === 'A' ? 'addedThicknessA' : 'addedThicknessB'
             return (
