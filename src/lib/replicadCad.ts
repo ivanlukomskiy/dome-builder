@@ -1,4 +1,4 @@
-import { exportSTEP, Plane, Sketcher, setOC } from 'replicad'
+import { deserializeShape, exportSTEP, Plane, Sketcher, setOC } from 'replicad'
 import type { Drawing, Shape3D } from 'replicad'
 import type * as THREE from 'three'
 import type { StrutSketch } from './strutGeometry'
@@ -19,7 +19,11 @@ export function ensureReplicadReady(): Promise<void> {
         import('replicad-opencascadejs'),
         import('replicad-opencascadejs/wasm?url'),
       ])
-      const oc = await initOpenCascade({ locateFile: () => wasmUrl })
+      const oc = await initOpenCascade({
+        locateFile: () => wasmUrl,
+        // This runtime's default abort path recursively calls back into abort().
+        onAbort: (reason: unknown) => { throw new WebAssembly.RuntimeError(`OpenCascade aborted: ${String(reason ?? 'unknown error')}`) },
+      })
       setOC(oc)
     })()
   }
@@ -171,6 +175,17 @@ export function buildStrutStepFromDrawing(
 export interface StepAssemblyShape {
   name: string
   shape: Shape3D
+}
+
+export function deserializeStepAssemblyParts(parts: { name: string; brep: string }[]): StepAssemblyShape[] {
+  const shapes: StepAssemblyShape[] = []
+  try {
+    for (const { name, brep } of parts) shapes.push({ name, shape: deserializeShape(brep).asShape3D() })
+    return shapes
+  } catch (error) {
+    for (const { shape } of shapes) shape.delete()
+    throw error
+  }
 }
 
 export function buildStepAssembly(shapes: StepAssemblyShape[]): Blob {

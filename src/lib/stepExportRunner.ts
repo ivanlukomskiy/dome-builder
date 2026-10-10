@@ -9,10 +9,12 @@ import { pairBracePoints, type BraceBody, type BracePoints } from './braceSolid'
 import { runExportBatches } from './exportBatchPool'
 import { exportProfilingEnabled, publishExportProfile, type ExportBatchProfile, type ExportWorkerProfile } from './exportProfile'
 import type {
+  SerializedStepShape,
   StepExportPiece,
   StepExportRequest,
   StepExportWorkerMessage,
   StepExportWorkerPhase,
+  StepExportPhase,
 } from '../workers/stepExportWorker'
 
 // Same per-worker item cap as DomeMesh.tsx's live Preview build, and for the same reason: no
@@ -51,7 +53,7 @@ function runBatch(
   requestId: number,
   onProgress: (done: number) => void,
   signal?: AbortSignal,
-): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
+): Promise<{ pieces: StepExportPiece[]; bracePoints: BracePoints[]; assemblyParts?: SerializedStepShape[]; profile?: ExportWorkerProfile; createToReadyMs: number; readyToResultMs: number }> {
   return new Promise((resolve, reject) => {
     const createdAt = performance.now()
     let readyAt = createdAt
@@ -81,6 +83,7 @@ function runBatch(
         settle(() => resolve({
           pieces: msg.pieces,
           bracePoints: msg.bracePoints,
+          assemblyParts: msg.assemblyParts,
           profile: msg.profile,
           createToReadyMs: readyAt - createdAt,
           readyToResultMs: finishedAt - readyAt,
@@ -99,8 +102,7 @@ function runBatch(
 }
 
 function runAssembly(
-  strutJobs: StrutGeometryEntry[],
-  vertices: VertexEdgesInfo[],
+  assemblyParts: SerializedStepShape[],
   shared: Omit<StepExportRequest, 'requestId' | 'strutJobs' | 'vertices' | 'braceBodies' | 'mode'>,
   requestId: number,
   onProgress: (progress: StepExportProgress) => void,
@@ -150,8 +152,9 @@ function runAssembly(
       ...shared,
       requestId,
       mode: 'assembly',
-      strutJobs,
-      vertices,
+      assemblyParts,
+      strutJobs: [],
+      vertices: [],
       braceBodies: [],
     }
     worker.postMessage(request)
@@ -363,8 +366,8 @@ export async function runStepDebugExport(
 }
 
 // Builds one STEP assembly containing every visible strut, flange plate, brace plate and brace in
-// its Preview position. Unlike runStepExport, this has to keep all shapes in one OpenCascade
-// worker long enough for the STEP assembly writer to reference them together.
+// its Preview position. Geometry is built in bounded batches; only finished solids are
+// loaded into the final assembly writer.
 export async function runStepAssemblyExport(
   params: RunStepExportParams,
   onProgress: (progress: StepExportProgress | null) => void,
@@ -390,8 +393,40 @@ export async function runStepAssemblyExport(
 
   if (isCancelled()) return null
 
-  const result = await runAssembly(strutEntries, vertices, shared, 1, onProgress, signal)
-  if (profiling && !isCancelled() && result.profile) publishExportProfile('stepAssembly', startedAt, [{
+  // Build geometry in disposable workers, then import only the finished solids into the
+  // writer. Keeping the construction intermediates in one WASM heap exhausts its memory.
+  const assemblyParts: SerializedStepShape[] = []
+  const bracePoints: BracePoints[] = []
+  let requestId = 0
+  const batchProfiles: ExportBatchProfile[] = []
+  const buildBatches = async <T>(jobs: T[], phase: StepExportPhase,
+    run: (batch: T[], id: number, report: (done: number) => void) => ReturnType<typeof runBatch>) => {
+    const batches = chunk(jobs, BATCH_SIZE)
+    const results = await runExportBatches(batches, jobs.length, run,
+      (done, total) => onProgress({ phase, done, total }),
+      (_batch, err) => { throw err }, isCancelled)
+    if (!results) return false
+    for (const [i, result] of results.entries()) {
+      if (!result) continue
+      if (profiling && result.profile) batchProfiles.push({
+        phase, items: batches[i].length, createToReadyMs: result.createToReadyMs,
+        readyToResultMs: result.readyToResultMs, worker: result.profile,
+      })
+      assemblyParts.push(...result.assemblyParts ?? [])
+      bracePoints.push(...result.bracePoints)
+    }
+    return true
+  }
+  const partsShared = { ...shared, mode: 'assembly-parts' as const }
+  if (!await buildBatches(strutEntries, 'struts', (batch, _id, report) =>
+    runBatch(batch, [], [], partsShared, ++requestId, report, signal))) return null
+  if (!await buildBatches(vertices, 'flanges', (batch, _id, report) =>
+    runBatch([], batch, [], partsShared, ++requestId, report, signal))) return null
+  if (!await buildBatches(pairBracePoints(bracePoints), 'braces', (batch, _id, report) =>
+    runBatch([], [], batch, partsShared, ++requestId, report, signal))) return null
+  if (isCancelled()) return null
+  const result = await runAssembly(assemblyParts, shared, ++requestId, onProgress, signal)
+  if (profiling && !isCancelled() && result.profile) publishExportProfile('stepAssembly', startedAt, [...batchProfiles, {
     phase: 'assembly', items: strutEntries.length + vertices.length,
     createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
     worker: result.profile,
