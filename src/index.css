@@ -538,6 +538,14 @@ body,
 .export-modal-step-count { margin-left: auto; color: var(--text-dim); font-size: 12px; white-space: nowrap; }
 .export-modal-progress { height: 5px; margin-left: 34px; border-radius: 99px; background: var(--border); overflow: hidden; }
 .export-modal-progress > div { height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.15s ease-out; }
+.export-modal-progress.indeterminate > div { width: 40%; animation: export-progress-indeterminate 1.3s ease-in-out infinite; }
+@keyframes export-progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .export-modal-progress.indeterminate > div { animation: none; margin: 0 auto; }
+}
 .export-modal-steps .completed .export-modal-progress > div { background: #4bbd77; }
 .export-modal-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
 .export-modal-actions button { flex: 0 0 auto; min-width: 90px; }

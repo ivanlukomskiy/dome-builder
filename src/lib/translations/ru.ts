@@ -31,6 +31,7 @@ export const ru: Dictionary = {
   "Write STEP": "Запись STEP",
   "Create ZIP archive": "Создание ZIP-архива",
   "Completed": "Готово",
+  "Working…": "Выполняется…",
   "Close": "Закрыть",
   "DXF": "DXF",
   "STEP parts": "Детали STEP",

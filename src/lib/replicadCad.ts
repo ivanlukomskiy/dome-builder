@@ -21,6 +21,8 @@ export function ensureReplicadReady(): Promise<void> {
       ])
       const oc = await initOpenCascade({
         locateFile: () => wasmUrl,
+        // OpenCascade prints transfer statistics to stdout for every STEP part.
+        print: () => {},
         // This runtime's default abort path recursively calls back into abort().
         onAbort: (reason: unknown) => { throw new WebAssembly.RuntimeError(`OpenCascade aborted: ${String(reason ?? 'unknown error')}`) },
       })

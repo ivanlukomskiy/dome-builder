@@ -52,6 +52,7 @@ export function ExportProgressModal({ session, onCancel, onClose }: Props) {
         {phases.map((phase, index) => {
           const completed = session.status === 'completed' || index < activeIndex
           const active = session.status === 'running' && index === activeIndex
+          const indeterminate = active && phase === 'writing' && session.progress.total <= 0
           const percent = completed ? 100 : active && session.progress.total > 0
             ? Math.min(100, Math.round(100 * session.progress.done / session.progress.total)) : 0
           return <li key={phase} className={completed ? 'completed' : active ? 'active' : ''}>
@@ -59,12 +60,12 @@ export function ExportProgressModal({ session, onCancel, onClose }: Props) {
               <span className="export-modal-step-icon" aria-hidden="true">{completed ? '✓' : index + 1}</span>
               <span>{labels[phase]}</span>
               <span className="export-modal-step-count">
-                {completed ? t('Completed') : active && session.progress.total > 0
+                {completed ? t('Completed') : indeterminate ? t('Working…') : active && session.progress.total > 0
                   ? `${session.progress.done} / ${session.progress.total}` : ''}
               </span>
             </div>
-            <div className="export-modal-progress" role="progressbar" aria-label={labels[phase]} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-              <div style={{ width: `${percent}%` }} />
+            <div className={`export-modal-progress${indeterminate ? ' indeterminate' : ''}`} role="progressbar" aria-label={labels[phase]} aria-valuenow={indeterminate ? undefined : percent} aria-valuetext={indeterminate ? t('Working…') : undefined} aria-valuemin={0} aria-valuemax={100}>
+              <div style={indeterminate ? undefined : { width: `${percent}%` }} />
             </div>
           </li>
         })}

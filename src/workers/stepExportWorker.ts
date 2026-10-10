@@ -89,6 +89,12 @@ export async function buildStepExports(
 
   const center = new THREE.Vector3(0, 0, 0)
   const pieces: StepExportPiece[] = []
+  const reportWriting = () => self.postMessage({
+    type: 'progress', requestId: req.requestId, phase: 'writing', done: 0, total: 0,
+  } satisfies StepExportWorkerMessage)
+  // The native writer exposes no incremental progress. Include loading the finished
+  // solids in its indeterminate phase instead of leaving the UI on "Build braces".
+  if (req.mode === 'assembly' && req.assemblyParts) reportWriting()
   const assemblyShapes: StepAssemblyShape[] = deserializeStepAssemblyParts(req.assemblyParts ?? [])
   // Each strut's brace plate end points in 3D, for the caller to pair up into brace bodies.
   const bracePoints: BracePoints[] = []
@@ -270,13 +276,7 @@ export async function buildStepExports(
       return { pieces, bracePoints, assemblyParts: assemblyShapes.map(({ name, shape }) => ({ name, brep: shape.serialize() })),
         profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
     }
-    self.postMessage({
-      type: 'progress',
-      requestId: req.requestId,
-      phase: 'writing',
-      done: 0,
-      total: assemblyShapes.length,
-    } satisfies StepExportWorkerMessage)
+    if (!req.assemblyParts) reportWriting()
     const assemblyBlob = timed('assemblyStepWrite', () => buildStepAssembly(assemblyShapes))
     return { pieces, bracePoints, assemblyBlob, profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
   } finally {
