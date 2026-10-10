@@ -132,3 +132,76 @@ export function toggleShellStitch(panels: ShellPanel[], layout: ShellLayout, sti
   nextStitches.add(edgeId)
   return { layout: group.has(fixedFaceId) ? new Map(layout) : transformShellGroup(layout, group, layout.get(movingId)!, aligned), stitches: nextStitches }
 }
+
+/** Positive-area overlap only: touching at a seam or vertex is allowed. */
+export function shellTrianglesOverlap(a: readonly (readonly [number, number])[], b: readonly (readonly [number, number])[]): boolean {
+  for (const triangle of [a, b]) for (let i = 0; i < 3; i++) {
+    const p = triangle[i], q = triangle[(i + 1) % 3]
+    const length = Math.hypot(q[0] - p[0], q[1] - p[1])
+    const nx = -(q[1] - p[1]) / length, ny = (q[0] - p[0]) / length
+    const pa = a.map(v => v[0] * nx + v[1] * ny), pb = b.map(v => v[0] * nx + v[1] * ny)
+    const tolerance = Math.max(1, length) * 1e-8
+    if (Math.min(Math.max(...pa), Math.max(...pb)) - Math.max(Math.min(...pa), Math.min(...pb)) <= tolerance) return false
+  }
+  return true
+}
+
+// Pack assembly bounding boxes with a positive gap, without changing their rotations.
+function spaceShellGroups(panels: ShellPanel[], layout: ShellLayout, groups: ReadonlySet<number>[]): Map<number, ShellPanelPose> {
+  const next = new Map(layout)
+  const gap = Math.max(1, ...panels.flatMap(p => p.points.map((v, i) => Math.hypot(v[0] - p.points[(i + 1) % 3][0], v[1] - p.points[(i + 1) % 3][1])))) * 0.1
+  const boxes = groups.map(group => {
+    const points = panels.filter(p => group.has(p.faceId)).flatMap(p => p.points.map(pt => placePanelPoint(pt, layout.get(p.faceId)!)))
+    const xs = points.map(p => p[0]), ys = points.map(p => p[1])
+    return { group, minX: Math.min(...xs), minY: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }
+  })
+  const rowWidth = Math.max(0, ...boxes.map(b => b.width), Math.sqrt(boxes.reduce((sum, b) => sum + (b.width + gap) * (b.height + gap), 0)))
+  let x = 0, y = 0, rowHeight = 0
+  for (const box of boxes) {
+    if (x > 0 && x + box.width > rowWidth) { x = 0; y += rowHeight + gap; rowHeight = 0 }
+    for (const id of box.group) {
+      const pose = layout.get(id)!
+      next.set(id, { ...pose, x: pose.x + x - box.minX, y: pose.y + y - box.minY })
+    }
+    x += box.width + gap
+    rowHeight = Math.max(rowHeight, box.height)
+  }
+  return next
+}
+
+export function decoupleAllShellPanels(panels: ShellPanel[]) {
+  const ordered = [...panels].sort((a, b) => parseInt(a.label) - parseInt(b.label))
+  return { layout: spaceShellGroups(ordered, resolveShellLayout(ordered, new Map()), ordered.map(p => new Set([p.faceId]))), stitches: new Set<number>() }
+}
+
+/** Greedy depth-first unfolding, beginning with panel 1. Rebuilds seams from scratch. */
+export function autoStitchShellPanels(panels: ShellPanel[]) {
+  const ordered = [...panels].sort((a, b) => parseInt(a.label) - parseInt(b.label))
+  let layout = resolveShellLayout(ordered, new Map())
+  let stitches = new Set<number>()
+  const remaining = new Set(ordered.map(p => p.faceId)), groups: Set<number>[] = []
+  const byId = new Map(panels.map(p => [p.faceId, p]))
+  const connections = shellPanelConnections(ordered).sort((a, b) => a.edgeId - b.edgeId)
+  for (const root of ordered) {
+    if (!remaining.delete(root.faceId)) continue
+    const group = new Set([root.faceId]), stack = [root.faceId]
+    while (stack.length) {
+      const fixedId = stack[stack.length - 1]
+      let attached = false
+      for (const c of connections) {
+        const movingId = c.a.faceId === fixedId ? c.b.faceId : c.b.faceId === fixedId ? c.a.faceId : null
+        if (movingId === null || !remaining.has(movingId)) continue
+        const candidate = toggleShellStitch(panels, layout, stitches, c.edgeId, fixedId)
+        const moving = byId.get(movingId)!.points.map(pt => placePanelPoint(pt, candidate.layout.get(movingId)!))
+        if ([...group].some(id => shellTrianglesOverlap(moving, byId.get(id)!.points.map(pt => placePanelPoint(pt, layout.get(id)!))))) continue
+        layout = candidate.layout; stitches = candidate.stitches
+        remaining.delete(movingId); group.add(movingId); stack.push(movingId)
+        attached = true
+        break
+      }
+      if (!attached) stack.pop()
+    }
+    groups.push(group)
+  }
+  return { layout: spaceShellGroups(ordered, layout, groups), stitches }
+}

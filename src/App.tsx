@@ -1,4 +1,4 @@
-import { ShellWorkspace } from './components/ShellWorkspace'
+import { ShellWorkspace, type ShellWorkspaceActions } from './components/ShellWorkspace'
 import { DEFAULT_STEP_EXPORT_SETTINGS } from './lib/stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './lib/dxfLabelSettings'
 import { DEFAULT_DXF_SHEET_SETTINGS } from './lib/dxfSheetSettings'
@@ -342,6 +342,7 @@ function App() {
   const setGrooveDepth = (value: DomeDocument['grooveDepth'] | ((previous: DomeDocument['grooveDepth']) => DomeDocument['grooveDepth'])) => setDocumentField('grooveDepth', value)
   const setMillingDiameter = (value: DomeDocument['millingDiameter'] | ((previous: DomeDocument['millingDiameter']) => DomeDocument['millingDiameter'])) => setDocumentField('millingDiameter', value)
   const setChamferLength = (value: DomeDocument['chamferLength'] | ((previous: DomeDocument['chamferLength']) => DomeDocument['chamferLength'])) => setDocumentField('chamferLength', value)
+  const shellWorkspaceActions = useRef<ShellWorkspaceActions>(null)
   const setShellThickness = (value: number) => setDocumentField('shellThickness', value)
   const setShellEnabled = (value: boolean) => setDocumentField('shellEnabled', value)
   const setRoundStrutBridge = (value: DomeDocument['roundStrutBridge'] | ((previous: DomeDocument['roundStrutBridge']) => DomeDocument['roundStrutBridge'])) => setDocumentField('roundStrutBridge', value)
@@ -1069,6 +1070,8 @@ function App() {
   return (
     <div className="app">
       <Sidebar
+        onDecoupleAllShellPanels={() => shellWorkspaceActions.current?.decoupleAll()}
+        onAutoStitchShellPanels={() => shellWorkspaceActions.current?.stitchAutomatically()}
         onExportConfig={handleExportConfig}
         onImportConfig={handleImportConfig}
         onDownloadSteps={handleDownloadSteps}
@@ -1199,7 +1202,7 @@ function App() {
       />
       {exportSession && <ExportProgressModal session={exportSession} onCancel={cancelExport} onClose={() => setExportSession(null)} />}
       {mode === 'shell' ? (
-        <ShellWorkspace params={buildExportParams()} layout={shellLayout} stitches={shellStitches}
+        <ShellWorkspace actionsRef={shellWorkspaceActions} params={buildExportParams()} layout={shellLayout} stitches={shellStitches}
           onLayoutChange={(layout, stitches) => documentHistory.commit(prev => ({ ...prev, shellLayout: layout, shellStitches: stitches }))}
           previewParamsDirty={previewParamsDirty || bracePlateDirty || previewDiameterDirty}
           onApplyPreview={handleApplyPreview} onEndHistoryGroup={documentHistory.endGroup} />

@@ -49,6 +49,8 @@ const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
 ]
 
 interface SidebarProps {
+  onDecoupleAllShellPanels: () => void
+  onAutoStitchShellPanels: () => void
   onExportConfig: () => void
   onImportConfig: (file: File) => void
   onDownloadSteps: () => void
@@ -425,6 +427,8 @@ function Help({ text }: { text: string }) {
 }
 
 export function Sidebar({
+  onDecoupleAllShellPanels,
+  onAutoStitchShellPanels,
   onExportConfig,
   onImportConfig,
   onDownloadSteps,
@@ -1017,9 +1021,12 @@ export function Sidebar({
 
       </SidebarSection>}
       {mode === 'shell' && <SidebarSection id="shell-workspace" title={t('Shell layout')}>
-        <p className="hint">{t('Click blue edges to stitch matching panels; click green seams to decouple. Orange edges have no matching panel. Stitched panels move and rotate together.')}</p>
-        <p className="hint">{t('Drag panels to arrange them. Drag the round handle to rotate. Dashed lines connect matching dome edges.')}</p>
-        <p className="hint">{t('Drag the background to pan; scroll to zoom. Each move or rotation is one undo step.')}</p>
+        <div className="button-row">
+          <button onClick={onDecoupleAllShellPanels} disabled={!shellEnabled || roundStrutBridge}>{t('Decouple all')}</button>
+        </div>
+        <div className="button-row">
+          <button onClick={onAutoStitchShellPanels} disabled={!shellEnabled || roundStrutBridge}>{t('Stitch automatically')}</button>
+        </div>
       </SidebarSection>}
       {mode === 'preview' && <SidebarSection id="preview" title={t('Preview')}>
         <div className="button-row">

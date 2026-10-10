@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, shellPanelGroup, transformShellGroup, toggleShellStitch } from './shellLayout'
+import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, shellPanelGroup, transformShellGroup, toggleShellStitch, decoupleAllShellPanels, autoStitchShellPanels, shellTrianglesOverlap, type ShellPanel } from './shellLayout'
 import { initialHistory, commitHistory, undoHistory, redoHistory } from './useHistory'
 
 const data = {
@@ -157,5 +157,46 @@ describe('shell stitching', () => {
 
   it('rejects orphan edges', () => {
     expect(() => toggleShellStitch(panels, layout, new Set(), 10, 7)).toThrow('no matching panel')
+  })
+})
+
+
+describe('bulk shell arrangement', () => {
+  const fan: ShellPanel[] = Array.from({ length: 7 }, (_, i) => ({
+    faceId: 100 + i, label: String(i + 1), vertices: [0, i + 1, i + 2],
+    points: [[0, 0], [10, 0], [5, Math.sqrt(75)]], edges: [i, 1000 + i, i + 1],
+  }))
+  it('allows boundary contact but rejects crossing and containment', () => {
+    const a: [number, number][] = [[0, 0], [10, 0], [0, 10]]
+    expect(shellTrianglesOverlap(a, [[0, 0], [10, 0], [0, -10]])).toBe(false)
+    expect(shellTrianglesOverlap(a, [[1, 1], [2, 1], [1, 2]])).toBe(true)
+    expect(shellTrianglesOverlap(a, [[-1, 2], [5, 2], [2, -1]])).toBe(true)
+    expect(shellTrianglesOverlap(a, a)).toBe(true)
+  })
+  it('decouples and leaves positive gaps between every panel bounding box', () => {
+    const result = decoupleAllShellPanels(fan)
+    expect(result.stitches.size).toBe(0)
+    for (let i = 0; i < fan.length; i++) for (let j = i + 1; j < fan.length; j++) {
+      const bounds = (panel: ShellPanel) => {
+        const pts = panel.points.map(p => placePanelPoint(p, result.layout.get(panel.faceId)!))
+        return [Math.min(...pts.map(p => p[0])), Math.max(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1])), Math.max(...pts.map(p => p[1]))]
+      }
+      const a = bounds(fan[i]), b = bounds(fan[j])
+      expect(a[1] < b[0] || b[1] < a[0] || a[3] < b[2] || b[3] < a[2]).toBe(true)
+    }
+  })
+  it('starts from panel 1, grows recursively, and splits before an overlap', () => {
+    const result = autoStitchShellPanels([...fan].reverse())
+    expect(shellPanelGroup(fan, result.stitches, 100).size).toBe(6)
+    expect(result.stitches.size).toBe(5)
+    for (let i = 0; i < fan.length; i++) for (let j = i + 1; j < fan.length; j++) {
+      const points = (panel: ShellPanel) => panel.points.map(p => placePanelPoint(p, result.layout.get(panel.faceId)!))
+      expect(shellTrianglesOverlap(points(fan[i]), points(fan[j]))).toBe(false)
+    }
+    expect(autoStitchShellPanels(fan)).toEqual(result)
+  })
+  it('handles empty shells and isolated panels', () => {
+    expect(autoStitchShellPanels([])).toEqual({ layout: new Map(), stitches: new Set() })
+    expect(autoStitchShellPanels([fan[0]]).stitches.size).toBe(0)
   })
 })

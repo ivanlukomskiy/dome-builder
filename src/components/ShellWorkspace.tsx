@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import type { Ref, PointerEvent as ReactPointerEvent } from 'react'
 import { computePreviewBuildInputs, type PreviewBuildInputParams } from '../lib/previewBuildInputs'
-import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, shellPanelGroup, transformShellGroup, toggleShellStitch, type ShellLayout, type ShellPanelPose } from '../lib/shellLayout'
+import { flattenShellPanels, placePanelPoint, resolveShellLayout, shellPanelConnections, shellPanelGroup, transformShellGroup, toggleShellStitch, decoupleAllShellPanels, autoStitchShellPanels, type ShellLayout, type ShellPanelPose } from '../lib/shellLayout'
 import { useI18n } from '../lib/i18n'
+
+export interface ShellWorkspaceActions { decoupleAll: () => void; stitchAutomatically: () => void }
 
 interface Frame { x: number; y: number; width: number; height: number }
 interface Gesture {
@@ -18,7 +20,8 @@ interface Gesture {
   group: ReadonlySet<number>
 }
 
-export function ShellWorkspace({ params, layout, stitches, onLayoutChange, previewParamsDirty, onApplyPreview, onEndHistoryGroup }: {
+export function ShellWorkspace({ params, layout, stitches, actionsRef, onLayoutChange, previewParamsDirty, onApplyPreview, onEndHistoryGroup }: {
+  actionsRef: Ref<ShellWorkspaceActions>
   params: PreviewBuildInputParams
   layout: ShellLayout
   stitches: ReadonlySet<number>
@@ -164,6 +167,15 @@ export function ShellWorkspace({ params, layout, stitches, onLayoutChange, previ
       setStitchError(error instanceof Error ? error.message : String(error))
     }
   }
+  const arrange = (automatic: boolean) => {
+    if (gesture.current || !panels.length) return
+    onEndHistoryGroup()
+    const next = automatic ? autoStitchShellPanels(panels) : decoupleAllShellPanels(panels)
+    onLayoutChange(next.layout, next.stitches)
+    setView(null)
+    setStitchError(null)
+  }
+  useImperativeHandle(actionsRef, () => ({ decoupleAll: () => arrange(false), stitchAutomatically: () => arrange(true) }))
   const sharedEdges = new Set(connections.map(c => c.edgeId))
   const selectedGroup = selected === null ? new Set<number>() : shellPanelGroup(panels, stitches, selected)
   return (
