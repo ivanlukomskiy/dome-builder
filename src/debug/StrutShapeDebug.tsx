@@ -493,7 +493,7 @@ export function StrutShapeDebug() {
                   />
                   Brace at end {end}
                 </label>
-                {BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
+                {params[enabledKey] && BRACE_PARAM_FIELDS.map(({ key, label, step }) => (
                   <div className="transform-field" key={key}>
                     <label>{`${end}: ${label}`}</label>
                     <NumberField
