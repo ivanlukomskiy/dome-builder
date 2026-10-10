@@ -38,6 +38,7 @@ import {
 const EDIT_OR_PREVIEW_OPTIONS: { value: EditOrPreviewMode; label: string }[] = [
   { value: 'edit', label: 'Edit' },
   { value: 'preview', label: 'Preview' },
+  { value: 'shell', label: 'Shell' },
 ]
 
 const EDIT_TARGET_OPTIONS: { value: EditTarget; label: string }[] = [
@@ -1015,6 +1016,10 @@ export function Sidebar({
         )}
 
       </SidebarSection>}
+      {mode === 'shell' && <SidebarSection id="shell-workspace" title={t('Shell layout')}>
+        <p className="hint">{t('Drag panels to arrange them. Drag the round handle to rotate. Dashed lines connect matching dome edges.')}</p>
+        <p className="hint">{t('Drag the background to pan; scroll to zoom. Each move or rotation is one undo step.')}</p>
+      </SidebarSection>}
       {mode === 'preview' && <SidebarSection id="preview" title={t('Preview')}>
         <div className="button-row">
           <button onClick={onApplyPreview} disabled={!previewParamsDirty}>{t('Redraw')}</button>
@@ -1048,7 +1053,7 @@ export function Sidebar({
         </SidebarSection>
         <>
           <SidebarSection id="geometry-struts" title={t('Struts')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 <div className="transform-field">
                   <label><FieldLabel text={t('Corner length (D, mm)')} /> <Help text={t(
@@ -1084,7 +1089,7 @@ export function Sidebar({
                 </div>
               </section>
             )}
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 <div className="transform-field">
                   <label><FieldLabel text={t('End groove length (%)')} /> <Help text={t(
@@ -1122,7 +1127,7 @@ export function Sidebar({
             )}
           </SidebarSection>
           <SidebarSection id="geometry-flanges" title={t('Flanges')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 <div className="transform-field">
                   <label><FieldLabel text={t('Center hole diameter (mm)')} /> <Help text={t(
@@ -1183,7 +1188,7 @@ export function Sidebar({
             )}
           </SidebarSection>
           <SidebarSection id="geometry-foot" title={t('Foot')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 {FOOT_PARAM_FIELDS.map(({ key, label }) => (
                   <div className="transform-field" key={key}>
@@ -1218,7 +1223,7 @@ export function Sidebar({
             {roundStrutBridge && <p className="hint">{t('Disable Round bridge to generate the shell.')}</p>}
           </SidebarSection>
           <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>
-            {(mode === 'preview' || mode === 'edit') && (
+            {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (
               <section className="control-group">
                 {BRACE_PLATE_PARAM_FIELDS.map(({ key, label, step }) => (
                   <div className="transform-field" key={key}>

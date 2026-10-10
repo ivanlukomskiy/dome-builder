@@ -549,3 +549,15 @@ body,
 .export-modal-steps .completed .export-modal-progress > div { background: #4bbd77; }
 .export-modal-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
 .export-modal-actions button { flex: 0 0 auto; min-width: 90px; }
+
+.shell-workspace { min-width: 0; overflow: hidden; background: #12141a; display: flex; flex-direction: column; }
+.shell-canvas:focus { outline: none; }
+.shell-canvas { flex: 1; width: 100%; min-height: 0; touch-action: none; user-select: none; cursor: grab; }
+.shell-canvas:active { cursor: grabbing; }
+.shell-panel { cursor: move; }
+.shell-panel polygon { fill: #243e50; stroke: #71bed3; stroke-width: 1.5; }
+.shell-panel polygon.selected { fill: #36576a; stroke: #facc15; stroke-width: 2; }
+.shell-panel text { fill: #e8f0f6; font-family: monospace; }
+.shell-connections line { stroke: #8194ae; stroke-width: 1; stroke-dasharray: 6 6; opacity: .55; }
+.shell-rotate-handle { cursor: crosshair; }
+.shell-message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 500px; padding: 20px; border: 1px solid #343b4c; border-radius: 8px; background: #1b202b; text-align: center; }

@@ -1,3 +1,4 @@
+import type { ShellPanelPose } from './shellLayout'
 import { DEFAULT_STEP_EXPORT_SETTINGS, type StepExportSettings } from './stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
 import { DEFAULT_DXF_SHEET_SETTINGS, type DxfSheetSettings } from './dxfSheetSettings'
@@ -48,6 +49,7 @@ export interface DomeConfig {
   // Informational shell measurements; absent in older configs means disabled.
   shellEnabled?: boolean
   shellThickness?: number
+  shellLayout?: [number, ShellPanelPose][]
   // Whether the bridge between the two tangent end sections of each strut is rounded to follow
   // the sphere. Missing in older configs means true.
   roundStrutBridge?: boolean
@@ -114,6 +116,7 @@ export interface DomeState {
   chamferLength: number
   shellEnabled: boolean
   shellThickness: number
+  shellLayout: ReadonlyMap<number, ShellPanelPose>
   roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
@@ -163,6 +166,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
     chamferLength: state.chamferLength,
     shellEnabled: state.shellEnabled,
     shellThickness: state.shellThickness,
+    shellLayout: [...state.shellLayout],
     roundStrutBridge: state.roundStrutBridge,
     toleranceLongitudinal: state.toleranceLongitudinal,
     toleranceTransverse: state.toleranceTransverse,
@@ -238,6 +242,8 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     millingDiameter: config.millingDiameter,
     chamferLength: config.chamferLength,
     shellEnabled: config.shellEnabled ?? false,
+    shellLayout: new Map((config.shellLayout ?? []).filter(([id, pose]) =>
+      Number.isInteger(id) && pose && [pose.x, pose.y, pose.rotation].every(Number.isFinite))),
     shellThickness: typeof config.shellThickness === 'number' && Number.isFinite(config.shellThickness) ? Math.max(0, config.shellThickness) : 2,
     roundStrutBridge: config.roundStrutBridge ?? true,
     toleranceLongitudinal: config.toleranceLongitudinal,

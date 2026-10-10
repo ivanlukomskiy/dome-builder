@@ -1,3 +1,4 @@
+import { ShellWorkspace } from './components/ShellWorkspace'
 import { DEFAULT_STEP_EXPORT_SETTINGS } from './lib/stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './lib/dxfLabelSettings'
 import { DEFAULT_DXF_SHEET_SETTINGS } from './lib/dxfSheetSettings'
@@ -67,8 +68,8 @@ import {
   type PreviewPartKind,
 } from './lib/previewParts'
 
-export type ViewMode = 'new' | 'edit' | 'preview'
-export type EditOrPreviewMode = 'edit' | 'preview'
+export type ViewMode = 'new' | 'edit' | 'preview' | 'shell'
+export type EditOrPreviewMode = 'edit' | 'preview' | 'shell'
 export type EditTarget = 'vertices' | 'edges' | 'faces' | 'braces'
 
 // The strut-shape fields in the Sidebar's "Edge Curvature" and "Grooves" sections - the only
@@ -184,6 +185,7 @@ function createDocument(initial: DomeState | null, sceneData = initial?.sceneDat
     chamferLength: initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH,
     shellEnabled: initial?.shellEnabled ?? false,
     shellThickness: initial?.shellThickness ?? 2,
+    shellLayout: new Map(initial?.shellLayout ?? []),
     roundStrutBridge: initial?.roundStrutBridge ?? DEFAULT_ROUND_STRUT_BRIDGE,
     toleranceLongitudinal: initial?.toleranceLongitudinal ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceLongitudinal,
     toleranceTransverse: initial?.toleranceTransverse ?? DEFAULT_FLANGE_SHAPE_PARAMS.toleranceTransverse,
@@ -294,6 +296,7 @@ function App() {
     roundStrutBridge,
     shellEnabled,
     shellThickness,
+    shellLayout,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -842,6 +845,7 @@ function App() {
       roundStrutBridge,
       shellEnabled,
       shellThickness,
+      shellLayout,
       toleranceLongitudinal,
       toleranceTransverse,
       centerHoleDiameter,
@@ -881,6 +885,7 @@ function App() {
     roundStrutBridge,
     shellEnabled,
     shellThickness,
+    shellLayout,
     toleranceLongitudinal,
     toleranceTransverse,
     centerHoleDiameter,
@@ -1189,7 +1194,12 @@ function App() {
         onEndHistoryGroup={documentHistory.endGroup}
       />
       {exportSession && <ExportProgressModal session={exportSession} onCancel={cancelExport} onClose={() => setExportSession(null)} />}
-      <Viewport
+      {mode === 'shell' ? (
+        <ShellWorkspace params={buildExportParams()} layout={shellLayout}
+          onLayoutChange={(layout) => setDocumentField('shellLayout', layout)}
+          previewParamsDirty={previewParamsDirty || bracePlateDirty || previewDiameterDirty}
+          onApplyPreview={handleApplyPreview} onEndHistoryGroup={documentHistory.endGroup} />
+      ) : <Viewport
         mode={mode}
         editTarget={editTarget}
         diameter={isNew ? newDiameter : sceneData.diameter}
@@ -1233,7 +1243,7 @@ function App() {
         onFaceClick={handleFaceClick}
         onBraceClick={handleBraceClick}
         onDeselectAll={handleDeselectAll}
-      />
+      />}
     </div>
   )
 }
