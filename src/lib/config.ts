@@ -47,6 +47,7 @@ export interface DomeConfig {
   chamferLength: number
   // Informational shell measurements; absent in older configs means disabled.
   shellEnabled?: boolean
+  shellThickness?: number
   // Whether the bridge between the two tangent end sections of each strut is rounded to follow
   // the sphere. Missing in older configs means true.
   roundStrutBridge?: boolean
@@ -112,6 +113,7 @@ export interface DomeState {
   millingDiameter: number
   chamferLength: number
   shellEnabled: boolean
+  shellThickness: number
   roundStrutBridge: boolean
   toleranceLongitudinal: number
   toleranceTransverse: number
@@ -160,6 +162,7 @@ export function serializeConfig(state: DomeState): DomeConfig {
     millingDiameter: state.millingDiameter,
     chamferLength: state.chamferLength,
     shellEnabled: state.shellEnabled,
+    shellThickness: state.shellThickness,
     roundStrutBridge: state.roundStrutBridge,
     toleranceLongitudinal: state.toleranceLongitudinal,
     toleranceTransverse: state.toleranceTransverse,
@@ -235,6 +238,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     millingDiameter: config.millingDiameter,
     chamferLength: config.chamferLength,
     shellEnabled: config.shellEnabled ?? false,
+    shellThickness: typeof config.shellThickness === 'number' && Number.isFinite(config.shellThickness) ? Math.max(0, config.shellThickness) : 2,
     roundStrutBridge: config.roundStrutBridge ?? true,
     toleranceLongitudinal: config.toleranceLongitudinal,
     toleranceTransverse: config.toleranceTransverse,

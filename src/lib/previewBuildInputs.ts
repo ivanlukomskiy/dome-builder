@@ -39,6 +39,7 @@ export interface StrutGeometryEntry {
 }
 
 export interface PreviewBuildInputs {
+  shellVertices: ReadonlyMap<number, THREE.Vector3>
   strutEntries: StrutGeometryEntry[]
   vertices: VertexEdgesInfo[]
   halfWidth: number
@@ -125,7 +126,7 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     }
   })
 
-  prepareShellStruts(strutEntries, params)
+  const { shellVertices } = prepareShellStruts(strutEntries, params)
   resolveBracePlacements(strutEntries, params)
 
   const edgesInfo = computeEdgesInfo({
@@ -146,5 +147,5 @@ export function computePreviewBuildInputs(params: PreviewBuildInputParams): Prev
     chamferLength,
   })
 
-  return { strutEntries, vertices: edgesInfo.vertices, halfWidth }
+  return { strutEntries, vertices: edgesInfo.vertices, halfWidth, shellVertices }
 }

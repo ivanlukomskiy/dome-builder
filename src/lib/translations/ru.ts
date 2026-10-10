@@ -7,6 +7,7 @@ import type { Dictionary } from '../i18n'
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
   "Disable Round bridge to generate the shell.": "Отключите скругление перемычки для построения оболочки.",
+  "Shell thickness (mm)": "Толщина оболочки (мм)",
   "Shell": "Оболочка",
   "Enabled": "Включено",
   "Add labels": "Добавить подписи",

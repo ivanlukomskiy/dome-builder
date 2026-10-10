@@ -143,6 +143,8 @@ interface SidebarProps {
   onMillingDiameterChange: (value: number) => void
   chamferLength: number
   onChamferLengthChange: (value: number) => void
+  shellThickness: number
+  onShellThicknessChange: (value: number) => void
   shellEnabled: boolean
   onShellEnabledChange: (value: boolean) => void
   roundStrutBridge: boolean
@@ -513,6 +515,8 @@ export function Sidebar({
   onMillingDiameterChange,
   chamferLength,
   onChamferLengthChange,
+  shellThickness,
+  onShellThicknessChange,
   shellEnabled,
   onShellEnabledChange,
   roundStrutBridge,
@@ -1204,6 +1208,13 @@ export function Sidebar({
               <input type="checkbox" checked={shellEnabled} disabled={roundStrutBridge} onChange={(e) => onShellEnabledChange(e.target.checked)} />
               {t('Enabled')}
             </label>
+            {shellEnabled && !roundStrutBridge && (
+              <div className="transform-field">
+                <label>{t('Shell thickness (mm)')}</label>
+                <NumberField value={shellThickness} step={0.5} min={0}
+                  clamp={(n) => Number.isFinite(n) ? Math.max(0, n) : 0} onCommit={onShellThicknessChange} />
+              </div>
+            )}
             {roundStrutBridge && <p className="hint">{t('Disable Round bridge to generate the shell.')}</p>}
           </SidebarSection>
           <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>

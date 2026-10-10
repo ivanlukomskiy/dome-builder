@@ -41,6 +41,11 @@ const legacyConfig: LoadableConfig = {
 }
 
 describe('config migration', () => {
+  it.each([0, 2.5])('preserves shell thickness %s through save and load', thickness => {
+    const state = { ...deserializeConfig(legacyConfig), shellThickness: thickness }
+    expect(deserializeConfig(serializeConfig(state)).shellThickness).toBe(thickness)
+  })
+
   it('preserves shell enablement through save and load', () => {
     const state = { ...deserializeConfig(legacyConfig), shellEnabled: true }
     expect(deserializeConfig(serializeConfig(state)).shellEnabled).toBe(true)
@@ -53,6 +58,7 @@ describe('config migration', () => {
     expect(state.sideHoleDiameterInner).toBe(7)
     expect(state.roundStrutBridge).toBe(true)
     expect(state.shellEnabled).toBe(false)
+    expect(state.shellThickness).toBe(2)
     expect(state.vertexFlangeParams.get(42)).toEqual({
       sideHoleDiameterOuter: 9,
       sideHoleDiameterInner: 9,

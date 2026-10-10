@@ -39,6 +39,7 @@ interface ViewportProps {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellThickness: number
   shellEnabled: boolean
   roundStrutBridge: boolean
   toleranceLongitudinal: number
@@ -84,6 +85,7 @@ export function Viewport({
   grooveDepth,
   millingDiameter,
   chamferLength,
+  shellThickness,
   shellEnabled,
   roundStrutBridge,
   toleranceLongitudinal,
@@ -267,6 +269,7 @@ export function Viewport({
           grooveDepth={grooveDepth}
           millingDiameter={millingDiameter}
           chamferLength={chamferLength}
+          shellThickness={shellThickness}
           shellEnabled={shellEnabled}
           roundStrutBridge={roundStrutBridge}
           toleranceLongitudinal={toleranceLongitudinal}
