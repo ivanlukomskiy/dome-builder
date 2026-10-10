@@ -96,9 +96,18 @@ describe('DXF label settings', () => {
   it('defaults old configs to unpacked DXF and preserves sheet settings', () => {
     const state = deserializeConfig(legacyConfig)
     expect(state.dxfSheetSettings.arrangeOnSheet).toBe(false)
+    expect(state.dxfSheetSettings.parts.struts).toBe(true)
+    expect(state.dxfSheetSettings.parts.shell).toBe(true)
     expect(state.dxfSheetSettings.rotationStep).toBe(90)
-    const settings = { arrangeOnSheet: true, width: 2000, height: 1000, margin: 12, spacing: 3, rotationStep: 30 as const }
+    const settings = { parts: { ...state.dxfSheetSettings.parts, struts: false, flanges: false }, arrangeOnSheet: true, width: 2000, height: 1000, margin: 12, spacing: 3, rotationStep: 30 as const }
     expect(deserializeConfig(serializeConfig({ ...state, dxfSheetSettings: settings })).dxfSheetSettings).toEqual(settings)
+  })
+  it('migrates frame/shell category choices to individual parts', () => {
+    const state = deserializeConfig({ ...legacyConfig, dxfSheetSettings: { includeFrameParts: false, includeShellParts: true } })
+    expect(state.dxfSheetSettings.parts).toEqual({ flanges: false, struts: false, braces: false, bracePlates: false, foot: false, shell: true })
+    const partial = deserializeConfig({ ...legacyConfig, dxfSheetSettings: { parts: { foot: false } } })
+    expect(partial.dxfSheetSettings.parts.foot).toBe(false)
+    expect(partial.dxfSheetSettings.parts.struts).toBe(true)
   })
   it('defaults old configs to the original text sizes and preserves custom sizes', () => {
     const state = deserializeConfig(legacyConfig)

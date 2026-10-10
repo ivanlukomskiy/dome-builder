@@ -1,3 +1,4 @@
+import type { PartVisibility } from '../lib/previewParts'
 /// <reference lib="webworker" />
 import * as THREE from 'three'
 import { strutPartLabels, flangePartLabels, footPartLabels, arcPoint2, projectToPlane2D, angleDegOf, pointTuple } from '../lib/partLabels'
@@ -22,6 +23,7 @@ import { bracePlateNameKey, type PartNameMaps } from '../lib/partNames'
 declare const self: DedicatedWorkerGlobalScope
 
 export interface DxfExportRequest {
+  parts?: PartVisibility
   strict?: boolean
   partIdLabelSize: number
   connectedPartIdLabelSize: number
@@ -95,8 +97,8 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     } satisfies DxfExportWorkerMessage)
 
     try {
-      if (req.strict && !boundary.main) throw new Error(`Cannot construct strut ${req.names.struts[job.index]}.`)
-      if (boundary.main) {
+      if (req.parts?.struts !== false && req.strict && !boundary.main) throw new Error(`Cannot construct strut ${req.names.struts[job.index]}.`)
+      if (req.parts?.struts !== false && boundary.main) {
         const labels = strutPartLabels(req, job, boundary)
         const strutPlane = computeStrutPlane(posA, posB, center)
         const endA = projectToPlane2D(posA, strutPlane)
@@ -126,7 +128,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
         const [p, q] = bracePlateEndPoints3D(plane, job.beamThickness, brace, [ends[0], ends[1]])
         bracePoints.push({ braceId: brace.braceId, edgeId: job.index, thickness: brace.params.thickness, points: [p.toArray(), q.toArray()] })
       }
-      if (!plate) continue
+      if (!plate || req.parts?.bracePlates === false) continue
       try {
         parts.push({
           name: req.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)],
@@ -152,7 +154,7 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
       total: req.vertices.length,
     } satisfies DxfExportWorkerMessage)
 
-    for (const side of ['outer', 'inner'] as const satisfies readonly FlangeSide[]) {
+    for (const side of (req.parts?.flanges === false ? [] : ['outer', 'inner'] as const) satisfies readonly FlangeSide[]) {
       const boundary = timed('flangeBoundary2D', () => computeFlangeBoundary2D(
         { vertexId: vertex.vertexId, edges: vertex.edges, foot: vertex.foot },
         flangeParams,
@@ -176,10 +178,10 @@ async function buildDxfParts(req: DxfExportRequest): Promise<{ parts: DxfPart[];
     }
 
     const foot = vertex.foot
-    if (foot) {
+    if (foot && req.parts?.foot !== false) {
       try {
         const boundary = timed('footBoundary2D', () => computeFootPartBoundary2D(foot, req.halfWidth * 2, req.grooveDepth))
-        if (req.strict && !boundary.main) throw new Error('Cannot construct foot outline.')
+        if (req.parts?.struts !== false && req.strict && !boundary.main) throw new Error('Cannot construct foot outline.')
         if (boundary.main) {
           parts.push({
             ...footPartLabels(req, vertex.vertexId),

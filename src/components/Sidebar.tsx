@@ -1255,6 +1255,12 @@ export function Sidebar({
       </SidebarSection>}
       {mode !== 'new' && <SidebarSection id="export" title={t('Export')}>
         <SidebarSection id="export-dxf" title={t('DXF')} defaultOpen={false}>
+          {PREVIEW_PART_KINDS.map(({ kind, label }) => <label className="checkbox-field" key={kind}>
+            <input type="checkbox" checked={dxfSheetSettings.parts[kind]} disabled={exportBusy}
+              onChange={(event) => onDxfSheetSettingsChange({ ...dxfSheetSettings, parts: { ...dxfSheetSettings.parts, [kind]: event.target.checked } })} />
+            {t(label)}
+          </label>)}
+
           <div className="transform-field">
             <label><FieldLabel text={t('Part ID label size (mm)')} /></label>
             <NumberField value={partIdLabelSize} step={0.5} min={0.1} onCommit={onPartIdLabelSizeChange} />
@@ -1297,7 +1303,7 @@ export function Sidebar({
             <Help text={t('Dimensions are in exported millimeters. Margin is measured from the sheet border; spacing is the minimum gap between parts. Parts may be turned by multiples of the rotation step; a finer step packs tighter but takes longer.')} />
           </fieldset>}
           <div className="button-row">
-            <button onClick={onDownloadDxf} disabled={exportBusy}>{t('Download DXF')}</button>
+            <button onClick={onDownloadDxf} disabled={exportBusy || !Object.values(dxfSheetSettings.parts).some(Boolean)}>{t('Download DXF')}</button>
           </div>
           <Help text={dxfSheetSettings.arrangeOnSheet
             ? t("The DXF arranges all parts across as many sheets as needed, one material thickness per sheet. Blue borders are on the SHEETS layer, and each sheet's thickness is written above its top-left corner on the SHEET_THICKNESS layer. Red and green labels stay with their parts.")

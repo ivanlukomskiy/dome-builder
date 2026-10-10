@@ -6,6 +6,11 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  'Select at least one part type to export.': 'Выберите хотя бы один тип деталей для экспорта.',
+  'Frame parts': 'Детали каркаса',
+  'Shell parts': 'Детали оболочки',
+  'Select frame parts or shell parts to export.': 'Выберите детали каркаса или оболочки для экспорта.',
+  'There are no selected parts to export.': 'Нет выбранных деталей для экспорта.',
   'Decouple all': 'Разъединить все',
   'Stitch automatically': 'Сшить автоматически',
   'Decouple seam': 'Разъединить шов',

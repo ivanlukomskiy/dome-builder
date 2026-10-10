@@ -1,7 +1,7 @@
 import type { ShellPanelPose } from './shellLayout'
 import { DEFAULT_STEP_EXPORT_SETTINGS, type StepExportSettings } from './stepExportSettings'
 import { DEFAULT_DXF_LABEL_SETTINGS } from './dxfLabelSettings'
-import { DEFAULT_DXF_SHEET_SETTINGS, type DxfSheetSettings } from './dxfSheetSettings'
+import { restoreDxfSheetSettings, type SavedDxfSheetSettings, type DxfSheetSettings } from './dxfSheetSettings'
 import type { Edge, Face, SceneData, SelectionMode, VertexTransform } from './polyhedra'
 import { DEFAULT_BRACE_PARAMS, type Brace } from './braces'
 import { DEFAULT_FOOT_PARAMS, type FlangeShapeParams, type FootParams } from './flangeGeometry'
@@ -17,7 +17,7 @@ export interface DomeConfig {
   partIdLabelSize?: number
   connectedPartIdLabelSize?: number
   stepExportSettings?: StepExportSettings
-  dxfSheetSettings?: DxfSheetSettings
+  dxfSheetSettings?: SavedDxfSheetSettings
   // The dome's sphere diameter in mm (SceneData.diameter).
   diameter: number
   // Polar coordinates about the origin: [r (mm), azimuth (rad), elevation (rad)] - see PolarCoord.
@@ -232,7 +232,7 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     },
     partIdLabelSize: config.partIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.partIdLabelSize,
     stepExportSettings: { ...DEFAULT_STEP_EXPORT_SETTINGS, ...config.stepExportSettings },
-    dxfSheetSettings: { ...DEFAULT_DXF_SHEET_SETTINGS, ...config.dxfSheetSettings },
+    dxfSheetSettings: restoreDxfSheetSettings(config.dxfSheetSettings),
     connectedPartIdLabelSize: config.connectedPartIdLabelSize ?? DEFAULT_DXF_LABEL_SETTINGS.connectedPartIdLabelSize,
     selectionMode: config.selectionMode,
     extrudeDistance: config.extrudeDistance,

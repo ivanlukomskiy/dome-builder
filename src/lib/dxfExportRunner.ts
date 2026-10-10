@@ -1,3 +1,5 @@
+import { shellDxfParts } from './shellDxf'
+import { flattenShellPanels, type ShellLayout } from './shellLayout'
 import { DEFAULT_DXF_LABEL_SETTINGS, type DxfLabelSettings } from './dxfLabelSettings'
 import { computePreviewBuildInputs, type StrutGeometryEntry } from './previewBuildInputs'
 import type { VertexEdgesInfo } from './edgesInfo'
@@ -74,23 +76,32 @@ function runBatch(
 // Builds a single DXF sheet with the flat 2D outline of every visible strut, flange plate, foot,
 // brace plate and brace (each with its ID as a label in its own color - see dxf.ts), scaled by
 // `params.scale`. Cancellation stops active workers when a signal is provided. Returns null if cancelled.
+export interface RunDxfExportParams extends RunStepExportParams {
+  shellLayout?: ShellLayout
+  shellStitches?: ReadonlySet<number>
+  shellThickness?: number
+}
+
 export async function runDxfExport(
-  params: RunStepExportParams,
+  params: RunDxfExportParams,
   onProgress: (progress: DxfExportProgress | null) => void,
   isCancelled: () => boolean,
   labelSettings: DxfLabelSettings = DEFAULT_DXF_LABEL_SETTINGS,
   sheetSettings: DxfSheetSettings = DEFAULT_DXF_SHEET_SETTINGS,
   signal?: AbortSignal,
 ): Promise<Blob | null> {
+  const selected = sheetSettings.parts
+  if (!Object.values(selected).some(Boolean)) throw new Error('Select at least one part type to export.')
   if (sheetSettings.arrangeOnSheet) validateDxfSheetSettings(sheetSettings)
   const startedAt = performance.now()
   const profiling = exportProfilingEnabled()
   const batchProfiles: ExportBatchProfile[] = []
-  const { strutEntries, vertices, halfWidth } = computePreviewBuildInputs(params)
+  const { strutEntries, vertices, halfWidth, shellVertices } = computePreviewBuildInputs(params)
   const names = buildExportPartNames(params, strutEntries, vertices)
 
   const shared: Shared = {
     ...labelSettings,
+    parts: selected,
     halfWidth,
     endGrooveLengthPercent: params.endGrooveLengthPercent,
     midGrooveLengthPercent: params.midGrooveLengthPercent,
@@ -107,78 +118,89 @@ export async function runDxfExport(
   const parts: DxfPart[] = []
   const bracePoints: BracePoints[] = []
 
-  const strutBatches = chunk(strutEntries, BATCH_SIZE)
-  const strutResults = await runExportBatches(
-    strutBatches,
-    strutEntries.length,
-    (batch, i, report) => runBatch(batch, [], shared, i + 1, report, signal),
-    (done, total) => onProgress({ phase: 'struts', done, total }),
-    (batch, err) => {
-      if (sheetSettings.arrangeOnSheet) throw err
-      console.error(`Failed to build DXF outlines for struts ${batch.map((job) => job.index).join(', ')}`, err)
-    },
-    isCancelled,
-  )
-  if (!strutResults) return null
-  for (const [i, result] of strutResults.entries()) {
-    if (!result) continue
-    parts.push(...result.parts)
-    bracePoints.push(...result.bracePoints)
-    if (profiling && result.profile) batchProfiles.push({
-      phase: 'struts', items: strutBatches[i].length,
-      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
-      worker: result.profile,
-    })
+  if (selected.struts || selected.braces || selected.bracePlates || selected.flanges || selected.foot) {
+    const strutBatches = chunk(selected.struts || selected.braces || selected.bracePlates ? strutEntries : [], BATCH_SIZE)
+    const strutResults = await runExportBatches(
+      strutBatches,
+      strutEntries.length,
+      (batch, i, report) => runBatch(batch, [], shared, i + 1, report, signal),
+      (done, total) => onProgress({ phase: 'struts', done, total }),
+      (batch, err) => {
+        if (sheetSettings.arrangeOnSheet) throw err
+        console.error(`Failed to build DXF outlines for struts ${batch.map((job) => job.index).join(', ')}`, err)
+      },
+      isCancelled,
+    )
+    if (!strutResults) return null
+    for (const [i, result] of strutResults.entries()) {
+      if (!result) continue
+      parts.push(...result.parts)
+      bracePoints.push(...result.bracePoints)
+      if (profiling && result.profile) batchProfiles.push({
+        phase: 'struts', items: strutBatches[i].length,
+        createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+        worker: result.profile,
+      })
+    }
+
+    const vertexBatches = chunk(selected.flanges || selected.foot ? vertices : [], BATCH_SIZE)
+    const vertexResults = await runExportBatches(
+      vertexBatches,
+      vertices.length,
+      (batch, i, report) => runBatch([], batch, shared, strutBatches.length + i + 1, report, signal),
+      (done, total) => onProgress({ phase: 'flanges', done, total }),
+      (batch, err) => {
+        if (sheetSettings.arrangeOnSheet) throw err
+        console.error(`Failed to build DXF outlines for flanges of vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
+      },
+      isCancelled,
+    )
+    if (!vertexResults) return null
+    for (const [i, result] of vertexResults.entries()) {
+      if (!result) continue
+      parts.push(...result.parts)
+      if (profiling && result.profile) batchProfiles.push({
+        phase: 'flanges', items: vertexBatches[i].length,
+        createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+        worker: result.profile,
+      })
+    }
+
+    if (isCancelled()) return null
+    const bodies = selected.braces ? pairBracePoints(bracePoints) : []
+    onProgress({ phase: 'braces', done: 0, total: bodies.length })
+
+    // A brace's body is the flat quad through its four plate end points - no WASM needed for that.
+    for (const [index, body] of bodies.entries()) {
+      if (isCancelled()) return null
+      const frame = braceQuadFrame(body.a, body.b)
+      if (!frame) {
+        if (sheetSettings.arrangeOnSheet) throw new Error(`Cannot construct brace ${names.braces[body.braceId]}.`)
+        continue
+      }
+      parts.push({
+        ...bracePartLabels(body, names, labelSettings),
+        kind: 'brace',
+        thickness: body.thickness,
+        loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
+      })
+      onProgress({ phase: 'braces', done: index + 1, total: bodies.length })
+    }
   }
 
-  const vertexBatches = chunk(vertices, BATCH_SIZE)
-  const vertexResults = await runExportBatches(
-    vertexBatches,
-    vertices.length,
-    (batch, i, report) => runBatch([], batch, shared, strutBatches.length + i + 1, report, signal),
-    (done, total) => onProgress({ phase: 'flanges', done, total }),
-    (batch, err) => {
-      if (sheetSettings.arrangeOnSheet) throw err
-      console.error(`Failed to build DXF outlines for flanges of vertices ${batch.map((v) => v.vertexId).join(', ')}`, err)
-    },
-    isCancelled,
-  )
-  if (!vertexResults) return null
-  for (const [i, result] of vertexResults.entries()) {
-    if (!result) continue
-    parts.push(...result.parts)
-    if (profiling && result.profile) batchProfiles.push({
-      phase: 'flanges', items: vertexBatches[i].length,
-      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
-      worker: result.profile,
-    })
+  if (selected.shell && params.shellEnabled && !params.roundStrutBridge) {
+    parts.push(...shellDxfParts(flattenShellPanels(params.data, shellVertices), params.shellLayout ?? new Map(),
+      params.shellStitches ?? new Set(), names.struts, params.shellThickness ?? 2, labelSettings))
   }
 
   if (isCancelled()) return null
-  const bodies = pairBracePoints(bracePoints)
-  onProgress({ phase: 'braces', done: 0, total: bodies.length })
-
-  // A brace's body is the flat quad through its four plate end points - no WASM needed for that.
-  for (const [index, body] of bodies.entries()) {
-    if (isCancelled()) return null
-    const frame = braceQuadFrame(body.a, body.b)
-    if (!frame) {
-      if (sheetSettings.arrangeOnSheet) throw new Error(`Cannot construct brace ${names.braces[body.braceId]}.`)
-      continue
-    }
-    parts.push({
-      ...bracePartLabels(body, names, labelSettings),
-      kind: 'brace',
-      thickness: body.thickness,
-      loops: [{ closed: true, vertices: braceQuadPoints2D(frame).map(([x, y]) => ({ x, y, bulge: 0 })) }],
-    })
-    onProgress({ phase: 'braces', done: index + 1, total: bodies.length })
-  }
 
   const layoutStart = performance.now()
   const options = { scale: params.scale, partIdLabelSize: labelSettings.partIdLabelSize }
-  const orientedParts = parts.map(orientDxfStrut)
-  if (sheetSettings.arrangeOnSheet) onProgress({ phase: 'packing', done: 0, total: parts.length })
+  const kinds = { strut: 'struts', flange: 'flanges', foot: 'foot', 'brace-plate': 'bracePlates', brace: 'braces', shell: 'shell' } as const
+  const orientedParts = parts.filter(part => selected[kinds[part.kind]]).map(orientDxfStrut)
+  if (!orientedParts.length) throw new Error('There are no selected parts to export.')
+  if (sheetSettings.arrangeOnSheet) onProgress({ phase: 'packing', done: 0, total: orientedParts.length })
   const layout = sheetSettings.arrangeOnSheet
     ? await runDxfNesting({ parts: orientedParts, options, settings: sheetSettings }, (done, total) => onProgress({ phase: 'packing', done, total }), isCancelled)
     : { parts: layoutDxfParts(orientedParts, options), sheets: [] }

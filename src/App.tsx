@@ -1055,7 +1055,7 @@ function App() {
     const controller = beginExport('dxf')
     if (!controller) return
     try {
-      const blob = await runDxfExport(buildExportParams(), (progress) => updateExportProgress(controller, progress), () => controller.signal.aborted, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings, controller.signal)
+      const blob = await runDxfExport({ ...buildExportParams(), shellLayout, shellStitches, shellThickness: appliedPreviewParams.shellThickness }, (progress) => updateExportProgress(controller, progress), () => controller.signal.aborted, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings, controller.signal)
       if (blob && !controller.signal.aborted) {
         downloadBlob(blob, 'dome-parts.dxf')
         finishExport(controller)
