@@ -859,7 +859,7 @@ export function computeStrutBoundary2D(
     for (const [end, vertex] of [["A", a], ["B", b]] as const) {
       const point = lineIntersection2D(center, sub2(vertex, center), arcEnds.extA, sub2(arcEnds.extB, arcEnds.extA));
       if (point && point.every(Number.isFinite)) {
-        addHelperPoint(point, `outer bridge × radius ${end}`, "#4ade80");
+        addHelperPoint(point, `shell vertex ${end}`, "#4ade80");
       }
     }
   }
