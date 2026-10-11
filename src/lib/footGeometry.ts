@@ -72,36 +72,55 @@ export function computeFootPartBoundary2D(
     return { main: null, holes: [] }
   }
 
-  let main = draw()
-    .movePointerTo([halfTabX, -halfTotalY + tabChamfer])
-    .vLineTo(-halfBodyY)
-    .hLineTo(halfBodyX)
-    .vLineTo(-halfStrutY + rectChamfer)
-    .lineTo([halfBodyX + rectChamfer, -halfStrutY])
-    .hLineTo(straightEndX)
-    .threePointsArcTo([straightEndX, halfStrutY], [straightEndX + halfStrutY, 0])
-    .hLineTo(halfBodyX + rectChamfer)
-    .lineTo([halfBodyX, halfStrutY - rectChamfer])
-    .vLineTo(halfBodyY)
-    .hLineTo(halfTabX)
-    .vLineTo(halfTotalY - tabChamfer)
-    .lineTo([halfTabX - tabChamfer, halfTotalY])
-    .hLineTo(-halfTabX + tabChamfer)
-    .lineTo([-halfTabX, halfTotalY - tabChamfer])
-    .vLineTo(halfBodyY)
-    .hLineTo(-halfBodyX)
-    .vLineTo(halfStrutY - rectChamfer)
-    .lineTo([-halfBodyX - rectChamfer, halfStrutY])
-    .hLineTo(-straightEndX)
-    .threePointsArcTo([-straightEndX, -halfStrutY], [-straightEndX - halfStrutY, 0])
-    .hLineTo(-halfBodyX - rectChamfer)
-    .lineTo([-halfBodyX, -halfStrutY + rectChamfer])
-    .vLineTo(-halfBodyY)
-    .hLineTo(-halfTabX)
-    .vLineTo(-halfTotalY + tabChamfer)
-    .lineTo([-halfTabX + tabChamfer, -halfTotalY])
-    .hLineTo(halfTabX - tabChamfer)
-    .close()
+  const start: Point2D = [halfTabX, -halfTotalY + tabChamfer]
+  const pen = draw().movePointerTo(start)
+  let current = start
+  // Chamfers can consume an entire edge (or be zero). Do not hand the CAD
+  // kernel duplicate endpoints, which it cannot turn into a segment.
+  const lineTo = (point: Point2D) => {
+    if (Math.hypot(point[0] - current[0], point[1] - current[1]) > 1e-9) {
+      pen.lineTo(point)
+      current = point
+    }
+  }
+  const linesTo = (points: Point2D[]) => points.forEach(lineTo)
+
+  linesTo([
+    [halfTabX, -halfBodyY],
+    [halfBodyX, -halfBodyY],
+    [halfBodyX, -halfStrutY + rectChamfer],
+    [halfBodyX + rectChamfer, -halfStrutY],
+    [straightEndX, -halfStrutY],
+  ])
+  pen.threePointsArcTo([straightEndX, halfStrutY], [straightEndX + halfStrutY, 0])
+  current = [straightEndX, halfStrutY]
+  linesTo([
+    [halfBodyX + rectChamfer, halfStrutY],
+    [halfBodyX, halfStrutY - rectChamfer],
+    [halfBodyX, halfBodyY],
+    [halfTabX, halfBodyY],
+    [halfTabX, halfTotalY - tabChamfer],
+    [halfTabX - tabChamfer, halfTotalY],
+    [-halfTabX + tabChamfer, halfTotalY],
+    [-halfTabX, halfTotalY - tabChamfer],
+    [-halfTabX, halfBodyY],
+    [-halfBodyX, halfBodyY],
+    [-halfBodyX, halfStrutY - rectChamfer],
+    [-halfBodyX - rectChamfer, halfStrutY],
+    [-straightEndX, halfStrutY],
+  ])
+  pen.threePointsArcTo([-straightEndX, -halfStrutY], [-straightEndX - halfStrutY, 0])
+  current = [-straightEndX, -halfStrutY]
+  linesTo([
+    [-halfBodyX - rectChamfer, -halfStrutY],
+    [-halfBodyX, -halfStrutY + rectChamfer],
+    [-halfBodyX, -halfBodyY],
+    [-halfTabX, -halfBodyY],
+    [-halfTabX, -halfTotalY + tabChamfer],
+    [-halfTabX + tabChamfer, -halfTotalY],
+    [halfTabX - tabChamfer, -halfTotalY],
+  ])
+  let main = pen.close()
 
   const holes: DxfHoleMark[] = []
   if (foot.holeDiameter > 0) {
