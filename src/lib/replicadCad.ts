@@ -191,8 +191,20 @@ export function deserializeStepAssemblyParts(parts: { name: string; brep: string
 }
 
 export function buildStepAssembly(shapes: StepAssemblyShape[]): Blob {
-  return exportSTEP(shapes.map(({ name, shape }) => ({ name, shape })))
+  // Preview uses +Y up. Rotate the complete assembly into CAD's +Z-up
+  // frame: (x, y, z) -> (x, -z, y), preserving handedness and placement.
+  // Clone first: callers still own and dispose the preview-space solids.
+  const oriented: StepAssemblyShape[] = []
+  try {
+    for (const { name, shape } of shapes) {
+      oriented.push({ name, shape: shape.clone().rotate(90, [0, 0, 0], [1, 0, 0]) })
+    }
+    return exportSTEP(oriented)
+  } finally {
+    for (const { shape } of oriented) shape.delete()
+  }
 }
+
 
 // Meshes an arbitrary flat `Drawing` (e.g. from replicad's own `draw()`/boolean-op primitives -
 // see strutGeometry.ts and the "Strut Shape Debug" tool) directly, without extruding: puts
