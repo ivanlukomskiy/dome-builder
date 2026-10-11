@@ -41,7 +41,7 @@ export function ShellWorkspace({ params, layout, stitches, actionsRef, onLayoutC
   const [view, setView] = useState<Frame | null>(null)
   const [size, setSize] = useState({ width: 1000, height: 800 })
   const computed = useMemo(() => {
-    if (!params.shellEnabled || params.roundStrutBridge) return { panels: [], error: null }
+    if (!params.shellEnabled || (params.roundStrutBridge && !params.shellFlexible)) return { panels: [], error: null }
     try {
       const { shellVertices } = computePreviewBuildInputs(params)
       return { panels: flattenShellPanels(params.data, shellVertices), error: null }
@@ -231,8 +231,8 @@ export function ShellWorkspace({ params, layout, stitches, actionsRef, onLayoutC
         })()}
       </svg>
       {stitchError && <div className="shell-stitch-error" role="status" onClick={() => setStitchError(null)}>{t(stitchError)}</div>}
-      {(!params.shellEnabled || params.roundStrutBridge || error || !panels.length) && <div className="shell-message" role="status">
-        {error ?? (params.roundStrutBridge ? t('Disable Round bridge to generate the shell.') : !params.shellEnabled ? t('Enable Shell in Dome geometry to arrange panels.') : t('No triangular shell faces to arrange.'))}
+      {(!params.shellEnabled || (params.roundStrutBridge && !params.shellFlexible) || error || !panels.length) && <div className="shell-message" role="status">
+        {error ?? ((params.roundStrutBridge && !params.shellFlexible) ? t('Disable Round bridge to generate the shell.') : !params.shellEnabled ? t('Enable Shell in Dome geometry to arrange panels.') : t('No triangular shell faces to arrange.'))}
       </div>}
     </div>
   )

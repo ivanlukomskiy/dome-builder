@@ -33,7 +33,9 @@ export function shellEdgeLabels(panel: ShellPanel, strutNames: Readonly<Record<n
 }
 
 /** A stitched assembly is a single packing unit, so nesting cannot separate its panels. */
-export function shellDxfParts(panels: ShellPanel[], saved: ShellLayout, stitches: ReadonlySet<number>, strutNames: Readonly<Record<number, string>>, thickness: number, labels: DxfLabelSettings): DxfPart[] {
+export function shellDxfParts(panels: ShellPanel[], saved: ShellLayout, stitches: ReadonlySet<number>, strutNames: Readonly<Record<number, string>>, thickness: number, labels: DxfLabelSettings, scale = 1): DxfPart[] {
+  panels = panels.map(panel => ({ ...panel, points: panel.points.map(([x, y]) => [x * scale, y * scale]) }))
+  saved = new Map([...saved].map(([id, pose]) => [id, { ...pose, x: pose.x * scale, y: pose.y * scale }]))
   const poses = resolveShellLayout(panels, saved), seen = new Set<number>(), parts: DxfPart[] = []
   for (const root of [...panels].sort((a, b) => parseInt(a.label) - parseInt(b.label))) {
     if (seen.has(root.faceId)) continue

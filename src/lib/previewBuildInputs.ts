@@ -65,6 +65,7 @@ export interface PreviewBuildInputParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellFlexible?: boolean
   shellEnabled?: boolean
   roundStrutBridge: boolean
 }

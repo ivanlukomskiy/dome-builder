@@ -136,6 +136,8 @@ interface DomeMeshProps {
   millingDiameter: number
   chamferLength: number
   shellThickness: number
+  shellExportScale: number
+  shellFlexible: boolean
   shellEnabled: boolean
   roundStrutBridge: boolean
   toleranceLongitudinal: number
@@ -182,6 +184,8 @@ export function DomeMesh({
   millingDiameter,
   chamferLength,
   shellThickness,
+  shellExportScale,
+  shellFlexible,
   shellEnabled,
   roundStrutBridge,
   toleranceLongitudinal,
@@ -302,6 +306,7 @@ export function DomeMesh({
           millingDiameter,
           chamferLength,
           roundStrutBridge,
+          shellFlexible,
           shellEnabled,
         }),
       )
@@ -642,7 +647,7 @@ export function DomeMesh({
             allPieces.push(...part.pieces)
           }
         })
-        const nextShellGeometry = buildShellGeometry(data.faces, inputs.shellVertices, shellThickness)
+        const nextShellGeometry = buildShellGeometry(data.faces, inputs.shellVertices, shellFlexible ? 0 : shellThickness)
         const merged = timedMain('buildColoredGeometry + mergeGeometries', () => {
           const result: Partial<Record<PreviewPartKind, THREE.BufferGeometry>> = {}
           for (const { kind } of PREVIEW_PART_KINDS) {
@@ -706,6 +711,7 @@ export function DomeMesh({
     millingDiameter,
     chamferLength,
     roundStrutBridge,
+    shellFlexible,
     shellEnabled,
     shellThickness,
     toleranceLongitudinal,
@@ -786,7 +792,7 @@ export function DomeMesh({
         </lineSegments>
       )}
       {mode === 'preview' && shellGeometry && (
-        <mesh geometry={shellGeometry} visible={partVisibility.shell}>
+        <mesh geometry={shellGeometry} visible={partVisibility.shell} scale={shellFlexible ? shellExportScale / 100 : 1}>
           <meshStandardMaterial color={SHELL_COLOR} side={THREE.DoubleSide} roughness={0.65} />
         </mesh>
       )}

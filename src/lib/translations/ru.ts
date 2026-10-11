@@ -6,6 +6,10 @@ import type { Dictionary } from '../i18n'
 // Glossary: strut = балка, edge = ребро, vertex = вершина, face = грань, hub = узел, brace = раскос,
 // flange = фланец, groove = паз, tenon = шип, chamfer = фаска, milling = фрезеровка.
 export const ru: Dictionary = {
+  'Adds width to the struts so the shell vertices at each joint converge to a single point.': 'Увеличивает ширину балок, чтобы вершины оболочки в каждом узле сходились в одной точке.',
+  'Shown as a surface and excluded from STEP exports. The shell may not fit the struts perfectly; use Scale to compensate. Scale uniformly scales the shell around the sphere center in preview and scales the panel triangles in DXF exports.': 'Отображается как поверхность и не включается в экспорт STEP. Оболочка может не идеально прилегать к балкам; используйте масштаб для компенсации. Масштаб равномерно изменяет размер оболочки относительно центра сферы в предпросмотре и размер треугольников панелей при экспорте DXF.',
+  'Rigid shell': 'Жёсткая оболочка',
+  'Flexible shell': 'Гибкая оболочка',
   'Select at least one part type to export.': 'Выберите хотя бы один тип деталей для экспорта.',
   'Frame parts': 'Детали каркаса',
   'Shell parts': 'Детали оболочки',

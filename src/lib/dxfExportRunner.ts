@@ -79,6 +79,7 @@ function runBatch(
 export interface RunDxfExportParams extends RunStepExportParams {
   shellLayout?: ShellLayout
   shellStitches?: ReadonlySet<number>
+  shellExportScale?: number
   shellThickness?: number
 }
 
@@ -188,9 +189,9 @@ export async function runDxfExport(
     }
   }
 
-  if (selected.shell && params.shellEnabled && !params.roundStrutBridge) {
+  if (selected.shell && params.shellEnabled && (params.shellFlexible || !params.roundStrutBridge)) {
     parts.push(...shellDxfParts(flattenShellPanels(params.data, shellVertices), params.shellLayout ?? new Map(),
-      params.shellStitches ?? new Set(), names.struts, params.shellThickness ?? 2, labelSettings))
+      params.shellStitches ?? new Set(), names.struts, params.shellFlexible ? 0 : params.shellThickness ?? 2, labelSettings, params.shellFlexible ? (params.shellExportScale ?? 100) / 100 : 1))
   }
 
   if (isCancelled()) return null

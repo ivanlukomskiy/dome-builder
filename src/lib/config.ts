@@ -47,6 +47,8 @@ export interface DomeConfig {
   millingDiameter: number
   chamferLength: number
   // Informational shell measurements; absent in older configs means disabled.
+  shellFlexible?: boolean
+  shellExportScale?: number
   shellEnabled?: boolean
   shellThickness?: number
   shellStitches?: number[]
@@ -115,6 +117,8 @@ export interface DomeState {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellFlexible: boolean
+  shellExportScale: number
   shellEnabled: boolean
   shellThickness: number
   shellStitches: ReadonlySet<number>
@@ -166,6 +170,8 @@ export function serializeConfig(state: DomeState): DomeConfig {
     grooveDepth: state.grooveDepth,
     millingDiameter: state.millingDiameter,
     chamferLength: state.chamferLength,
+    shellFlexible: state.shellFlexible,
+    shellExportScale: state.shellExportScale,
     shellEnabled: state.shellEnabled,
     shellThickness: state.shellThickness,
     shellStitches: [...state.shellStitches],
@@ -244,6 +250,8 @@ export function deserializeConfig(config: LoadableDomeConfig): DomeState {
     grooveDepth: config.grooveDepth,
     millingDiameter: config.millingDiameter,
     chamferLength: config.chamferLength,
+    shellFlexible: config.shellFlexible ?? false,
+    shellExportScale: typeof config.shellExportScale === 'number' && Number.isFinite(config.shellExportScale) && config.shellExportScale > 0 ? config.shellExportScale : 100,
     shellEnabled: config.shellEnabled ?? false,
     shellStitches: new Set((config.shellStitches ?? []).filter(Number.isInteger)),
     shellLayout: new Map((config.shellLayout ?? []).filter(([id, pose]) =>

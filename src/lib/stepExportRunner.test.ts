@@ -56,8 +56,8 @@ it('does not start any workers after cancellation', async () => {
   expect(Worker).not.toHaveBeenCalled()
 })
 
-it.each([[true, false, 1], [false, false, 0], [true, true, 0]] as const)(
-  'includes shell files only with shell enabled=%s and round bridge=%s', async (shellEnabled, roundStrutBridge, count) => {
+it.each([[true, false, false, 1], [false, false, false, 0], [true, true, false, 0], [true, false, true, 0], [true, true, true, 0]] as const)(
+  'includes shell files only with shell enabled=%s and round bridge=%s and flexible=%s', async (shellEnabled, roundStrutBridge, shellFlexible, count) => {
     const requests: StepExportRequest[] = []
     // The prepared shell vertices must be used rather than the unscaled scene vertices.
     const { Vector3 } = await import('three')
@@ -77,7 +77,7 @@ it.each([[true, false, 1], [false, false, 0], [true, true, 0]] as const)(
       }
       terminate() {}
     })
-    const params = { shellEnabled, roundStrutBridge, shellThickness: 3,
+    const params = { shellEnabled, roundStrutBridge, shellFlexible, shellThickness: 3,
       data: { faces: new Map([[7, [0, 1, 2]]]), edges: new Map([[10, [0, 1]], [20, [1, 2]], [30, [2, 0]]]) },
     } as unknown as RunStepExportParams
     const blob = await runStepExport(params, vi.fn(), () => false)

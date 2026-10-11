@@ -31,13 +31,13 @@ function fixture(): PreviewBuildInputParams {
 }
 
 describe('uniform shell preparation', () => {
-  it('makes actual strut shell vertices coincide at every hub, with nonnegative minimal thickness', () => {
-    const params = fixture()
+  it.each([false, true])('constructs shell vertices from actual strut ends (flexible=%s)', shellFlexible => {
+    const params = { ...fixture(), shellFlexible }
     const { strutEntries } = computePreviewBuildInputs(params)
     const { scale, shellVertices } = prepareShellStruts(strutEntries, params)
     expect(scale).toBeGreaterThan(0)
     expect(Math.min(...strutEntries.flatMap(e => [e.addedThicknessA!, e.addedThicknessB!]))).toBeCloseTo(0, 7)
-    const observed = new Map<number, THREE.Vector3>()
+    const observed = new Map<number, THREE.Vector3[]>()
     for (const entry of strutEntries) {
       expect(entry.addedThicknessA).toBeGreaterThanOrEqual(0)
       expect(entry.addedThicknessB).toBeGreaterThanOrEqual(0)
@@ -54,11 +54,26 @@ describe('uniform shell preparation', () => {
       for (const [end, id] of [['A', entry.vertexA], ['B', entry.vertexB]] as const) {
         const local = result.helpers.find(h => h.name === `shell vertex ${end}`)!.drawing.boundingBox.center
         const point = plane.origin.clone().addScaledVector(plane.xDir, local[0]).addScaledVector(y, local[1])
-        expect(point.distanceTo(shellVertices.get(id)!)).toBeLessThan(1e-5)
-        if (observed.has(id)) expect(point.distanceTo(observed.get(id)!)).toBeLessThan(1e-5)
-        observed.set(id, point)
+        if (!shellFlexible) expect(point.distanceTo(shellVertices.get(id)!)).toBeLessThan(1e-5)
+        observed.set(id, [...(observed.get(id) ?? []), point])
       }
     }
+    for (const [id, points] of observed) {
+      const mean = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).divideScalar(points.length)
+      expect(mean.distanceTo(shellVertices.get(id)!)).toBeLessThan(1e-5)
+    }
+    if (shellFlexible) expect(strutEntries.every(e => e.addedThicknessA === 0 && e.addedThicknessB === 0)).toBe(true)
+  })
+
+  it('creates flexible shell vertices with round strut bridges and zero added thickness', () => {
+    const params = { ...fixture(), shellFlexible: true }
+    const straight = computePreviewBuildInputs(params)
+    const round = computePreviewBuildInputs({ ...params, roundStrutBridge: true })
+    expect(round.shellVertices.size).toBeGreaterThan(0)
+    for (const [id, point] of round.shellVertices) {
+      expect(point.distanceTo(straight.shellVertices.get(id)!)).toBeLessThan(1e-5)
+    }
+    expect(round.strutEntries.every(e => e.addedThicknessA === 0 && e.addedThicknessB === 0)).toBe(true)
   })
 
   it.each([{ shellEnabled: false, roundStrutBridge: false }, { shellEnabled: true, roundStrutBridge: true }])

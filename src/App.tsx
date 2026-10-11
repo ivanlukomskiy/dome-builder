@@ -86,6 +86,7 @@ export interface PreviewShapeParams {
   grooveDepth: number
   millingDiameter: number
   chamferLength: number
+  shellFlexible: boolean
   shellEnabled: boolean
   shellThickness: number
   roundStrutBridge: boolean
@@ -153,14 +154,14 @@ type DomeDocument = Omit<DomeState, 'selectionMode'> & {
 function previewParamsFrom(state: Omit<DomeState, 'selectionMode'>): PreviewShapeParams {
   const {
     extrudeDistance, thickness, cornerLength, offsetModifier, endGrooveLengthPercent,
-    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge, shellEnabled, shellThickness,
+    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge, shellEnabled, shellFlexible, shellThickness,
     toleranceLongitudinal, toleranceTransverse, centerHoleDiameter, sideHoleDiameterOuter,
     sideHoleDiameterInner, sideHoleDiameterOffset, overshoot, minSide,
     flangeMillingDiameter, footParams,
   } = state
   return {
     extrudeDistance, thickness, cornerLength, offsetModifier, endGrooveLengthPercent,
-    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge, shellEnabled, shellThickness,
+    midGrooveLengthPercent, grooveDepth, millingDiameter, chamferLength, roundStrutBridge, shellEnabled, shellFlexible, shellThickness,
     toleranceLongitudinal, toleranceTransverse, centerHoleDiameter, sideHoleDiameterOuter,
     sideHoleDiameterInner, sideHoleDiameterOffset, overshoot, minSide,
     flangeMillingDiameter, footParams,
@@ -183,6 +184,8 @@ function createDocument(initial: DomeState | null, sceneData = initial?.sceneDat
     grooveDepth: initial?.grooveDepth ?? DEFAULT_GROOVE_DEPTH,
     millingDiameter: initial?.millingDiameter ?? DEFAULT_MILLING_DIAMETER,
     chamferLength: initial?.chamferLength ?? DEFAULT_CHAMFER_LENGTH,
+    shellFlexible: initial?.shellFlexible ?? false,
+    shellExportScale: initial?.shellExportScale ?? 100,
     shellEnabled: initial?.shellEnabled ?? false,
     shellThickness: initial?.shellThickness ?? 2,
     shellStitches: new Set(initial?.shellStitches ?? []),
@@ -295,8 +298,10 @@ function App() {
     millingDiameter,
     chamferLength,
     roundStrutBridge,
+    shellFlexible,
     shellEnabled,
     shellThickness,
+    shellExportScale,
     shellLayout,
     shellStitches,
     toleranceLongitudinal,
@@ -846,7 +851,9 @@ function App() {
       millingDiameter,
       chamferLength,
       roundStrutBridge,
+      shellFlexible,
       shellEnabled,
+      shellExportScale,
       shellThickness,
       shellLayout,
       shellStitches,
@@ -887,7 +894,9 @@ function App() {
     millingDiameter,
     chamferLength,
     roundStrutBridge,
+    shellFlexible,
     shellEnabled,
+    shellExportScale,
     shellThickness,
     shellLayout,
     shellStitches,
@@ -969,6 +978,7 @@ function App() {
       millingDiameter: appliedPreviewParams.millingDiameter,
       chamferLength: appliedPreviewParams.chamferLength,
       roundStrutBridge: appliedPreviewParams.roundStrutBridge,
+      shellFlexible: appliedPreviewParams.shellFlexible,
       shellEnabled: appliedPreviewParams.shellEnabled,
       shellThickness: appliedPreviewParams.shellThickness,
       flangeParams: {
@@ -1056,7 +1066,7 @@ function App() {
     const controller = beginExport('dxf')
     if (!controller) return
     try {
-      const blob = await runDxfExport({ ...buildExportParams(), shellLayout, shellStitches, shellThickness: appliedPreviewParams.shellThickness }, (progress) => updateExportProgress(controller, progress), () => controller.signal.aborted, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings, controller.signal)
+      const blob = await runDxfExport({ ...buildExportParams(), shellLayout, shellStitches, shellExportScale, shellThickness: appliedPreviewParams.shellThickness }, (progress) => updateExportProgress(controller, progress), () => controller.signal.aborted, { partIdLabelSize, connectedPartIdLabelSize }, dxfSheetSettings, controller.signal)
       if (blob && !controller.signal.aborted) {
         downloadBlob(blob, 'dome-parts.dxf')
         finishExport(controller)
@@ -1168,6 +1178,10 @@ function App() {
         onShellThicknessChange={setShellThickness}
         shellEnabled={shellEnabled}
         onShellEnabledChange={setShellEnabled}
+        shellFlexible={shellFlexible}
+        onShellModeChange={(value) => documentHistory.commit(prev => ({ ...prev, shellEnabled: value !== 'off', shellFlexible: value === 'flexible' }))}
+        shellExportScale={shellExportScale}
+        onShellExportScaleChange={(value) => setDocumentField('shellExportScale', value)}
         roundStrutBridge={roundStrutBridge}
         onRoundStrutBridgeChange={setRoundStrutBridge}
         toleranceLongitudinal={toleranceLongitudinal}
@@ -1232,6 +1246,8 @@ function App() {
         millingDiameter={appliedPreviewParams.millingDiameter}
         chamferLength={appliedPreviewParams.chamferLength}
         shellThickness={appliedPreviewParams.shellThickness}
+        shellExportScale={shellExportScale}
+        shellFlexible={appliedPreviewParams.shellFlexible}
         shellEnabled={appliedPreviewParams.shellEnabled}
         roundStrutBridge={appliedPreviewParams.roundStrutBridge}
         toleranceLongitudinal={appliedPreviewParams.toleranceLongitudinal}

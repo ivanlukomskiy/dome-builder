@@ -14,6 +14,16 @@ const names = { 10: '5', 20: '6.', 30: '7', 40: '8', 50: '9.' }
 const poses = resolveShellLayout(panels, new Map([[7, { x: 100, y: -150, rotation: 37 }]]))
 
 describe('shell DXF', () => {
+  it('scales stitched triangle geometry without changing the source panels', () => {
+    const joined = toggleShellStitch(panels, poses, new Set(), 20, 7)
+    const original = shellDxfParts(panels, joined.layout, joined.stitches, names, 2, DEFAULT_DXF_LABEL_SETTINGS)
+    const scaled = shellDxfParts(panels, joined.layout, joined.stitches, names, 2, DEFAULT_DXF_LABEL_SETTINGS, 0.8)
+    original[0].loops.forEach((loop, i) => loop.vertices.forEach((vertex, j) => {
+      expect(scaled[0].loops[i].vertices[j].x).toBeCloseTo(vertex.x * 0.8)
+      expect(scaled[0].loops[i].vertices[j].y).toBeCloseTo(vertex.y * 0.8)
+    }))
+    expect(flattenShellPanels(data, vertices)).toEqual(panels)
+  })
   it('exports individual panels when decoupled and one rigid packing unit when stitched', () => {
     expect(shellDxfParts(panels, poses, new Set(), names, 0, DEFAULT_DXF_LABEL_SETTINGS)).toHaveLength(2)
     const joined = toggleShellStitch(panels, poses, new Set(), 20, 7)

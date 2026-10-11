@@ -148,6 +148,10 @@ interface SidebarProps {
   onChamferLengthChange: (value: number) => void
   shellThickness: number
   onShellThicknessChange: (value: number) => void
+  shellFlexible: boolean
+  shellExportScale: number
+  onShellModeChange: (value: 'off' | 'rigid' | 'flexible') => void
+  onShellExportScaleChange: (value: number) => void
   shellEnabled: boolean
   onShellEnabledChange: (value: boolean) => void
   roundStrutBridge: boolean
@@ -528,7 +532,10 @@ export function Sidebar({
   shellThickness,
   onShellThicknessChange,
   shellEnabled,
-  onShellEnabledChange,
+  shellFlexible,
+  shellExportScale,
+  onShellModeChange,
+  onShellExportScaleChange,
   roundStrutBridge,
   onRoundStrutBridgeChange,
   toleranceLongitudinal,
@@ -1027,10 +1034,10 @@ export function Sidebar({
       </SidebarSection>}
       {mode === 'shell' && <SidebarSection id="shell-workspace" title={t('Shell layout')}>
         <div className="button-row">
-          <button onClick={onDecoupleAllShellPanels} disabled={!shellEnabled || roundStrutBridge}>{t('Decouple all')}</button>
+          <button onClick={onDecoupleAllShellPanels} disabled={!shellEnabled || (roundStrutBridge && !shellFlexible)}>{t('Decouple all')}</button>
         </div>
         <div className="button-row">
-          <button onClick={onAutoStitchShellPanels} disabled={!shellEnabled || roundStrutBridge}>{t('Stitch automatically')}</button>
+          <button onClick={onAutoStitchShellPanels} disabled={!shellEnabled || (roundStrutBridge && !shellFlexible)}>{t('Stitch automatically')}</button>
         </div>
       </SidebarSection>}
       {mode === 'preview' && <SidebarSection id="preview" title={t('Preview')}>
@@ -1222,18 +1229,29 @@ export function Sidebar({
             )}
           </SidebarSection>
           <SidebarSection id="geometry-shell" title={t('Shell')} defaultOpen={false}>
-            <label className="checkbox-field">
-              <input type="checkbox" checked={shellEnabled} disabled={roundStrutBridge} onChange={(e) => onShellEnabledChange(e.target.checked)} />
-              {t('Enabled')}
-            </label>
-            {shellEnabled && !roundStrutBridge && (
+            <div className="segmented-control" role="group" aria-label={t('Shell')}>
+              {(['off', 'rigid', 'flexible'] as const).map(value => <button key={value}
+                className={(shellEnabled ? shellFlexible ? 'flexible' : 'rigid' : 'off') === value ? 'active' : ''}
+                disabled={roundStrutBridge && value === 'rigid'} onClick={() => onShellModeChange(value)}>
+                {t(value === 'off' ? 'Off' : value === 'rigid' ? 'Rigid shell' : 'Flexible shell')}
+              </button>)}
+            </div>
+            {shellEnabled && <p className="hint">{shellFlexible
+              ? t('Shown as a surface and excluded from STEP exports. The shell may not fit the struts perfectly; use Scale to compensate. Scale uniformly scales the shell around the sphere center in preview and scales the panel triangles in DXF exports.')
+              : t('Adds width to the struts so the shell vertices at each joint converge to a single point.')}</p>}
+            {shellEnabled && shellFlexible && <div className="transform-field">
+              <label>{t('Scale')} (%)</label>
+              <NumberField value={shellExportScale} step={1} min={0.01}
+                clamp={n => Number.isFinite(n) ? Math.max(0.01, n) : 100} onCommit={onShellExportScaleChange} />
+            </div>}
+            {shellEnabled && !shellFlexible && !roundStrutBridge && (
               <div className="transform-field">
                 <label>{t('Shell thickness (mm)')}</label>
                 <NumberField value={shellThickness} step={0.5} min={0}
                   clamp={(n) => Number.isFinite(n) ? Math.max(0, n) : 0} onCommit={onShellThicknessChange} />
               </div>
             )}
-            {roundStrutBridge && <p className="hint">{t('Disable Round bridge to generate the shell.')}</p>}
+            {roundStrutBridge && !shellFlexible && <p className="hint">{t('Disable Round bridge to generate the shell.')}</p>}
           </SidebarSection>
           <SidebarSection id="geometry-braces" title={t('Braces')} defaultOpen={false}>
             {(mode === 'preview' || mode === 'edit' || mode === 'shell') && (

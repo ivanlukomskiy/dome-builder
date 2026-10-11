@@ -40,6 +40,8 @@ interface ViewportProps {
   millingDiameter: number
   chamferLength: number
   shellThickness: number
+  shellExportScale: number
+  shellFlexible: boolean
   shellEnabled: boolean
   roundStrutBridge: boolean
   toleranceLongitudinal: number
@@ -86,6 +88,8 @@ export function Viewport({
   millingDiameter,
   chamferLength,
   shellThickness,
+  shellExportScale,
+  shellFlexible,
   shellEnabled,
   roundStrutBridge,
   toleranceLongitudinal,
@@ -270,6 +274,8 @@ export function Viewport({
           millingDiameter={millingDiameter}
           chamferLength={chamferLength}
           shellThickness={shellThickness}
+          shellExportScale={shellExportScale}
+          shellFlexible={shellFlexible}
           shellEnabled={shellEnabled}
           roundStrutBridge={roundStrutBridge}
           toleranceLongitudinal={toleranceLongitudinal}

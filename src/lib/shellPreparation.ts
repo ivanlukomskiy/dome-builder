@@ -7,7 +7,7 @@ import { computeShellEdgeOffsets } from './shellGeometry'
 // from its target shell line. No sequential end adjustments or iterative solve.
 export function prepareShellStruts(entries: StrutGeometryEntry[], params: PreviewBuildInputParams) {
   const shellVertices = new Map<number, THREE.Vector3>()
-  if (!params.shellEnabled || params.roundStrutBridge || !entries.length) return { scale: 1, shellVertices }
+  if (!params.shellEnabled || (params.roundStrutBridge && !params.shellFlexible) || !entries.length) return { scale: 1, shellVertices }
   const offsets = new Map(computeShellEdgeOffsets(params.data, params.transformedVertices,
     id => params.edgeThickness.get(id) ?? params.thickness).map(m => [m.edgeId, m]))
   let scale = 0
@@ -45,6 +45,27 @@ export function prepareShellStruts(entries: StrutGeometryEntry[], params: Previe
     })
     return { entry, normal, level, shoulders, offset: measurement.offset }
   })
+  if (params.shellFlexible) {
+    const counts = new Map<number, number>()
+    for (const { entry, shoulders, normal, offset } of prepared) {
+      entry.addedThicknessA = 0
+      entry.addedThicknessB = 0
+      entry.shellEdgeOffset = offset
+      const direction = shoulders[1].base.clone().sub(shoulders[0].base).normalize()
+      const outward = normal.clone().addScaledVector(direction, -normal.dot(direction)).normalize()
+      const shellLevel = outward.dot(shoulders[0].base) + offset
+      for (const [id, position] of [[entry.vertexA, entry.posA], [entry.vertexB, entry.posB]] as const) {
+        const radial = new THREE.Vector3(...position).normalize()
+        const point = radial.multiplyScalar(shellLevel / outward.dot(radial))
+        if (!point.toArray().every(Number.isFinite)) throw new Error(`Shell edge ${entry.index}: undefined shell vertex`)
+        if (!shellVertices.has(id)) shellVertices.set(id, new THREE.Vector3())
+        shellVertices.get(id)!.add(point)
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
+    }
+    for (const [id, point] of shellVertices) point.divideScalar(counts.get(id)!)
+    return { scale: 1, shellVertices }
+  }
   for (const { entry, normal, level, shoulders, offset } of prepared) {
     const thicknesses = shoulders.map(({ base, projection }) =>
       Math.max(0, (scale * level - offset - normal.dot(base)) / projection))

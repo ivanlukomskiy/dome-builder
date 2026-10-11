@@ -215,7 +215,7 @@ export async function runStepExport(
   const names = buildExportPartNames(params, strutEntries, vertices)
   const shared = buildPartsShared(params, inputs, names, profiling)
 
-  const panels = params.shellEnabled && !params.roundStrutBridge
+  const panels = params.shellEnabled && !params.shellFlexible && !params.roundStrutBridge
     ? flattenShellPanels(params.data, inputs.shellVertices) : []
   const allPieces: StepExportPiece[] = []
   // Every strut's brace plate end points, across batches - a brace's two struts can land in
