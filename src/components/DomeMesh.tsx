@@ -1,3 +1,4 @@
+import { edgeThicknessColor, FLANGE_COLOR, CORNER_OVERRIDE_COLOR, BRACE_BODY_COLOR, SHELL_COLOR } from '../lib/partColors'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -58,19 +59,8 @@ export interface PreviewProgress {
 }
 
 const SELECTED_COLOR = '#f5a623'
-const EDGE_DEFAULT_COLOR = new THREE.Color('#3a5a7a')
-const EDGE_OVERRIDE_MIN_COLOR = new THREE.Color('#4fd97e')
-const EDGE_OVERRIDE_MAX_COLOR = new THREE.Color('#ff3b3b')
-// Override magnitude (mm) at which the color heatmap maxes out.
-const EDGE_OVERRIDE_COLOR_REFERENCE = 300
-// A neutral steel-plate tone for flange solids, distinct from any strut color so the hub
-// hardware reads as its own part rather than blending into the beams it connects.
-const FLANGE_COLOR = new THREE.Color('#b0b4bc')
 const FLANGE_SIDES = ['outer', 'inner'] as const satisfies readonly FlangeSide[]
 const flangeMeshKey = (groupKey: string, side: FlangeSide) => `${groupKey}#${side}`
-// Marks a vertex (Edit) and its flanges (Preview) that have any override of their own (corner
-// length or flange parameters).
-const CORNER_OVERRIDE_COLOR = new THREE.Color('#22d3ee')
 // Edit-mode marker color of a vertex marked as a foot.
 const FOOT_VERTEX_COLOR = '#c084fc'
 const BRACE_COLOR = '#e05ad0'
@@ -78,12 +68,6 @@ const BRACE_COLOR = '#e05ad0'
 // The heatmap color for a given thickness override (or the default tone if there isn't one) -
 // shared between the clickable edge markers in Edit mode and the beam mesh in Preview, so a
 // dome's strut coloring means the same thing in both places.
-function edgeThicknessColor(override: number | undefined): THREE.Color {
-  if (override === undefined) return EDGE_DEFAULT_COLOR.clone()
-  const t = Math.min(override / EDGE_OVERRIDE_COLOR_REFERENCE, 1)
-  return EDGE_OVERRIDE_MIN_COLOR.clone().lerp(EDGE_OVERRIDE_MAX_COLOR, t)
-}
-
 function edgeMarkerColor(override: number | undefined, isSelected: boolean): string {
   if (isSelected) return SELECTED_COLOR
   return `#${edgeThicknessColor(override).getHexString()}`
@@ -93,9 +77,6 @@ function edgeMarkerColor(override: number | undefined, isSelected: boolean): str
 // vertex color - shared by strut and flange solids alike, since both merge into the same preview
 // geometry (see the preview-build effect below) and mergeGeometries needs every piece to carry
 // the same set of attributes.
-// The brace bodies (bars between the struts' brace plates) - distinct from the plates' magenta.
-const BRACE_BODY_COLOR: [number, number, number] = [0.96, 0.62, 0.13]
-
 function buildColoredGeometry(piece: PreviewPiece): THREE.BufferGeometry {
   const geom = new THREE.BufferGeometry()
   geom.setAttribute('position', new THREE.Float32BufferAttribute(piece.positions, 3))
@@ -806,7 +787,7 @@ export function DomeMesh({
       )}
       {mode === 'preview' && shellGeometry && (
         <mesh geometry={shellGeometry} visible={partVisibility.shell}>
-          <meshStandardMaterial color="#c5d4df" side={THREE.DoubleSide} roughness={0.65} />
+          <meshStandardMaterial color={SHELL_COLOR} side={THREE.DoubleSide} roughness={0.65} />
         </mesh>
       )}
       {mode === 'preview' &&

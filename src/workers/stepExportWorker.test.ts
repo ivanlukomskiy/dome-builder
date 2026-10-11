@@ -7,6 +7,7 @@ import initOpenCascade from 'replicad-opencascadejs'
 import { DEFAULT_FLANGE_SHAPE_PARAMS, DEFAULT_FOOT_PARAMS } from '../lib/flangeGeometry'
 import { flangeNameKey } from '../lib/partNames'
 import type { StepExportRequest } from './stepExportWorker'
+import { FOOT_COLOR, stepColor, SHELL_COLOR } from '../lib/partColors'
 import { ENGRAVING_FONT } from '../lib/stepPartSolid'
 
 const captured = vi.hoisted(() => ({ assembly: [] as { name: string; bounds: number[][] }[], parts: [] as { bounds: number[][]; volume: number; labels?: import('../lib/partLabels').PartLabels }[] }))
@@ -66,6 +67,7 @@ function request(mode: 'archive' | 'assembly'): StepExportRequest {
 it('includes the foot in STEP assembly at the preview position', async () => {
   const parts = await build({ ...request('assembly'), mode: 'assembly-parts' })
   expect(parts.assemblyParts?.map(part => part.name)).toContain('foot-42.step')
+  expect(parts.assemblyParts?.find(part => part.name === 'foot-42.step')?.color).toBe(stepColor(FOOT_COLOR))
   const result = await build({ ...request('assembly'), vertices: [], assemblyParts: parts.assemblyParts })
   expect(result.assemblyBlob?.size).toBeGreaterThan(0)
   const foot = captured.assembly.find(part => part.name === 'foot-42.step')
@@ -167,7 +169,15 @@ it('exports flat shell panels with their IDs and optional connected strut engrav
   captured.parts = []
   const plain = await build(req)
   expect(plain.pieces.map(p => p.name)).toEqual(['shell-7.step'])
-  expect(await plain.pieces[0].blob.text()).toContain('MANIFOLD_SOLID_BREP')
+  const stepText = await plain.pieces[0].blob.text()
+  expect(stepText).toContain('MANIFOLD_SOLID_BREP')
+  const colors = [...stepText.matchAll(/COLOUR_RGB\([^,]*,([^,]+),([^,]+),([^)]+)\)/g)]
+    .map(match => match.slice(1).map(Number))
+  // STEP writes sRGB channels; match the visible preview shade within the
+  // byte quantization used by Replicad's color API.
+  const expectedColor = SHELL_COLOR.clone().convertLinearToSRGB()
+  const expected = [expectedColor.r, expectedColor.g, expectedColor.b]
+  expect(colors.some(rgb => rgb.every((value, i) => Math.abs(value - expected[i]) < 0.005))).toBe(true)
   const flat = captured.parts.at(-1)!
   expect(flat.bounds[0][2]).toBeCloseTo(0)
   expect(flat.bounds[1][2]).toBeCloseTo(6)

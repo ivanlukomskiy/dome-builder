@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import * as THREE from 'three'
+import { BRACE_PLATE_COLOR, FOOT_COLOR } from '../lib/partColors'
 import { computeStrutBoundary, computeStrutPlane } from '../lib/strutGeometry'
 import { computeFlangeBoundary2D, resolveFlangeParams, type FlangeShapeParams, type FlangeSide } from '../lib/flangeGeometry'
 import { footPartPlane } from '../lib/footPartPlane'
@@ -28,10 +29,6 @@ import { installReplicadProfiler, snapshotReplicadStats } from '../lib/replicadP
 // need opencascade.
 
 declare const self: DedicatedWorkerGlobalScope
-
-// Same magenta the brace lines are drawn in in Edit mode.
-const BRACE_PLATE_COLOR: [number, number, number] = [0.878, 0.353, 0.816]
-const FOOT_COLOR: [number, number, number] = [0.753, 0.518, 0.961]
 
 export interface StrutBuildJob extends StrutGeometryEntry {
   color: [number, number, number]

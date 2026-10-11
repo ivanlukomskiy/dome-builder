@@ -177,12 +177,13 @@ export function buildStrutStepFromDrawing(
 export interface StepAssemblyShape {
   name: string
   shape: Shape3D
+  color?: string
 }
 
-export function deserializeStepAssemblyParts(parts: { name: string; brep: string }[]): StepAssemblyShape[] {
+export function deserializeStepAssemblyParts(parts: { name: string; brep: string; color?: string }[]): StepAssemblyShape[] {
   const shapes: StepAssemblyShape[] = []
   try {
-    for (const { name, brep } of parts) shapes.push({ name, shape: deserializeShape(brep).asShape3D() })
+    for (const { name, brep, color } of parts) shapes.push({ name, color, shape: deserializeShape(brep).asShape3D() })
     return shapes
   } catch (error) {
     for (const { shape } of shapes) shape.delete()
@@ -196,8 +197,8 @@ export function buildStepAssembly(shapes: StepAssemblyShape[]): Blob {
   // Clone first: callers still own and dispose the preview-space solids.
   const oriented: StepAssemblyShape[] = []
   try {
-    for (const { name, shape } of shapes) {
-      oriented.push({ name, shape: shape.clone().rotate(90, [0, 0, 0], [1, 0, 0]) })
+    for (const { name, shape, color } of shapes) {
+      oriented.push({ name, color, shape: shape.clone().rotate(90, [0, 0, 0], [1, 0, 0]) })
     }
     return exportSTEP(oriented)
   } finally {

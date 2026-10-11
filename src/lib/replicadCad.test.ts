@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { beforeAll, expect, it } from 'vitest'
 import { importSTEP, makeBox, measureVolume, setOC, type AnyShape } from 'replicad'
 import initOpenCascade from 'replicad-opencascadejs'
-import { buildStepAssembly } from './replicadCad'
+import { buildStepAssembly, deserializeStepAssemblyParts } from './replicadCad'
 
 beforeAll(async () => {
   const wasmBinary = readFileSync(createRequire(import.meta.url).resolve('replicad-opencascadejs/wasm'))
@@ -18,17 +18,28 @@ function bounds(shape: AnyShape) {
 
 it('writes Y-up assembly solids as Z-up without changing the source solids', async () => {
   const shapes = [
-    { name: 'lower', shape: makeBox([10, 100, 30], [20, 120, 40]) },
-    { name: 'upper', shape: makeBox([30, 200, 60], [50, 210, 80]) },
+    { name: 'lower', color: '#00ff00', shape: makeBox([10, 100, 30], [20, 120, 40]) },
+    { name: 'upper', color: '#0000ff', shape: makeBox([30, 200, 60], [50, 210, 80]) },
   ]
   const originalBounds = shapes.map(({ shape }) => bounds(shape))
   try {
     // Repeated exports must apply the rotation exactly once each time.
     for (let i = 0; i < 2; i++) {
-      const blob = buildStepAssembly(shapes)
+      // BREP serialization itself has no color: the worker message carries it.
+      const restored = deserializeStepAssemblyParts(shapes.map(({ name, shape, color }) => ({
+        name, color, brep: shape.serialize(),
+      })))
+      let blob: Blob
+      try {
+        expect(restored.map(part => part.color)).toEqual(['#00ff00', '#0000ff'])
+        blob = buildStepAssembly(restored)
+      } finally { restored.forEach(({ shape }) => shape.delete()) }
       const text = await blob.text()
       expect(text).toContain('lower')
       expect(text).toContain('upper')
+      // OpenCascade emits named STEP colors for exact primaries.
+      expect(text).toContain("DRAUGHTING_PRE_DEFINED_COLOUR('green')")
+      expect(text).toContain("DRAUGHTING_PRE_DEFINED_COLOUR('blue')")
       const imported = (await importSTEP(blob)).asShape3D()
       try {
         const [min, max] = bounds(imported)

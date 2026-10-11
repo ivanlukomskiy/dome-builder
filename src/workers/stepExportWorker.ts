@@ -14,7 +14,8 @@ import type { VertexEdgesInfo } from '../lib/edgesInfo'
 import type { StrutGeometryEntry } from '../lib/previewBuildInputs'
 import { bracePlateEndPoints3D, bracePlatePlane, type StrutBraceEnd } from '../lib/braces'
 import { braceQuadFrame, braceQuadPoints2D, pairBracePoints, type BraceBody, type BracePoints } from '../lib/braceSolid'
-import { draw, type Drawing } from 'replicad'
+import { draw, exportSTEP, type Drawing } from 'replicad'
+import { edgeThicknessColor, FLANGE_COLOR, CORNER_OVERRIDE_COLOR, BRACE_BODY_COLOR, BRACE_PLATE_COLOR, FOOT_COLOR, SHELL_COLOR, stepColor } from '../lib/partColors'
 import type { StepAssemblyShape, StrutPlane } from '../lib/replicadCad'
 import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/exportProfile'
 
@@ -59,6 +60,7 @@ export interface StepExportRequest {
 export interface SerializedStepShape {
   name: string
   brep: string
+  color?: string
 }
 
 export interface StepExportPiece {
@@ -108,7 +110,7 @@ export async function buildStepExports(
   if (engraving) await ensureEngravingFont()
   const wanted = (name: string) => req.onlyPiece === undefined || name === req.onlyPiece
 
-  const addStepShape = (name: string, drawing: Drawing, plane: StrutPlane, thickness: number, labels?: PartLabels) => {
+  const addStepShape = (name: string, drawing: Drawing, plane: StrutPlane, thickness: number, labels?: PartLabels, color?: string) => {
     if (!wanted(name)) return
     const solid = timed('solidFromDrawing', () => mode !== 'archive'
       ? buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale)
@@ -118,12 +120,12 @@ export async function buildStepExports(
       } : undefined))
     if (!solid) return
     if (mode !== 'archive') {
-      assemblyShapes.push({ name, shape: solid })
+      assemblyShapes.push({ name, shape: solid, color })
       return
     }
 
     try {
-      const blob = timed('partStepWrite', () => solid.blobSTEP())
+      const blob = timed('partStepWrite', () => exportSTEP([{ name, shape: solid, color }]))
       if (blob) pieces.push({ name, blob })
     } finally { solid.delete() }
   }
@@ -161,7 +163,7 @@ export async function buildStepExports(
 
       if (boundary.main) {
         try {
-          addStepShape(`strut-${job.index}.step`, boundary.main, plane, job.beamThickness, labelContext ? strutPartLabels(labelContext, job, boundary) : undefined)
+          addStepShape(`strut-${job.index}.step`, boundary.main, plane, job.beamThickness, labelContext ? strutPartLabels(labelContext, job, boundary) : undefined, stepColor(edgeThicknessColor(job.thicknessOverride)))
         } catch (err) {
           throw new Error(`Failed to export strut solid for edge ${job.index}`, { cause: err })
         }
@@ -189,6 +191,7 @@ export async function buildStepExports(
               name: engraving.names.bracePlates[bracePlateNameKey(brace.braceId, job.index, end)],
               labelAngleDeg: ends ? angleDegOf(pointTuple(ends[0]), pointTuple(ends[1])) + 90 : undefined,
             } : undefined,
+            stepColor(BRACE_PLATE_COLOR),
           )
         } catch (err) {
           throw new Error(`Failed to export brace plate ${brace.braceId} for edge ${job.index}`, { cause: err })
@@ -231,7 +234,7 @@ export async function buildStepExports(
             normal,
             xDir,
           }
-          addStepShape(`flange-${vertex.vertexId}-${side}.step`, boundary.main, plane, req.grooveDepth, labelContext ? flangePartLabels(labelContext, vertex, side, boundary) : undefined)
+          addStepShape(`flange-${vertex.vertexId}-${side}.step`, boundary.main, plane, req.grooveDepth, labelContext ? flangePartLabels(labelContext, vertex, side, boundary) : undefined, stepColor(vertex.cornerLengthOverride !== undefined || vertex.flangeOverrides !== undefined ? CORNER_OVERRIDE_COLOR : FLANGE_COLOR))
         }
       } catch (err) {
         throw new Error(`Failed to export flange solid for vertex ${vertex.vertexId}`, { cause: err })
@@ -246,7 +249,7 @@ export async function buildStepExports(
             throw new Error(`Cannot construct foot at vertex ${vertex.vertexId}.`)
           }
           addStepShape(`foot-${vertex.vertexId}.step`, boundary.main, plane, foot.thickness,
-            labelContext ? footPartLabels(labelContext, vertex.vertexId) : undefined)
+            labelContext ? footPartLabels(labelContext, vertex.vertexId) : undefined, stepColor(FOOT_COLOR))
         } catch (err) {
           throw new Error(`Failed to export foot at vertex ${vertex.vertexId}: ${err instanceof Error ? err.message : String(err)}`)
         }
@@ -270,7 +273,7 @@ export async function buildStepExports(
         const [first, ...rest] = braceQuadPoints2D(frame)
         let outline = draw(first)
         for (const pt of rest) outline = outline.lineTo(pt)
-        addStepShape(`brace-${body.braceId}.step`, outline.close(), frame.plane, body.thickness, engraving ? bracePartLabels(body, engraving.names, engraving) : undefined)
+        addStepShape(`brace-${body.braceId}.step`, outline.close(), frame.plane, body.thickness, engraving ? bracePartLabels(body, engraving.names, engraving) : undefined, stepColor(BRACE_BODY_COLOR))
       } catch (err) {
         throw new Error(`Failed to export brace ${body.braceId}`, { cause: err })
       }
@@ -294,7 +297,7 @@ export async function buildStepExports(
             labelAnchor: { x: centroid[0], y: centroid[1] },
             helpers: shellEdgeLabels(panel, engraving.names.struts, engraving.connectedPartIdLabelSize)
               .map(label => ({ ...label, y: -label.y, angleDeg: -label.angleDeg })),
-          } : undefined)
+          } : undefined, stepColor(SHELL_COLOR))
         } catch (err) {
           throw new Error(`Failed to export shell panel ${panel.label}`, { cause: err })
         }
@@ -306,7 +309,7 @@ export async function buildStepExports(
     if (mode === 'archive') return { pieces, bracePoints, profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
 
     if (mode === 'assembly-parts') {
-      return { pieces, bracePoints, assemblyParts: assemblyShapes.map(({ name, shape }) => ({ name, brep: shape.serialize() })),
+      return { pieces, bracePoints, assemblyParts: assemblyShapes.map(({ name, shape, color }) => ({ name, color, brep: shape.serialize() })),
         profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
     }
     if (!req.assemblyParts) reportWriting()
