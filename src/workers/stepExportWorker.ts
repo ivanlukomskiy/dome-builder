@@ -1,4 +1,6 @@
 /// <reference lib="webworker" />
+import type { ShellPanel } from '../lib/shellLayout'
+import { shellEdgeLabels } from '../lib/shellDxf'
 import { footPartPlane } from '../lib/footPartPlane'
 import { computeFootPartBoundary2D } from '../lib/footGeometry'
 import { buildFlatStepPart, ensureEngravingFont } from '../lib/stepPartSolid'
@@ -25,7 +27,7 @@ import { createExportStageProfiler, type ExportWorkerProfile } from '../lib/expo
 declare const self: DedicatedWorkerGlobalScope
 
 export interface StepExportRequest {
-  engraving?: DxfLabelSettings & { depth: number; names: PartNameMaps }
+  engraving?: DxfLabelSettings & { depth: number; names: PartNameMaps; addConnectedLabels?: boolean }
   requestId: number
   profile?: boolean
   mode?: 'archive' | 'assembly' | 'assembly-parts'
@@ -34,6 +36,8 @@ export interface StepExportRequest {
   // stepExportRunner.ts's runStepDebugExport. Brace plate end points are still reported for every
   // strut job, so a brace body can be paired up without building its struts' solids.
   onlyPiece?: string
+  shellPanels?: ShellPanel[]
+  shellThickness?: number
   strutJobs: StrutGeometryEntry[]
   // Brace bodies to export (see braceSolid.ts's pairBracePoints) - a batch of these is all a
   // 'braces' worker does, and strutJobs/vertices are empty then.
@@ -62,7 +66,7 @@ export interface StepExportPiece {
   blob: Blob
 }
 
-export type StepExportPhase = 'struts' | 'flanges' | 'braces'
+export type StepExportPhase = 'struts' | 'flanges' | 'braces' | 'shell'
 export type StepExportWorkerPhase = StepExportPhase | 'writing'
 
 export type StepExportWorkerMessage =
@@ -109,7 +113,8 @@ export async function buildStepExports(
     const solid = timed('solidFromDrawing', () => mode !== 'archive'
       ? buildStrutSolidFromDrawing(drawing, plane, thickness, req.scale)
       : buildFlatStepPart(drawing, thickness, req.scale, engraving && labels ? {
-        labels, depth: engraving.depth, partIdLabelSize: engraving.partIdLabelSize,
+        labels: engraving.addConnectedLabels === false ? { ...labels, helpers: [] } : labels,
+        depth: engraving.depth, partIdLabelSize: engraving.partIdLabelSize,
       } : undefined))
     if (!solid) return
     if (mode !== 'archive') {
@@ -270,6 +275,33 @@ export async function buildStepExports(
         throw new Error(`Failed to export brace ${body.braceId}`, { cause: err })
       }
     })
+
+    if (mode === 'archive') {
+      for (const [i, panel] of (req.shellPanels ?? []).entries()) {
+        const name = `shell-${panel.faceId}.step`
+        if (!wanted(name)) continue
+        try {
+          // Shell layout coordinates have Y down; reflect to the same Y-up
+          // manufacturing face used by DXF, keeping edge labels on that face.
+          const points = panel.points.map(([x, y]) => [x, -y] as [number, number])
+          let outline = draw(points[0])
+          for (const point of points.slice(1)) outline = outline.lineTo(point)
+          const centroid = points.reduce((sum, p) => [sum[0] + p[0] / 3, sum[1] + p[1] / 3], [0, 0])
+          addStepShape(name, outline.close(), {
+            origin: center, normal: new THREE.Vector3(0, 0, 1), xDir: new THREE.Vector3(1, 0, 0),
+          }, req.shellThickness ?? 2, engraving ? {
+            name: panel.label,
+            labelAnchor: { x: centroid[0], y: centroid[1] },
+            helpers: shellEdgeLabels(panel, engraving.names.struts, engraving.connectedPartIdLabelSize)
+              .map(label => ({ ...label, y: -label.y, angleDeg: -label.angleDeg })),
+          } : undefined)
+        } catch (err) {
+          throw new Error(`Failed to export shell panel ${panel.label}`, { cause: err })
+        }
+        self.postMessage({ type: 'progress', requestId: req.requestId, phase: 'shell',
+          done: i + 1, total: req.shellPanels!.length } satisfies StepExportWorkerMessage)
+      }
+    }
 
     if (mode === 'archive') return { pieces, bracePoints, profile: profiler?.snapshot(initMs, performance.now() - buildStart) }
 

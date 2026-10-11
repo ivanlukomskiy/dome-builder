@@ -272,11 +272,16 @@ function StepLabelSettingsFields({ idPrefix, settings, disabled, onChange }: {
         <NumberField value={settings.partIdLabelSize} step={0.5} min={0.1}
           onCommit={(partIdLabelSize) => onChange({ ...settings, partIdLabelSize })} />
       </div>
-      <div className="transform-field">
+      <label className="checkbox-field">
+        <input type="checkbox" checked={settings.addConnectedLabels} disabled={disabled}
+          onChange={(event) => onChange({ ...settings, addConnectedLabels: event.target.checked })} />
+        {t('Connected parts ID labels')}
+      </label>
+      {settings.addConnectedLabels && <div className="transform-field">
         <label><FieldLabel text={t('Connected part ID labels size (mm)')} /></label>
         <NumberField value={settings.connectedPartIdLabelSize} step={0.5} min={0.1}
           onCommit={(connectedPartIdLabelSize) => onChange({ ...settings, connectedPartIdLabelSize })} />
-      </div>
+      </div>}
       <div className="transform-field">
         <label htmlFor={`${idPrefix}-label-depth`}><FieldLabel text={t('Depth (mm)')} /></label>
         <input id={`${idPrefix}-label-depth`} type="number" min={0.01} step="any"

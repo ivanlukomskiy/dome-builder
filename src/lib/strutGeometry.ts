@@ -56,6 +56,8 @@ export interface StrutMark {
 }
 
 export interface StrutBoundaryResult {
+  // Actual straight bridge centerline, including end lengths and added thickness.
+  straightBridge?: [Point2D, Point2D];
   // The actual strut sketch outline - what would eventually replace computeStrutBoundary's
   // return value. Null while you don't have one yet (helpers alone still render).
   main: Drawing | null;
@@ -1143,6 +1145,7 @@ export function computeStrutBoundary2D(
 
   return {
     main: main,
+    straightBridge: roundBridge ? undefined : [straightCenterline.a, straightCenterline.b],
     bracePlateA,
     bracePlateB,
     bracePlateEndsA,

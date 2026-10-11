@@ -2,10 +2,11 @@ import { DEFAULT_DXF_LABEL_SETTINGS, type DxfLabelSettings } from './dxfLabelSet
 
 export interface StepExportSettings extends DxfLabelSettings {
   addLabels: boolean
+  addConnectedLabels: boolean
   depth: number
 }
 
-export const DEFAULT_STEP_EXPORT_SETTINGS: StepExportSettings = { addLabels: false, depth: 1, ...DEFAULT_DXF_LABEL_SETTINGS }
+export const DEFAULT_STEP_EXPORT_SETTINGS: StepExportSettings = { addLabels: false, addConnectedLabels: true, depth: 1, ...DEFAULT_DXF_LABEL_SETTINGS }
 
 export function validateStepLabelDepth(depth: number, thickness?: number): void {
   if (!Number.isFinite(depth) || depth <= 0) throw new Error('Label depth must be greater than 0 mm.')

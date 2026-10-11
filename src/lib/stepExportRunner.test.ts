@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { runStepAssemblyExport, type RunStepExportParams } from './stepExportRunner'
+import JSZip from 'jszip'
+import { runStepExport, runStepAssemblyExport, type RunStepExportParams } from './stepExportRunner'
 import type { StepExportRequest } from '../workers/stepExportWorker'
 
 vi.mock('./previewBuildInputs', () => ({
@@ -9,8 +10,9 @@ vi.mock('./previewBuildInputs', () => ({
     halfWidth: 62.5,
   }),
 }))
+vi.mock('./exportPartNames', () => ({ buildExportPartNames: () => ({ struts: {}, flanges: {}, feet: {}, braces: {}, bracePlates: {} }) }))
 vi.mock('./exportProfile', () => ({ exportProfilingEnabled: () => false }))
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 it('builds bounded batches in disposable workers and writes their finished solids in a fresh worker', async () => {
   const requests: StepExportRequest[] = []
@@ -53,3 +55,38 @@ it('does not start any workers after cancellation', async () => {
   expect(await runStepAssemblyExport({} as RunStepExportParams, vi.fn(), () => true)).toBeNull()
   expect(Worker).not.toHaveBeenCalled()
 })
+
+it.each([[true, false, 1], [false, false, 0], [true, true, 0]] as const)(
+  'includes shell files only with shell enabled=%s and round bridge=%s', async (shellEnabled, roundStrutBridge, count) => {
+    const requests: StepExportRequest[] = []
+    // The prepared shell vertices must be used rather than the unscaled scene vertices.
+    const { Vector3 } = await import('three')
+    const { computePreviewBuildInputs } = await import('./previewBuildInputs')
+    const prepared = computePreviewBuildInputs({} as RunStepExportParams)
+    vi.spyOn(await import('./previewBuildInputs'), 'computePreviewBuildInputs').mockReturnValueOnce({
+      ...prepared, strutEntries: [], vertices: [],
+      shellVertices: new Map([[0, new Vector3(0, 0, 10)], [1, new Vector3(180, 0, 10)], [2, new Vector3(0, 150, 10)]]),
+    })
+    vi.stubGlobal('Worker', class {
+      onmessage?: (event: { data: unknown }) => void
+      postMessage(req: StepExportRequest) {
+        requests.push(req)
+        queueMicrotask(() => this.onmessage?.({ data: { type: 'result', requestId: req.requestId,
+          pieces: (req.shellPanels ?? []).map(panel => ({ name: `shell-${panel.faceId}.step`,
+            blob: new Uint8Array([1, 2, 3]) })), bracePoints: [] } }))
+      }
+      terminate() {}
+    })
+    const params = { shellEnabled, roundStrutBridge, shellThickness: 3,
+      data: { faces: new Map([[7, [0, 1, 2]]]), edges: new Map([[10, [0, 1]], [20, [1, 2]], [30, [2, 0]]]) },
+    } as unknown as RunStepExportParams
+    const blob = await runStepExport(params, vi.fn(), () => false)
+    const zip = await JSZip.loadAsync(await blob!.arrayBuffer())
+    expect(Object.keys(zip.files)).toEqual(count ? ['shell-1.step'] : [])
+    expect(requests).toHaveLength(count)
+    if (count) {
+      expect(requests[0].shellThickness).toBe(3)
+      expect(requests[0].shellPanels![0].points).toEqual([[-60, 50], [120, 50], [-60, -100]])
+    }
+  },
+)

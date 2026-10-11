@@ -28,11 +28,13 @@ export function ExportProgressModal({ session, onCancel, onClose }: Props) {
     ? ['struts', 'flanges', 'braces', ...(session.arrangeOnSheet ? ['packing' as const] : []), 'writing']
     // A debug export builds one part, so it only ever shows the step that part is built in.
     : session.kind === 'step-debug' ? [session.progress.phase]
-    : ['struts', 'flanges', 'braces', session.kind === 'step-parts' ? 'zipping' : 'writing']
+    : session.kind === 'step-parts' ? ['struts', 'flanges', 'braces', 'shell', 'zipping']
+    : ['struts', 'flanges', 'braces', 'writing']
   const labels: Record<ExportPhase, string> = {
     struts: t('Build struts'),
     flanges: t('Build flanges and feet'),
     braces: t('Build braces'),
+    shell: t('Build shell panels'),
     packing: t('Arrange parts on sheets'),
     writing: session.kind === 'dxf' ? t('Write DXF') : t('Write STEP'),
     zipping: t('Create ZIP archive'),

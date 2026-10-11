@@ -103,10 +103,11 @@ function strutLabel(
   center: THREE.Vector3,
   avoidAreas: LabelAvoidArea[],
   roundBridge: boolean,
+  straightBridge?: [[number, number], [number, number]],
 ): { anchor: { x: number; y: number }; angleDeg: number } {
   const plane = computeStrutPlane(posA, posB, center)
-  const a = projectToPlane2D(posA, plane)
-  const b = projectToPlane2D(posB, plane)
+  const a = !roundBridge && straightBridge ? straightBridge[0] : projectToPlane2D(posA, plane)
+  const b = !roundBridge && straightBridge ? straightBridge[1] : projectToPlane2D(posB, plane)
   const c = projectToPlane2D(center, plane)
   const pointAt = (fraction: number) => roundBridge ? arcPoint2(a, b, c, fraction) : linePoint2(a, b, fraction)
   const [x, y] =
@@ -168,7 +169,7 @@ export function strutPartLabels(req: LabelContext, job: StrutGeometryEntry, boun
   const avoidAreas = [boundary.bracePlateEndsA, boundary.bracePlateEndsB].flatMap((ends) =>
     ends ? [labelAvoidArea(ends, partName, req.partIdLabelSize)] : [],
   )
-  const label = strutLabel(posA, posB, center, avoidAreas, req.roundStrutBridge)
+  const label = strutLabel(posA, posB, center, avoidAreas, req.roundStrutBridge, boundary.straightBridge)
   return { name: partName, labelAnchor: label.anchor, labelAngleDeg: label.angleDeg, helpers }
 }
 

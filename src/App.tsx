@@ -970,6 +970,7 @@ function App() {
       chamferLength: appliedPreviewParams.chamferLength,
       roundStrutBridge: appliedPreviewParams.roundStrutBridge,
       shellEnabled: appliedPreviewParams.shellEnabled,
+      shellThickness: appliedPreviewParams.shellThickness,
       flangeParams: {
         toleranceLongitudinal: appliedPreviewParams.toleranceLongitudinal,
         toleranceTransverse: appliedPreviewParams.toleranceTransverse,

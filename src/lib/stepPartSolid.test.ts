@@ -5,6 +5,10 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { drawRectangle, loadFont, measureVolume, setOC, type Shape3D } from 'replicad'
 import initOpenCascade from 'replicad-opencascadejs'
 import { buildFlatStepPart, ENGRAVING_FONT } from './stepPartSolid'
+import { Vector3 } from 'three'
+import { computeStrutBoundary } from './strutGeometry'
+import { strutPartLabels } from './partLabels'
+import { DEFAULT_FLANGE_SHAPE_PARAMS } from './flangeGeometry'
 
 beforeAll(async () => {
   const wasmBinary = readFileSync(createRequire(import.meta.url).resolve('replicad-opencascadejs/wasm'))
@@ -71,4 +75,40 @@ describe('STEP parts solids', () => {
   it.each([0, -1, NaN, Infinity, 2.5, 3])('rejects invalid or through-cut depth %s before building', depth => {
     expect(() => buildFlatStepPart(drawing(), 5, 0.5, { labels, depth, partIdLabelSize: 8 })).toThrow(/depth/i)
   })
+})
+
+// Exercise label placement and actual subtraction together: a cutter outside the
+// body succeeds silently, so merely checking that export succeeds misses this bug.
+it.each([false, true])('engraves the strut ID with round bridge = %s', roundStrutBridge => {
+  const job = {
+    index: 1, vertexA: 0, vertexB: 1,
+    posA: [1000, 0, 0] as [number, number, number],
+    posB: [500, Math.sqrt(3) * 500, 0] as [number, number, number],
+    offsetA: 20, offsetB: 30, cornerLengthA: 150, cornerLengthB: 180,
+    beamThickness: 30, thicknessOverride: undefined, braces: { a: [], b: [] },
+    addedThicknessA: 12.5, addedThicknessB: 3.25,
+  }
+  const boundary = computeStrutBoundary(
+    new Vector3(...job.posA), new Vector3(...job.posB), new Vector3(),
+    job.offsetA, job.offsetB, job.cornerLengthA, job.cornerLengthB,
+    62.5, 15, 15, 20, 5, 4, job.braces, roundStrutBridge,
+    undefined, job.addedThicknessA, job.addedThicknessB,
+  )
+  const labels = strutPartLabels({
+    names: { struts: { 1: '101' }, flanges: {}, feet: {}, braces: {}, bracePlates: {} },
+    halfWidth: 62.5, grooveDepth: 20, roundStrutBridge,
+    partIdLabelSize: 8, connectedPartIdLabelSize: 5,
+    flangeParams: DEFAULT_FLANGE_SHAPE_PARAMS,
+  }, job, boundary)
+  // Isolate the part ID so connection engravings cannot mask a missing ID.
+  labels.helpers = []
+  const plain = buildFlatStepPart(boundary.main!, job.beamThickness, 1)
+  const engraved = buildFlatStepPart(boundary.main!, job.beamThickness, 1, {
+    labels, partIdLabelSize: 8, depth: 1,
+  })
+  try {
+    expect(measureVolume(plain) - measureVolume(engraved)).toBeGreaterThan(50)
+    const zs = engraved.mesh().vertices.filter((_, i) => i % 3 === 2)
+    expect(zs.some(z => Math.abs(z - 29) < 1e-6)).toBe(true)
+  } finally { plain.delete(); engraved.delete() }
 })

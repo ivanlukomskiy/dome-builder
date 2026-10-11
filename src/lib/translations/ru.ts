@@ -39,6 +39,7 @@ export const ru: Dictionary = {
   "Shell thickness (mm)": "Толщина оболочки (мм)",
   "Shell": "Оболочка",
   "Enabled": "Включено",
+  "Build shell panels": "Построение панелей оболочки",
   "Add labels": "Добавить подписи",
   "Depth (mm)": "Глубина (мм)",
   "Engraves bold part and connection labels. Depth is measured in exported millimeters.": "Гравирует жирные подписи деталей и соединений. Глубина указана в миллиметрах экспортируемой модели.",
@@ -80,6 +81,7 @@ export const ru: Dictionary = {
   "Geometry changes take effect when you click Redraw.": "Изменения геометрии вступают в силу после нажатия «Перерисовать».",
 
   "Part ID label size (mm)": "Размер подписи ID детали (мм)",
+  "Connected parts ID labels": "Подписи ID соединяемых деталей",
   "Connected part ID labels size (mm)": "Размер подписей ID соединяемых деталей (мм)",
   "{n} axis": ["{n} ось", "{n} оси", "{n} осей"],
   "{fold}-fold": "порядок {fold}",

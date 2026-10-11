@@ -9,7 +9,7 @@ import { flangeNameKey } from '../lib/partNames'
 import type { StepExportRequest } from './stepExportWorker'
 import { ENGRAVING_FONT } from '../lib/stepPartSolid'
 
-const captured = vi.hoisted(() => ({ assembly: [] as { name: string; bounds: number[][] }[], parts: [] as { bounds: number[][]; volume: number }[] }))
+const captured = vi.hoisted(() => ({ assembly: [] as { name: string; bounds: number[][] }[], parts: [] as { bounds: number[][]; volume: number; labels?: import('../lib/partLabels').PartLabels }[] }))
 vi.mock('../lib/replicadCad', async importOriginal => {
   const original = await importOriginal<typeof import('../lib/replicadCad')>()
   return {
@@ -32,7 +32,7 @@ vi.mock('../lib/stepPartSolid', async importOriginal => {
     buildFlatStepPart: (...args: Parameters<typeof original.buildFlatStepPart>) => {
       const solid = original.buildFlatStepPart(...args)
       const box = solid.boundingBox
-      try { captured.parts.push({ bounds: box.bounds, volume: measureVolume(solid) }) } finally { box.delete() }
+      try { captured.parts.push({ bounds: box.bounds, volume: measureVolume(solid), labels: args[3]?.labels }) } finally { box.delete() }
       return solid
     },
   }
@@ -91,7 +91,13 @@ it('exports a flat foot file in STEP parts, with optional ID and connection engr
   }
   const engraved = await build(req)
   expect(engraved.pieces.map(part => part.name)).toContain('foot-42.step')
-  expect(captured.parts.at(-1)!.volume).toBeLessThan(flat.volume)
+  const allLabelsVolume = captured.parts.at(-1)!.volume
+  expect(allLabelsVolume).toBeLessThan(flat.volume)
+  req.engraving.addConnectedLabels = false
+  await build(req)
+  const partIdOnlyVolume = captured.parts.at(-1)!.volume
+  expect(partIdOnlyVolume).toBeGreaterThan(allLabelsVolume)
+  expect(partIdOnlyVolume).toBeLessThan(flat.volume)
 }, 30_000)
 
 it('does not add a foot for a vertex that is not marked as a foot', async () => {
@@ -150,3 +156,35 @@ it('writes the supplied dome configuration as a STEP assembly', async () => {
   expect(text).toContain('ISO-10303-21;')
   for (const { name } of assemblyParts) expect(text).toContain(name)
 }, 300_000)
+
+it('exports flat shell panels with their IDs and optional connected strut engraving', async () => {
+  const req = request('archive')
+  req.vertices = []
+  req.shellThickness = 3
+  req.scale = 2
+  req.shellPanels = [{ faceId: 7, label: '6.', vertices: [0, 1, 2],
+    points: [[-60, 50], [120, 50], [-60, -100]], edges: [10, 20, 30] }]
+  captured.parts = []
+  const plain = await build(req)
+  expect(plain.pieces.map(p => p.name)).toEqual(['shell-7.step'])
+  expect(await plain.pieces[0].blob.text()).toContain('MANIFOLD_SOLID_BREP')
+  const flat = captured.parts.at(-1)!
+  expect(flat.bounds[0][2]).toBeCloseTo(0)
+  expect(flat.bounds[1][2]).toBeCloseTo(6)
+  expect(flat.volume).toBeCloseTo(13500 * 3 * 8)
+  req.engraving = { depth: 0.75, partIdLabelSize: 8, connectedPartIdLabelSize: 5,
+    names: { struts: { 10: '101', 20: '102', 30: '103' }, flanges: {}, feet: {}, braces: {}, bracePlates: {} } }
+  await build(req)
+  const allLabels = captured.parts.at(-1)!
+  expect(allLabels.labels!.name).toBe('6.')
+  expect(allLabels.labels!.labelAnchor).toEqual({ x: 0, y: 0 })
+  expect(allLabels.labels!.helpers!.map(label => label.text)).toEqual(['101', '102', '103'])
+  req.engraving.addConnectedLabels = false
+  await build(req)
+  const ownId = captured.parts.at(-1)!
+  expect(ownId.labels!.helpers).toEqual([])
+  expect(ownId.volume).toBeLessThan(flat.volume - 1)
+  expect(allLabels.volume).toBeLessThan(ownId.volume - 1)
+  req.engraving.depth = 6
+  await expect(build(req)).rejects.toThrow('Failed to export shell panel 6.')
+}, 30_000)

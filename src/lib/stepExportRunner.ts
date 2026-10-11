@@ -1,3 +1,4 @@
+import { flattenShellPanels } from './shellLayout'
 import { DEFAULT_STEP_EXPORT_SETTINGS, validateStepLabelDepth, type StepExportSettings } from './stepExportSettings'
 import { buildExportPartNames } from './exportPartNames'
 import { stepPartFileNames, type PartNameMaps } from './partNames'
@@ -36,6 +37,7 @@ export interface StepExportProgress {
 
 export interface RunStepExportParams extends PreviewBuildInputParams {
   stepExportSettings?: StepExportSettings
+  shellThickness?: number
   flangeParams: FlangeShapeParams
   // Uniform scale factor (1 = no change) applied to every exported solid - see
   // buildStrutStepFromDrawing in replicadCad.ts.
@@ -177,6 +179,7 @@ function buildPartsShared(
   return {
     engraving: settings.addLabels ? {
       depth: settings.depth,
+      addConnectedLabels: settings.addConnectedLabels,
       partIdLabelSize: settings.partIdLabelSize,
       connectedPartIdLabelSize: settings.connectedPartIdLabelSize,
       names,
@@ -190,6 +193,7 @@ function buildPartsShared(
     roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     scale: params.scale,
+    shellThickness: params.shellThickness,
     profile: profiling,
   }
 }
@@ -211,6 +215,8 @@ export async function runStepExport(
   const names = buildExportPartNames(params, strutEntries, vertices)
   const shared = buildPartsShared(params, inputs, names, profiling)
 
+  const panels = params.shellEnabled && !params.roundStrutBridge
+    ? flattenShellPanels(params.data, inputs.shellVertices) : []
   const allPieces: StepExportPiece[] = []
   // Every strut's brace plate end points, across batches - a brace's two struts can land in
   // different batches, so the bodies are only built once all of them are in.
@@ -280,11 +286,33 @@ export async function runStepExport(
 
   if (isCancelled()) return null
 
+  const panelBatches = chunk(panels, BATCH_SIZE)
+  const panelResults = await runExportBatches(
+    panelBatches, panels.length,
+    (batch, i, report) => runBatch([], [], [], { ...shared, shellPanels: batch },
+      strutBatches.length + vertexBatches.length + braceBatches.length + i + 1, report, signal),
+    (done, total) => onProgress({ phase: 'shell', done, total }),
+    (batch, err) => { throw new Error(`Failed to export shell panels ${batch.map(p => p.label).join(', ')}: ${err instanceof Error ? err.message : String(err)}`) },
+    isCancelled,
+  )
+  if (!panelResults) return null
+  for (const [i, result] of panelResults.entries()) {
+    if (!result) continue
+    allPieces.push(...result.pieces)
+    if (profiling && result.profile) batchProfiles.push({
+      phase: 'shell', items: panelBatches[i].length,
+      createToReadyMs: result.createToReadyMs, readyToResultMs: result.readyToResultMs,
+      worker: result.profile,
+    })
+  }
+  if (isCancelled()) return null
+
   onProgress({ phase: 'zipping', done: 0, total: 100 })
   const zipStart = performance.now()
   const zip = new JSZip()
   // Workers name pieces by model index; the archive names them by part ID.
   const fileNames = stepPartFileNames(names)
+  for (const panel of panels) fileNames.set(`shell-${panel.faceId}.step`, `shell-${panel.label.replace(/\.$/, '')}.step`)
   for (const piece of allPieces) zip.file(fileNames.get(piece.name) ?? piece.name, piece.blob)
   const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
     if (!isCancelled()) onProgress({ phase: 'zipping', done: Math.round(metadata.percent), total: 100 })
@@ -388,6 +416,7 @@ export async function runStepAssemblyExport(
     roundStrutBridge: params.roundStrutBridge,
     flangeParams: params.flangeParams,
     scale: params.scale,
+    shellThickness: params.shellThickness,
     profile: profiling,
   }
 
